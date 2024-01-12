@@ -1274,7 +1274,7 @@ async def session_management(interaction: discord.Interaction, session_id: int, 
     guild = interaction.guild
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
-    cursor.execute(f"""SELECT GM_Name, Session_Name, Play_Time, Session_Range, Gold, Flux, Easy, Medium, Hard, Deadly, Milestones, Trials, Alt_Reward_All, Alt_Reward_Party, Session_Thread, Message FROM Sessions_Archive WHERE Session_ID = {session_id} LIMIT 1""")
+    cursor.execute(f"""SELECT GM_Name, Session_Name, Play_Time, Session_Range, Gold, Flux, Easy, Medium, Hard, Deadly, Milestones, Trials, Alt_Reward_All, Alt_Reward_Party, Session_Thread, Message FROM Sessions WHERE Session_ID = {session_id} and IsActive = 0 LIMIT 1""")
     session_simple = cursor.fetchone()
     cursor.execute(f"""SELECT Player_Name, Character_Name,  Level, Received_Milestones, Effective_Gold, Received_Gold, Player_ID FROM Sessions_Archive WHERE Session_ID = {session_id}""")
     session_complex = cursor.fetchall()
@@ -1422,7 +1422,7 @@ async def session_management(interaction: discord.Interaction, session_id: int, 
 #                    DONE WITH GOLD
                 await Event.session_rewards(self, player[0], guild_id, player[1],  true_level, new_milestone_total, remaining, flux_total, true_tier, trials_total, trials_required, session_id)
                 await Event.gold_change(self, guild_id, player[0], player[6], player[1], difference, difference, gold, 'Session Reward', 'Session Reward')
-                await Event.update_session_log(self, guild_id, session_id, player[1], gold, flux, easy, medium, hard, deadly, milestones, trials, new_milestones, difference, reward_all, party_reward)
+                await Event.update_session_log_player(self, guild_id, session_id, player[1], rewarded, trials, difference)
                 embed.add_field(name="Character Info", value=f'Player: {player[0]} Character:{player[1]} \n **Level**: {true_level} \n **Milestone change**: {rewarded} **Gold change**: {difference}', inline=False)
                 cursor.execute(f'SELECT MAX(Transaction_ID) FROM Gold_History Order By Transaction_ID DESC LIMIT 1')
                 transaction_id = cursor.fetchone()
@@ -1438,6 +1438,7 @@ async def session_management(interaction: discord.Interaction, session_id: int, 
                 logging_embed = log_embed(player_info[0], player_info[2], true_level, rewarded, new_milestone_total, remaining, true_tier,  trials - session_simple[11], trials_total, trials_required, player_info[13] + difference, difference, player_info[14] + difference, transaction_id[0], flux_total, flux - session_simple[5], None, None, None, None, reward_all, source)
                 logging_thread = guild.get_thread(player_info[25])
                 await logging_thread.send(embed=logging_embed)
+            await Event.update_session_log(self, guild_id, session_id, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward)
             await interaction.followup.send(embed=embed)
             cursor.close()
             db.close()
@@ -4272,8 +4273,8 @@ async def edit(interaction: discord.Interaction,  session_id: int, session_range
     guild = interaction.guild
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
-    sql = f"SELECT Message, Session_Name, Session_Range_ID, Play_Location, Play_Time, game_link, Overview, Description, Player_Limit, Session_Range from Sessions WHERE Session_ID = ? AND GM_Name = ? ORDER BY Created_Time Desc Limit 1"
-    val = (session_id, author)
+    sql = f"SELECT Message, Session_Name, Session_Range_ID, Play_Location, Play_Time, game_link, Overview, Description, Player_Limit, Session_Range from Sessions WHERE Session_ID = ? AND GM_Name = ? AND IsActive = ? ORDER BY Created_Time Desc Limit 1"
+    val = (session_id, author, 1)
     cursor.execute(sql, val)
     info = cursor.fetchone()
     if info is not None:
@@ -4366,8 +4367,8 @@ async def delete(interaction: discord.Interaction, session_id: int):
     author_id = interaction.user.id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
-    sql = f"SELECT Message, Session_Name from Sessions WHERE Session_ID = ? AND GM_Name = ? ORDER BY Created_Time Desc Limit 1"
-    val = (session_id, author)
+    sql = f"SELECT Message, Session_Name from Sessions WHERE Session_ID = ? AND GM_Name = ? AND IsActive = ? ORDER BY Created_Time Desc Limit 1"
+    val = (session_id, author, 1)
     cursor.execute(sql, val)
     info = cursor.fetchone()
     if info is not None:
@@ -4624,7 +4625,7 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
     session_info = cursor.fetchone()
     if session_info is not None:
         mentions = f"Session Rewards for {session_info[1]}: "
-        cursor.execute(f"""SELECT Player_Name, Character_Name, Level, Effective_Wealth, Player_ID, Tier FROM Sessions_Participants WHERE Session_ID = {session_id}""")
+        cursor.execute(f"""SELECT Player_Name, Player_ID, Character_Name, Level, Tier, Effective_Wealth  FROM Sessions_Participants WHERE Session_ID = {session_id}""")
         session_players = cursor.fetchall()
         if session_players == []:
             await interaction.response.send_message(f"No players could be found participating in session with {session_id} can be found!")
@@ -4639,10 +4640,10 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
             embed = discord.Embed(title=f"{session_info[1]}", description=f"Reward Display", color=discord.Colour.green())
             embed.set_footer(text=f"Session ID is {session_id}")
             for player in session_players:
-                mentions += f"<@{player[4]}> "
-                character_name = player[1]
+                mentions += f"<@{player[1]}> "
+                character_name = player[2]
 #                Setting Job Rewards
-                cursor.execute(f"""SELECT Easy, Medium, Hard, Deadly from AA_Milestones WHERE level = {player[2]}""")
+                cursor.execute(f"""SELECT Easy, Medium, Hard, Deadly from AA_Milestones WHERE level = {player[3]}""")
                 job_info = cursor.fetchone()
                 easy_jobs = easy * job_info[0]
                 medium_jobs = medium * job_info[1]
@@ -4658,7 +4659,7 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
                 gold_info = gold_calculation(level_info[0], player_info[6], player_info[13], player_info[14], player_info[15], gold)
                 mythic_info = mythic_calculation(guild_id, level_info[0], player_info[11], trials)
                 # Building Player Reward
-                response = f"Player: <@{player[4]}>'s character has received:"
+                response = f"Player: <@{player[1]}>'s character has received:"
                 if gold != 0:
                     response += f" {gold_info[3]} gold with a new total of {gold_info[0]} GP!"
                 else:
@@ -4667,9 +4668,9 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
                     response += f" {rewarded} milestones!"
                 else:
                     response = response
-                if player[2] != level_info[0]:
+                if player[3] != level_info[0]:
                     response += f" and has leveled up to {level_info[0]}!"
-                    cursor.execute(f"SELECT Level, Role_name, Role_ID FROM Level_Range WHERE level = {player[2]}")
+                    cursor.execute(f"SELECT Level, Role_name, Role_ID FROM Level_Range WHERE level = {player[3]}")
                     level_range = cursor.fetchone()
                     cursor.execute(f"SELECT Level from LEVEL_Range WHERE Role_ID = {level_range[2]} Order by Level Desc")
                     level_range_max = cursor.fetchone()
@@ -4679,8 +4680,8 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
                     val = (player[0], level_range_min[0], level_range_max[0])
                     cursor.execute(sql, val)
                     level_range_characters = cursor.fetchone()
-                    # user = await bot.fetch_user(player[4])
-                    member = await guild.fetch_member(player[4])
+                    # user = await bot.fetch_user(player[1])
+                    member = await guild.fetch_member(player[1])
 
                     if level_range_characters is None:
                         cursor.execute(f"SELECT Level, Role_name, Role_ID FROM Level_Range WHERE level = {level_info[0]}")
@@ -4700,7 +4701,7 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
                     response += f" {trials} Mythic Trials!"
                 else:
                     response = response
-                if player[5] != mythic_info[0]:
+                if player[4] != mythic_info[0]:
                     response += f" and has reached a new mythic tier of {mythic_info[0]}!"
                 else:
                     response = response
@@ -4708,10 +4709,10 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
                     response += f" {flux} flux!"
                 else:
                     response = response
-                embed.add_field(name=f'**Character**: {player[1]}', value=response)
-                await Event.session_rewards(self, author, guild_id, player[1], level_info[0], player_info[9] + rewarded, level_info[1], flux_total, mythic_info[0], player_info[11] + trials, mythic_info[1], session_id)
-                await Event.gold_change(self, guild_id, player[0], player[4], player[1], gold_info[3], gold_info[3], gold, 'Session Reward', 'Session Reward')
-                await Event.session_log(self, guild_id, session_info[0], session_info[1], session_id, session_info[2], player[0], player[1], session_info[3], session_info[4], gold, player[2], flux, easy, medium, hard, deadly, milestones, trials, rewarded, player[3], session_info[5], gold_info[3], player[5], player[4], reward_all, party_reward, session_info[6])
+                embed.add_field(name=f'**Character**: {player[2]}', value=response)
+                await Event.session_rewards(self, author, guild_id, player[2], level_info[0], player_info[9] + rewarded, level_info[1], flux_total, mythic_info[0], player_info[11] + trials, mythic_info[1], session_id)
+                await Event.gold_change(self, guild_id, player[0], player[1], player[2], gold_info[3], gold_info[3], gold, 'Session Reward', 'Session Reward')
+                await Event.session_log_player(self, guild_id, session_info[0], session_info[1], session_id, player_info[0], player_info[1], player_info[2], player[3], player[4], player[5], rewarded, trials, gold_info[3])
                 cursor.execute(f'SELECT MAX(Transaction_ID) FROM Gold_History Order By Transaction_ID DESC LIMIT 1')
                 transaction_id = cursor.fetchone()
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -4724,6 +4725,7 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
                 logging_embed = log_embed(player_info[0], author, level_info[0], rewarded, player_info[9] + rewarded, level_info[1], mythic_info[0], trials, player_info[11] + trials, mythic_info[1], player_info[13] + gold_info[3], gold_info[3], player_info[14] + gold_info[3], transaction_id[0], flux_total, flux, None, None, None, None, reward_all, source)
                 logging_thread = guild.get_thread(player_info[25])
                 await logging_thread.send(embed=logging_embed)
+            await Event.session_log(self, guild_id, session_id, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward)
             await interaction.followup.send(content=mentions, embed=embed, allowed_mentions=discord.AllowedMentions(users=True))
             cursor.close()
             db.close()
@@ -4745,84 +4747,84 @@ async def endow(interaction: discord.Interaction, session_id: int, player_1: typ
         embed = discord.Embed(title=f"{session_info[1]}", description=f"Personal Reward Display", color=discord.Colour.green())
         embed.set_footer(text=f"Session ID is {session_id}")
         if player_1 is not None and player_1_reward is not None:
-            cursor.execute(f"""SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID FROM Sessions_Archive WHERE Player_Name = {player_1.name} AND Session_ID = {session_id}""")
+            cursor.execute(f"""SELECT True_Character_Name, Thread_ID FROM Sessions_Archive WHERE Player_Name = {player_1.name} AND Session_ID = {session_id}""")
             player_info = cursor.fetchone()
             response = f"<@{player_1.id}> "
             if player_info is not None:
                 await Event.session_endowment(self, author, guild_id, session_id, player_1.name, player_1_reward)
                 source = f"Personal reward for Session ID: {session_id}"
                 logging_embed = log_embed(player_info[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, player_1_reward, source)
-                logging_thread = guild.get_thread(player_info[25])
+                logging_thread = guild.get_thread(player_info[1])
                 await logging_thread.send(embed=logging_embed)
                 response += f"has been rewarded with {player_1_reward}!"
             else:
                 response += f"has not participated in this session or could not be found!"
             embed.add_field(name=f'**Player**: {player_1.name}', value=response, inline=False)
         if player_2 is not None and player_2_reward is not None:
-            cursor.execute(f"""SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID FROM Sessions_Archive WHERE Player_Name = {player_2.name} AND Session_ID = {session_id}""")
+            cursor.execute(f"""SELECT True_Character_Name, Thread_ID FROM Sessions_Archive WHERE Player_Name = {player_2.name} AND Session_ID = {session_id}""")
             player_info = cursor.fetchone()
             response = f"<@{player_2.id}> "
             if player_info is not None:
                 await Event.session_endowment(self, author, guild_id, session_id, player_2.name, player_2_reward)
                 source = f"Personal reward for Session ID: {session_id}"
                 logging_embed = log_embed(player_info[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, player_2_reward, source)
-                logging_thread = guild.get_thread(player_info[25])
+                logging_thread = guild.get_thread(player_info[1])
                 await logging_thread.send(embed=logging_embed)
                 response += f"has been rewarded with {player_2_reward}!"
             else:
                 response += f"has not participated in this session or could not be found!"
             embed.add_field(name=f'**Player**: {player_2.name}', value=response, inline=False)
         if player_3 is not None and player_3_reward is not None:
-            cursor.execute(f"""SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID FROM Sessions_Archive WHERE Player_Name = {player_3.name} AND Session_ID = {session_id}""")
+            cursor.execute(f"""SELECT True_Character_Name, Thread_ID FROM Sessions_Archive WHERE Player_Name = {player_3.name} AND Session_ID = {session_id}""")
             player_info = cursor.fetchone()
             response = f"<@{player_3.id}> "
             if player_info is not None:
                 await Event.session_endowment(self, author, guild_id, session_id, player_3.name, player_3_reward)
                 source = f"Personal reward for Session ID: {session_id}"
                 logging_embed = log_embed(player_info[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, player_3_reward, source)
-                logging_thread = guild.get_thread(player_info[25])
+                logging_thread = guild.get_thread(player_info[1])
                 await logging_thread.send(embed=logging_embed)
                 response += f"has been rewarded with {player_3_reward}!"
             else:
                 response += f"has not participated in this session or could not be found!"
             embed.add_field(name=f'**Player**: {player_3.name}', value=response, inline=False)
         if player_4 is not None and player_4_reward is not None:
-            cursor.execute(f"""SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID FROM Sessions_Archive WHERE Player_Name = {player_4.name} AND Session_ID = {session_id}""")
+            cursor.execute(f"""SELECT True_Character_Name, Thread_ID FROM Sessions_Archive WHERE Player_Name = {player_4.name} AND Session_ID = {session_id}""")
             player_info = cursor.fetchone()
             response = f"<@{player_4.id}> "
             if player_info is not None:
                 await Event.session_endowment(self, author, guild_id, session_id, player_4.name, player_4_reward)
                 source = f"Personal reward for Session ID: {session_id}"
                 logging_embed = log_embed(player_info[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, player_4_reward, source)
-                logging_thread = guild.get_thread(player_info[25])
+                logging_thread = guild.get_thread(player_info[1])
                 await logging_thread.send(embed=logging_embed)
                 response += f"has been rewarded with {player_4_reward}!"
             else:
                 response += f"has not participated in this session or could not be found!"
             embed.add_field(name=f'**Player**: {player_4.name}', value=response, inline=False)
         if player_5 is not None and player_5_reward is not None:
-            cursor.execute(f"""SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID FROM Sessions_Archive WHERE Player_Name = {player_5.name} AND Session_ID = {session_id}""")
+            cursor.execute(f"""SELECT True_Character_Name, Thread_ID FROM Sessions_Archive WHERE Player_Name = {player_5.name} AND Session_ID = {session_id}""")
             player_info = cursor.fetchone()
             response = f"<@{player_5.id}> "
             if player_info is not None:
                 await Event.session_endowment(self, author, guild_id, session_id, player_5.name, player_5_reward)
                 source = f"Personal reward for Session ID: {session_id}"
                 logging_embed = log_embed(player_info[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, player_5_reward, source)
-                logging_thread = guild.get_thread(player_info[25])
+                logging_thread = guild.get_thread(player_info[1])
                 await logging_thread.send(embed=logging_embed)
                 response += f"has been rewarded with {player_5_reward}!"
             else:
                 response += f"has not participated in this session or could not be found!"
             embed.add_field(name=f'**Player**: {player_5.name}', value=response, inline=False)
         if player_6 is not None and player_6_reward is not None:
-            cursor.execute(f"""SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID FROM Sessions_Archive WHERE Player_Name = {player_5.name} AND Session_ID = {session_id}""")
+            cursor.execute(f"""SELECT True_Character_Name, Thread_ID FROM Sessions_Archive WHERE Player_Name = {player_5.name} AND Session_ID = {session_id}""")
             player_info = cursor.fetchone()
-            response = f"<@{player_5.id}> "
+            response = f"<@{player_6.id}> "
             if player_info is not None:
                 await Event.session_endowment(self, author, guild_id, session_id, player_6.name, player_6_reward)
                 source = f"Personal reward for Session ID: {session_id}"
                 logging_embed = log_embed(player_info[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, player_6_reward, source)
-                logging_thread = guild.get_thread(player_info[25])
+                logging_thread = guild.get_thread(player_info[1])
                 await logging_thread.send(embed=logging_embed)
                 response += f"has been rewarded with {player_6_reward}!"
             else:
@@ -4924,7 +4926,7 @@ async def claim(interaction: discord.Interaction, session_id: int, character_nam
                                 await Event.gold_change(self, guild_id, validate_recipient[0], validate_recipient[1], character_name, new_gold_information[3], new_gold_information[3], previous_rewards[3], 'Session Added new Claim', 'Session Claim')
                                 cursor.execute(f"Select MAX(transaction_id) from Gold_History")
                                 transaction_id = cursor.fetchone
-                                await Event.session_log(self, guild_id, session_info[0], session_info[1], session_id, session_info[2], validate_recipient[0], validate_recipient[2], session_info[3], session_info[4], session_info[5], validate_recipient[6], session_info[7], session_info[8], session_info[9], session_info[10], session_info[11], session_info[12], session_info[13], rewarded, validate_recipient[13], session_info[14], new_gold_information[3], validate_recipient[7], validate_recipient[0], session_info[16], session_info[17], session_info[18])
+                                await Event.session_log_player(self, guild_id, session_info[0], session_info[1], session_id, validate_recipient[0], validate_recipient[1], validate_recipient[2], validate_recipient[6], validate_recipient[7], validate_recipient[13], rewarded, previous_rewards[11], gold_information[3])
                                 bio_embed = character_embed(validate_recipient[0], validate_recipient[2], validate_recipient[3], validate_recipient[4], new_level_information[0], new_mythic_information[0],new_milestones, new_level_information[1], validate_recipient[10] + session_info[13], new_mythic_information[1],new_gold_information[0], new_gold_information[1],validate_recipient[15] + session_info[7], validate_recipient[16],validate_recipient[17], validate_recipient[18], validate_recipient[19], validate_recipient[20], validate_recipient[21], validate_recipient[22], validate_recipient[1])
                                 bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
                                 bio_message = await bio_channel.fetch_message(validate_recipient[23])
@@ -4958,7 +4960,7 @@ async def claim(interaction: discord.Interaction, session_id: int, character_nam
                 accepted_bio_channel = cursor.fetchone()
                 cursor.close()
                 db.close()
-                await Event.session_log(self, guild_id, session_info[0], session_info[1], session_id, session_info[2], validate_recipient[0], validate_recipient[2], session_info[3], session_info[4], session_info[5], validate_recipient[6], session_info[7], session_info[8], session_info[9], session_info[10], session_info[11], session_info[12], session_info[13], rewarded, validate_recipient[13], session_info[14], gold_information[3], validate_recipient[7], validate_recipient[2])
+                await Event.session_log_player(self, guild_id, session_info[0], session_info[1], session_id, validate_recipient[0], validate_recipient[1], validate_recipient[2], validate_recipient[6], validate_recipient[7], validate_recipient[13], rewarded, previous_rewards[11], gold_information[3])
                 bio_embed = character_embed(validate_recipient[0], validate_recipient[2], validate_recipient[3], validate_recipient[4], level_information[0], mythic_information[0], new_milestones, level_information[1], validate_recipient[10] + session_info[13], mythic_information[1], gold_information[0], gold_information[1], validate_recipient[15] + session_info[7], validate_recipient[16], validate_recipient[17], validate_recipient[18], validate_recipient[19], validate_recipient[20], validate_recipient[21], validate_recipient[22], validate_recipient[1])
                 bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
                 bio_message = await bio_channel.fetch_message(validate_recipient[23])
@@ -5139,60 +5141,55 @@ async def display(ctx: commands.Context, session_id: int, group: discord.app_com
     guild_id = ctx.guild.id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
-    cursor.execute(f"SELECT GM_Name, Session_Name, Session_Range, Play_location, Play_Time, Overview, Description, Message FROM Sessions WHERE Session_ID = {session_id}")
+    cursor.execute(f"SELECT GM_Name, Session_Name, Session_Range, Play_location, Play_Time, Overview, Description, Message, IsActive FROM Sessions WHERE Session_ID = {session_id}")
     session_info = cursor.fetchone()
     if session_info is not None:
         cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
         sessions_channel = cursor.fetchone()
         session_channel = await bot.fetch_channel(sessions_channel[0])
         msg = await session_channel.fetch_message(session_info[7])
-        embed = discord.Embed(title=f"{session_info[1]}", description=f'[Session overview](<{msg.jump_url}>)!', colour=discord.Colour.red())
-        embed.add_field(name=f"Session Info", value=f"**GM**: {session_info[0]}, **Session Range**: {session_info[2]}, **Play_Location**: {session_info[3]}, **Play_Time**: <t:{session_info[4]}:D>", inline=False)
-        x = 0
-        print(group)
-        if group == 1 or group == 2:
-            cursor.execute(f"SELECT COUNT(Player_Name) FROM Sessions_Participants WHERE Session_ID = {session_id}")
-            total_participants = cursor.fetchone()
-            cursor.execute(f"SELECT Player_Name, Character_Name, Level, Effective_Wealth, Tier, Player_ID FROM Sessions_Participants WHERE Session_ID = {session_id}")
-            participants = cursor.fetchall()
-            player_total = total_participants[0]
-            embed.add_field(name=f"Participant List: {player_total} players", value=" ")
-            for player in participants:
-                embed.add_field(name=f'**Character**: {player[1]}', value=f"**Player**: <@{player[5]}> \n **Level**: {player[2]}, **Tier** {player[4]} \n **Effective_Wealth**: {player[3]} GP", inline=False)
-                x += 1
-                if x >= 20:
-                    embed.add_field(name=f"Field Limit reached", value=f'{total_participants[0] - 20} remaining Participants', inline=False)
-                    break
+        embed = discord.Embed(title=f"{session_info[1]}", description=f'[Session overview](<{msg.jump_url}>)!',colour=discord.Colour.blurple())
+        if session_info[8] == 1:
+            embed.add_field(name=f"Active Session Info", value=f"**GM**: {session_info[0]}, **Session Range**: {session_info[2]}, **Play_Location**: {session_info[3]}, **Play_Time**: <t:{session_info[4]}:D>", inline=False)
+            x = 0
+            print(group)
+            if group == 1 or group == 2:
+                cursor.execute(f"SELECT COUNT(Player_Name) FROM Sessions_Participants WHERE Session_ID = {session_id}")
+                total_participants = cursor.fetchone()
+                cursor.execute(f"SELECT Player_Name, Character_Name, Level, Effective_Wealth, Tier, Player_ID FROM Sessions_Participants WHERE Session_ID = {session_id}")
+                participants = cursor.fetchall()
+                player_total = total_participants[0]
+                embed.add_field(name=f"Participant List: {player_total} players", value=" ")
+                for player in participants:
+                    embed.add_field(name=f'**Character**: {player[1]}', value=f"**Player**: <@{player[5]}> \n **Level**: {player[2]}, **Tier** {player[4]} \n **Effective_Wealth**: {player[3]} GP", inline=False)
+                    x += 1
+                    if x >= 20:
+                        embed.add_field(name=f"Field Limit reached", value=f'{total_participants[0] - 20} remaining Participants', inline=False)
+                        break
+            else:
+                player_total = 0
+            if group == 1 or group == 3:
+                cursor.execute(f"SELECT COUNT(Player_Name) FROM Sessions_Signups WHERE Session_ID = {session_id}")
+                total_participants = cursor.fetchone()
+                x = 0 + player_total
+                cursor.execute(f"SELECT Player_Name, Character_Name, Level, Effective_Wealth, Tier, Player_ID FROM Sessions_Signups WHERE Session_ID = {session_id}")
+                participants = cursor.fetchall()
+                player_total += total_participants[0]
+                embed.add_field(name=f"Sign Up List: {total_participants[0]} players", value=' ', inline=False)
+                for player in participants:
+                    embed.add_field(name=f'**Character**: {player[1]}', value=f"Player: <@{player[5]}>, Level: {player[2]}, Tier: {player[4]}, Effective_Wealth: {player[3]}!", inline=False)
+                    x += 1
+                    if x >= 20:
+                        embed.add_field(name=f"Field Limit reached", value=f'{total_participants[0] - 20} remaining Sign-ups')
+                        break
+                embed.set_footer(text=f"Session ID: {session_id}")
+            await ctx.response.send_message(embed=embed)
         else:
-            player_total = 0
-        if group == 1 or group == 3:
-            cursor.execute(f"SELECT COUNT(Player_Name) FROM Sessions_Signups WHERE Session_ID = {session_id}")
-            total_participants = cursor.fetchone()
-            x = 0 + player_total
-            cursor.execute(f"SELECT Player_Name, Character_Name, Level, Effective_Wealth, Tier, Player_ID FROM Sessions_Signups WHERE Session_ID = {session_id}")
-            participants = cursor.fetchall()
-            player_total += total_participants[0]
-            embed.add_field(name=f"Sign Up List: {total_participants[0]} players", value=' ', inline=False)
-            for player in participants:
-                embed.add_field(name=f'**Character**: {player[1]}', value=f"Player: <@{player[5]}>, Level: {player[2]}, Tier: {player[4]}, Effective_Wealth: {player[3]}!", inline=False)
-                x += 1
-                if x >= 20:
-                    embed.add_field(name=f"Field Limit reached", value=f'{total_participants[0] - 20} remaining Sign-ups')
-                    break
-            embed.set_footer(text=f"Session ID: {session_id}")
-        await ctx.response.send_message(embed=embed)
-    else:
-        cursor.execute(f"SELECT GM_Name, Session_Name, Session_Range, Play_location, Play_Time, Message, Gold, Flux, Easy, Medium, Hard, Deadly, Milestones, Trials FROM Sessions_Archive WHERE Session_ID = {session_id}")
-        session_info = cursor.fetchone()
-        if session_info is not None:
-            cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
-            sessions_channel = cursor.fetchone()
-            session_channel = await bot.fetch_channel(sessions_channel[0])
-            msg = await session_channel.fetch_message(session_info[5])
-            embed = discord.Embed(title=f"{session_info[1]}", description=f'[Archived session overview](<{msg.jump_url}>)!', colour=discord.Colour.red())
-            embed.add_field(name=f"Session Info", value=f"**GM**: {session_info[0]}, **Session Range**: {session_info[2]}, **Play_Location**: {session_info[3]}, **Play_Time**: <t:{session_info[4]}:D>", inline=False)
-            embed.add_field(name=f"Milestone Rewards", value=f"**Easy Jobs**: {session_info[8]}, **Medium Jobs**: {session_info[9]}, **Hard_jobs**: {session_info[10]}, **Deadly_Jobs**: {session_info[11]}, **Trials**: {session_info[12]}", inline=False)
-            embed.add_field(name=f"Currency Rewards", value=f"**Gold**: {session_info[6]}, **Flux**: {session_info[7]}", inline=False)
+            cursor.execute(f"SELECT Gold, Flux, Easy, Medium, Hard, Deadly, Milestones, Trials FROM Sessions WHERE Session_ID = {session_id}")
+            session_reward_info = cursor.fetchone()
+            embed.add_field(name=f"Inactive Session Info", value=f"**GM**: {session_info[0]}, **Session Range**: {session_info[2]}, **Play_Location**: {session_info[3]}, **Play_Time**: <t:{session_info[4]}:D>", inline=False)
+            embed.add_field(name=f"Milestone Rewards", value=f"**Easy Jobs**: {session_reward_info[2]}, **Medium Jobs**: {session_reward_info[3]}, **Hard_jobs**: {session_reward_info[4]}, **Deadly_Jobs**: {session_reward_info[5]}, **Trials**: {session_reward_info[6]}", inline=False)
+            embed.add_field(name=f"Currency Rewards", value=f"**Gold**: {session_reward_info[0]}, **Flux**: {session_reward_info[1]}", inline=False)
             x = 0
             cursor.execute(f"SELECT COUNT(Player_Name) FROM Sessions_Archive WHERE Session_ID = {session_id}")
             total_participants = cursor.fetchone()
@@ -5209,9 +5206,9 @@ async def display(ctx: commands.Context, session_id: int, group: discord.app_com
                     break
             embed.set_footer(text=f"Session ID: {session_id}")
             await ctx.response.send_message(embed=embed)
-        else:
-            embed = discord.Embed(title=f"Display Command Failed", description=f'{session_id} could not be found in current or archived sessions!', colour=discord.Colour.red())
-            await ctx.response.send_message(embed=embed)
+    else:
+        embed = discord.Embed(title=f"Display Command Failed", description=f'{session_id} could not be found in current or archived sessions!', colour=discord.Colour.red())
+        await ctx.response.send_message(embed=embed)
     cursor.close()
     db.close()
 

@@ -1142,13 +1142,12 @@ class Event(commands.Cog):
         cursor.close()
         db.close()
 
-
     async def create_session(self, gm_name, session_name, session_range, session_range_id, play_location, play_time, link, guild_id, author, overview, description, player_limit):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"INSERT INTO Sessions(GM_Name, Session_Name, Session_Range, session_range_ID, Play_Location, Play_Time, Game_Link, Created_Time, overview, description, Player_Limit) Values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        val = (gm_name, session_name, session_range, session_range_id, play_location, play_time, link, time, overview, description, player_limit)
+        sql = f"INSERT INTO Sessions(GM_Name, Session_Name, Session_Range, session_range_ID, Play_Location, Play_Time, Game_Link, Created_Time, overview, description, Player_Limit, IsActive) Values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        val = (gm_name, session_name, session_range, session_range_id, play_location, play_time, link, time, overview, description, player_limit, 1)
         cursor.execute(sql, val)
         sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, 'N/A', time, 'Sessions', 'New Session', 0, 'creating a DND session')
@@ -1256,7 +1255,7 @@ class Event(commands.Cog):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        cursor.execute(f"DELETE FROM Sessions WHERE Session_ID = {session_id}'")
+        cursor.execute(f"DELETE FROM Sessions WHERE Session_ID = {session_id}' AND IsActive = 1")
         cursor.execute(f"DELETE FROM Sessions_Signups WHERE Session_ID = {session_id}'")
         cursor.execute(f"DELETE FROM Sessions_Participants WHERE Session_ID = {session_id}'")
         sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
@@ -1280,25 +1279,47 @@ class Event(commands.Cog):
         cursor.close()
         db.close()
 
-    async def session_log(self, guild_id, gm_name, session_name, session_id, session_range, player_name, character_name, play_location, play_time, gold, level, flux, easy, medium, hard, deadly, milestones, trials, rewarded, effective_gold, message, received_gold, tier, player_id, reward_all, party_reward, session_thread):
+    async def session_log_player(self, guild_id, gm_name, session_name, session_id, player_name, player_id, character_name, level, tier,  effective_gold, rewarded, trials, received_gold):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"INSERT INTO Sessions_Archive(GM_Name, Session_Name, Session_ID, Session_range, Character_Name, Player_Name, Play_Location, Play_Time, Gold, Level, Flux, Easy, Medium, Hard, Deadly, Milestones, Trials, Received_Milestones, Effective_Gold, Completed_Time, message, Received_Gold, Tier, Player_ID, Alt_Reward_All, Alt_Reward_Party, Session_Thread)Values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        val = (gm_name, session_name, session_id, session_range, character_name, player_name, play_location, play_time, gold, level, flux, easy, medium, hard, deadly, milestones, trials, rewarded, effective_gold, time, message, received_gold, tier, player_id, reward_all, party_reward, session_thread)
+        cursor.execute(f"UPDATE Sessions SET IsActive = 0  WHERE Session_ID = ?", (session_id,))
+        sql = f"INSERT INTO Sessions_Archive(GM_Name, Session_Name, Session_ID, Player_Name, Player_ID, Character_Name, Level, Tier,  Effective_Gold, Received_Milestones,  Received_Trials, Received_Gold) Values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        val = (gm_name, session_name, session_id, player_name, player_id, character_name, level, tier,  effective_gold, rewarded, trials, received_gold)
         cursor.execute(sql, val)
-        cursor.execute(f"DELETE FROM Sessions_Participants WHERE Character_Name = ? AND Session_ID = ?", (character_name, session_id))
-        cursor.execute(f"DELETE FROM Sessions WHERE Session_ID = {session_id}")
         db.commit()
         cursor.close()
         db.close()
 
-    async def update_session_log(self, guild_id, session_id, character_name, gold, flux, easy, medium, hard, deadly, milestones, trials, received_milestones, received_gold, reward_all, party_reward):
+    async def session_log(self, guild_id, session_id, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"UPDATE Sessions_Archive SET Gold = ?, Flux = ?, Easy = ?, Medium = ?, Hard = ?, Deadly = ?, Milestones = ?, Trials = ?, Received_Milestones = ?, received_gold = ?, Alt_Reward_All = ?, Alt_Reward_Party = ?  WHERE Session_ID = ? AND Character_Name = ?"
+        sql = f"UPDATE Sessions SET IsActive = ?, Completed_Time = ?, Gold = ?, Flux = ?, Easy = ?, Medium = ?, Hard = ?, Deadly = ?, Trials = ?, Reward_All = ?, Party_Reward = ?  WHERE Session_ID = ?"
+        val = (0, time, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward, session_id)
+        cursor.execute(sql, val)
+        cursor.execute(f"DELETE FROM Sessions_Participants WHERE Session_ID = ?", (session_id, ))
+        cursor.execute(f"DELETE FROM Sessions_Signups WHERE Session_ID = ?", (session_id,))
+        db.commit()
+        cursor.close()
+        db.close()
+
+    async def update_session_log(self, guild_id, session_id, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward):
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        sql = f"UPDATE Sessions SET Gold = ?, Flux = ?, Easy = ?, Medium = ?, Hard = ?, Deadly = ? Trials = ?, Alt_Reward_All = ?, Alt_Reward_Party = ?  WHERE Session_ID = ?"
         val = (gold, flux, easy, medium, hard, deadly, milestones, trials, received_milestones, received_gold, session_id, character_name, reward_all, party_reward)
+        cursor.execute(sql, val)
+        db.commit()
+        cursor.close()
+        db.close()
+
+    async def update_session_log_player(self, guild_id, session_id, character_name, received_milestones, trials, received_gold):
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        sql = f"UPDATE Sessions_Archive SET Received_Milestones = ?, Received_Trials = ?, Received_Gold = ? WHERE Session_ID = ? AND Character_Name = ?"
+        val = (received_milestones, trials, received_gold, session_id, character_name)
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
