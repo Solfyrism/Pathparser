@@ -32,7 +32,7 @@ class Event(commands.Cog):
             val = (kingdom_info[0] + leader[1], kingdom_info[1] + leader[2], kingdom_info[2] + leader[3], kingdom_info[3] + leader[4])
             cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Kingdoms', f'Create {kingdom}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -50,7 +50,7 @@ class Event(commands.Cog):
         cursor.execute(f"""DELETE FROM Leadership where Kingdom = '{kingdom}'""", {'kingdom': kingdom})
         cursor.execute(f"""DELETE FROM Hexes WHERE Kingdom = '{kingdom}'""", {'kingdom': kingdom})
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Kingdoms', f'Remove {kingdom}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -85,7 +85,7 @@ class Event(commands.Cog):
         cursor.execute(f"""UPDATE Leadership SET Kingdom = '{new_kingdom}' where Kingdom = '{old_kingdom}'""")
         cursor.execute(f"""UPDATE Hexes SET Kingdom = '{new_kingdom}' WHERE Kingdom = '{old_kingdom}'""")
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, new_kingdom, time, 'Kingdoms', f'replace {old_kingdom} for {new_kingdom}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -106,7 +106,7 @@ class Event(commands.Cog):
         val = (kingdoms[0]+control_dc - custom[1], kingdoms[1] + economy - custom[2], kingdoms[2] + loyalty - custom[3], kingdoms[3] + stability - custom[4], kingdoms[4] + fame - custom[5], kingdoms[5] + unrest - custom[6], kingdoms[6] + consumption - custom[7])
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Kingdoms_Custom', f'customize {kingdom}s custom modifiers', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -120,7 +120,7 @@ class Event(commands.Cog):
         val = (building, build_points, lots, economy, loyalty, stability, fame, unrest, corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting, supply, settlement_limit, district_limit, description)
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, building, time, 'Blueprints', f'Create {building}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -170,7 +170,7 @@ class Event(commands.Cog):
         val = (new_build_points, new_lots, new_economy, new_loyalty, new_stability, new_fame, new_unrest, new_corruption, new_crime, new_productivity, new_law, new_lore, new_society, new_danger, new_defence, new_base_value, new_spellcasting, new_supply, new_settlement_limit, new_district_limit, new_description)
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, building, time, 'Blueprints', f'Modify {building}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -196,12 +196,12 @@ class Event(commands.Cog):
             sql = f"""UPDATE settlements SET Size = ?, Population = ?, Corruption = ?, Crime = ?, Productivity = ?, Law = ?, Lore = ?, Society = ?, Danger = ?, Defence = ?, Base_Value = ?, Spellcasting = ?, Supply = ? WHERE kingdom = '{holdings[0]}' AND settlement = '{holdings[1]}'"""
             val = (settlements[3] - (1/4 * held[4]), settlements[4] - (held[4] * 50), settlements[5] - held[10], settlements[6] - held[11], settlements[7] - held[12], settlements[8] - held[13], settlements[9] - held[14], settlements[10] - held[15], settlements[11] - held[16], settlements[12] - held[17], settlements[13] - held[18], settlements[14] - held[19])
             cursor.execute(sql, val)
-            sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+            sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
             val = (author, held[0], time, 'Blueprints', f'Removed {held[4]} {building}', 0, 'N/A')
             cursor.execute(sql, val)
         cursor.execute(f"""DELETE from Buildings_Blueprints where Building = '{building}'""")
         cursor.execute(f"""DELETE from Buildings where Building = '{building}'""")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, building, time, 'Blueprints', f'Remove {building}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -225,7 +225,7 @@ class Event(commands.Cog):
         val = (kingdom, settlement, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Settlements', f'Claim {settlement} in {kingdom}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -261,7 +261,7 @@ class Event(commands.Cog):
             val = (kingdoms[1] - (holding_sum[1] / 4), kingdoms[2] + sum_bp, kingdoms[3] + sum_sp, kingdoms[4] + (holding_sum[1] * 50), kingdoms[5] + holding_sum[2], kingdoms[6] + holding_sum[3], kingdoms[7] + holding_sum[4], kingdoms[8] + holding_sum[5], kingdoms[9] + holding_sum[6])
             cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Settlements', f'destroy {settlement} in {kingdom}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -275,7 +275,7 @@ class Event(commands.Cog):
         cursor.execute(f"""UPDATE Buildings SET Settlement = '{new_settlement}' where Kingdom = '{kingdom}' AND Settlement = '{old_settlement}'""")
         cursor.execute(f"""UPDATE Settlements_Custom SET Settlement = '{new_settlement}' where Kingdom = '{kingdom}' AND Settlement = '{old_settlement}'""")
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Settlements', f'change from {old_settlement} to {new_settlement} in {kingdom}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -296,7 +296,7 @@ class Event(commands.Cog):
         val = (settlements[0] + corruption - custom[2], settlements[1] + crime - custom[3], settlements[2] + productivity - custom[4], settlements[3] + law - custom[5], settlements[4] + lore - custom[6], settlements[5] + society - custom[7], settlements[6] + danger - custom[8], settlements[7] + defence - custom[9], settlements[8] + base_value - custom[10], settlements[9] + spellcasting - custom[11], settlements[10] + supply - custom[12])
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Settlement_Modifies', f'adjust the modifies of {settlement} in {kingdom}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -347,7 +347,7 @@ class Event(commands.Cog):
         val = (settlements[0] + (1/4 * lots), settlements[1] + (lots * 50), settlements[2] + corruption, settlements[3] + crime, settlements[4] + productivity, settlements[5] + law, settlements[6] + lore, settlements[7] + society, settlements[8] + danger, settlements[9] + defence, settlements[10] + base_value, settlements[11] + spellcasting, settlements[12] + supply)
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Buildings', f'Build a {building} for {settlement} in {kingdom}', amount, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -396,7 +396,7 @@ class Event(commands.Cog):
         val = (settlements[0] - (1/4 * lots), settlements[1] - (lots * 50), settlements[2] - corruption, settlements[3] - crime, settlements[4] - productivity, settlements[5] - law, settlements[6] - lore, settlements[7] - society, settlements[8] - danger, settlements[9] - defence, settlements[10] - base_value, settlements[11] - spellcasting, settlements[12] - supply)
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Buildings', f'Destroy a {building} for {settlement} in {kingdom}', amount, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -417,7 +417,7 @@ class Event(commands.Cog):
         val = (kingdom_values[0] - leader_values[0] + economy_modifier, kingdom_values[1] - leader_values[1] + loyalty_modifier, kingdom_values[2] - leader_values[2] + stability_modifier, kingdom_values[3] - leader_values[3])
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Leadership', f'Modify the {title} role for {kingdom}', 1, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -444,7 +444,7 @@ class Event(commands.Cog):
         val = (economy, loyalty, stability, unrest)
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Leadership', f'reset the {title} role for {kingdom}', 1, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -469,7 +469,7 @@ class Event(commands.Cog):
         val = (kingdom_info[0] + 1, kingdom_info[1] + 1)
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Hexes', f'add one {hex_terrain} hex for {kingdom}', 1, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -491,7 +491,7 @@ class Event(commands.Cog):
         val = (kingdom_info[0] - 1, kingdom_info[1] - 1)
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Hexes', f'remove one {hex_terrain} hex for {kingdom}', 1, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -532,7 +532,7 @@ class Event(commands.Cog):
             val = (total[0]+1, total[1] + improvement_info[1], total[2] + improvement_info[2], total[3] + improvement_info[3], total[4] + improvement_info[4], total[5] + improvement_info[5], total[6] + improvement_info[6])
             cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Hexes', f'add one {improvement} hex improvement for {kingdom}', 1, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -567,7 +567,7 @@ class Event(commands.Cog):
             val = (total[0] - 1, total[1] - improvement_info[1], total[2] - improvement_info[2], total[3] - improvement_info[3], total[4] - improvement_info[4], total[5] - improvement_info[5], total[6] - improvement_info[6])
             cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, kingdom, time, 'Hexes', f'remove one {improvement} hex improvement for {kingdom}', 1, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -581,7 +581,7 @@ class Event(commands.Cog):
         val = (improvement, build_points, road_multiplier, economy, loyalty, stability, unrest, consumption, defence, taxation, cavernous, coastline, desert, forest, hills, jungle, marsh, mountains, plains, water)
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, 'N/A', time, 'Hexes_Improvements', f'add the {improvement} hex improvement', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -604,7 +604,7 @@ class Event(commands.Cog):
         cursor.execute(f"""DELETE from Hexes where Improvement = '{improvement}'""")
         cursor.execute(f"""DELETE from Hexes_Improvements where Improvement = '{improvement}'""")
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, 'N/A', time, 'Hexes_Improvements', f'remove the {improvement} hex improvement', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -639,7 +639,7 @@ class Event(commands.Cog):
         val = (new_improvement, new_build_points, new_economy, new_loyalty, new_stability, new_unrest, new_consumption, new_defence, new_taxation, new_cavernous, new_coastline, new_desert, new_forest, new_hills, new_jungle, new_marsh, new_mountains, new_plains, new_water)
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, 'N/A', time, 'Hexes_Improvements', f'Adjustment from {old_improvement} to the {new_improvement} hex improvement', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -737,7 +737,7 @@ class Event(commands.Cog):
                 val = (control_dc, kingdom_info[0] + hexes[1] * renovation_info[0], kingdom_info[1] + hexes[1] * renovation_info[1], kingdom_info[2] + hexes[1] * renovation_info[2], kingdom_info[3] + hexes[1] * renovation_info[3], kingdom_info[4] + hexes[1] * renovation_info[4])
                 cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, 'N/A', time, 'all tables', 'Massive Table rebalance', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -752,7 +752,7 @@ class Event(commands.Cog):
         tbp = bp[0] + build_points
         cursor.execute(f"""UPDATE Kingdoms SET Build_Points = {tbp} WHERE Kingdom = '{kingdom}'""")
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, character_name, time, 'Kingdoms', f'adjusting build points for {kingdom}', build_points, 'N/A')
         cursor.execute(sql, val)
         cursor.execute(f"""SELECT gold from Player_Characters where Character_Name = ? AND Player_Name = ?""", (character_name, author))
@@ -772,7 +772,7 @@ class Event(commands.Cog):
         tsp = sp[0] + stabilization_points
         cursor.execute(f"""UPDATE Kingdoms SET Stabilization_Points = {tsp} WHERE Kingdom = '{kingdom}'""")
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, character_name_true, time, 'Kingdoms', f'adjusting stabilization points for {kingdom}', stabilization_points, 'N/A')
         cursor.execute(sql, val)
         cursor.execute(f"""SELECT gold from Player_Characters where Character_Name = ? AND Player_Name = ?""", (character_name_true, author))
@@ -791,7 +791,7 @@ class Event(commands.Cog):
         val = (decay, kingdom, settlement)
         cursor.execute(sql, val)
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, 'N/A', time, 'Settlements', f'settlement decay for {kingdom}s {settlement}', decay, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -813,12 +813,114 @@ class Event(commands.Cog):
         sql = f"UPDATE Player_Characters SET gold = ?, gold_value = ?, gold_value_max = ? WHERE Character_Name = ?"
         val = (new_gold, new_gold_value, new_gold_value_max, character_name)
         cursor.execute(sql, val)
-        sql = "INSERT INTO gold_history(Author_Name, Author_ID, Character_Name, Gold_Value, Effective_Gold_Value, Effective_Gold_Value_Max, Reason, Source_Command, Time) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_Gold(Author_Name, Author_ID, Character_Name, Gold_Value, Effective_Gold_Value, Effective_Gold_Value_Max, Reason, Source_Command, Time) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
         val = (author_name, author_id, character_name, amount, expected_value, lifetime_value, reason, source, time)
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
         db.close()
+
+
+    async def gold_set(self, guild_id, author_name, author_id, character_name, amount, expected_value, lifetime_value, reason, source, table):
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        new_gold = amount - character_information[1]
+        new_gold_value = expected_value - character_information[2]
+        new_gold_value_max = lifetime_value - character_information[3]
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        if table == 1:
+            sql = f"UPDATE Player_Characters SET gold = ?, gold_value = ?, gold_value_max = ? WHERE Character_Name = ?"
+            val = (amount, expected_value, lifetime_value, character_name)
+            cursor.execute(sql, val)
+        else:
+            sql = f"UPDATE A_STG_Player_Characters SET gold = ?, gold_value = ?, gold_value_max = ? WHERE Character_Name = ?"
+            val = (amount, expected_value, lifetime_value, character_name)
+            cursor.execute(sql, val)
+        sql = "INSERT INTO A_Audit_Gold(Author_Name, Author_ID, Character_Name, Gold_Value, Effective_Gold_Value, Effective_Gold_Value_Max, Reason, Source_Command, Time) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        val = (author_name, author_id, character_name, new_gold, new_gold_value, new_gold_value_max, reason, source, time)
+        cursor.execute(sql, val)
+        db.commit()
+        cursor.close()
+        db.close()
+
+
+    async def title_change(self, guild_id, author, author_id, true_character_name, title_name, total_fame, total_prestige, reason, source):
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        sql = f"UPDATE Player_Characters SET Title = ?, Fame = ?, prestige = ? WHERE Character_Name = ?"
+        val = (title_name, total_fame, total_prestige, true_character_name)
+        cursor.execute(sql, val)
+        sql = "INSERT INTO A_Audit_All(Author, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?)"
+        val = (author, time, 'player_characters', source, total_fame, reason)
+        cursor.execute(sql, val)
+        db.commit()
+        cursor.close()
+        db.close()
+
+
+    async def proposition_open(self, guild_id, author, author_id, true_character_name, item_name, prestige_cost, reason, source):
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        sql = f"INSERT INTO A_Audit_Prestige(Author_ID, Character_Name, Item_Name, Prestige_Cost, IsAllowed VALUES(?, ?, ?, ?, ?)"
+        val = (author_id, true_character_name, item_name, prestige_cost, 1)
+        cursor.execute(sql, val)
+        sql = f"Select Prestige from Player_Characters WHERE Character_Name = ?"
+        val = (true_character_name, )
+        prestige = cursor.execute(sql, val)
+        new_prestige = prestige[0] - prestige_cost
+        sql = f"UPDATE Player_Characters SET Prestige = ? WHERE Character_Name = ?"
+        val = (new_prestige, true_character_name)
+        cursor.execute(sql, val)
+        sql = "INSERT INTO A_Audit_All(Author, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?)"
+        val = (author, time, 'A_Audit_Prestige', source, prestige_cost, reason)
+        cursor.execute(sql, val)
+        db.commit()
+        cursor.close()
+        db.close()
+
+    async def proposition_reject(self, guild_id, author, proposition_id, reason, source):
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        sql = f"UPDATE A_Audit_Prestige SET IsAllowed = ? WHERE Proposition_ID = ?"
+        val = (0, proposition_id)
+        cursor.execute(sql, val)
+        sql = f"SELECT Character_Name, Item_Name, Prestige_Cost FROM A_Audit_Prestige WHERE Proposition_ID = ?"
+        val = (proposition_id, )
+        rejected_item = cursor.execute(sql, val)
+        sql = f"SELECT Prestige FROM Player_Characters WHERE Character_Name = ?"
+        val = (rejected_item[0], )
+        character = cursor.execute(sql, val)
+        new_prestige = character[0] + rejected_item[2]
+        sql = f"UPDATE Player_Characters SET Prestige = ? WHERE Character_Name = ?"
+        val = (new_prestige, rejected_item[0])
+        cursor.execute(sql, val)
+        sql = "INSERT INTO A_Audit_All(Author, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?)"
+        val = (author, time, 'A_Audit_Prestige', source, prestige_cost, reason)
+        cursor.execute(sql, val)
+        db.commit()
+        cursor.close()
+        db.close()
+
+    async def glorify(self, guild_id, author, character, fame, prestige, reason):
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        sql = f"UPDATE Player_Characters SET Fame = ?, Prestige = ? WHERE Character_Name = ?"
+        val = (fame, prestige, character)
+        cursor.execute(sql, val)
+        sql = "INSERT INTO A_Audit_All(Author, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?)"
+        val = (author, time, 'Player_Characters', f'Glorifying character by changing their fame to {fame} and prestige to {prestige}', prestige, reason)
+        cursor.execute(sql, val)
+        sql = f"Insert into A_Audit_Prestige(Author, Character_Name, Item_Name, Prestige_Cost, IsAllowed) VALUES(?, ?, ?, ?, ?)"
+        val = (author, character, 'Glorified', prestige, 1)
+        cursor.execute(sql, val)
+        db.commit()
+        cursor.close()
+        db.close()
+
 
 
     async def stg_gold_change(self, guild_id, author_name, author_id, character_name, amount, expected_value, lifetime_value, reason, source):
@@ -835,7 +937,7 @@ class Event(commands.Cog):
         sql = f"UPDATE A_STG_Player_Characters SET gold = ?, gold_value = ?, gold_value_max = ? WHERE Character_Name = ?"
         val = (new_gold, new_gold_value, new_gold_value_max, character_name)
         cursor.execute(sql, val)
-        sql = "INSERT INTO gold_history(Author_Name, Author_ID, Character_Name, Gold_Value, Effective_Gold_Value, Effective_Gold_Value_Max, Reason, Source_Command, Time) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_Gold(Author_Name, Author_ID, Character_Name, Gold_Value, Effective_Gold_Value, Effective_Gold_Value_Max, Reason, Source_Command, Time) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
         val = (author_name, author_id, character_name, amount, expected_value, lifetime_value, reason, source, time)
         cursor.execute(sql, val)
         db.commit()
@@ -859,7 +961,7 @@ class Event(commands.Cog):
         sql = f"UPDATE Player_Characters SET gold = ?, gold_value = ?, gold_value_max = ? WHERE Character_Name = ?"
         val = (new_gold, new_gold_value, new_gold_value_max, character_name)
         cursor.execute(sql, val)
-        sql = f"UPDATE gold_history SET Gold_Value = ?, Effective_Gold_Value = ?, Effective_Gold_Value_Max = ?, Reason = ?, Source_Command = ? WHERE Transaction_ID = {transaction_id}"
+        sql = f"UPDATE A_Audit_Gold SET Gold_Value = ?, Effective_Gold_Value = ?, Effective_Gold_Value_Max = ?, Reason = ?, Source_Command = ? WHERE Transaction_ID = {transaction_id}"
         val = (amount, expected_value, lifetime_value, 'Transaction Cancelled!', 'Undo Transaction')
         cursor.execute(sql, val)
         db.commit()
@@ -869,7 +971,7 @@ class Event(commands.Cog):
     async def gold_transact(self, transaction_id, related_id, guild_id):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
-        cursor.execute(f"UPDATE Gold_History SET Related_Transaction_ID = {related_id} WHERE Transaction_ID = {transaction_id}")
+        cursor.execute(f"UPDATE A_Audit_Gold SET Related_Transaction_ID = {related_id} WHERE Transaction_ID = {transaction_id}")
         db.commit()
         cursor.close()
         db.close()
@@ -905,16 +1007,59 @@ class Event(commands.Cog):
         sql = f"UPDATE Player_Characters set Level = ?, Milestones = ?, Milestones_Required = ?, Tier = ?, Trials_Required = ? where Character_Name = ? and Player_Name = ?"
         val = (character_level, milestone_total, remaining, true_tier, trials_required, character_name, author)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?)"
         val = (time, 'player_characters', 'milestones to level', milestone_total, 'N/A')
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
         db.close()
 
+    async def adjust_personal_cap(self, guild_id, author, character_name, level_cap):
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        cursor.execute(f"SELECT Player_Name, Player_ID, Character_Name, Level, Trials, Tier, Milestones FROM Player_Characters where Author_Name = ? and Character_Name = ?", (author, character_name))
+        characters = cursor.fetchone()
+        level = characters[3] if characters[3] < level_cap else level_cap
+        cursor.execute(f"SELECT Minimum_Milestones, Milestones_To_Level FROM AA_Milestones WHERE Level = {level}")
+        milestone_information = cursor.fetchone()
+        cursor.execute(f"SELECT Tier, Trials, Trials_Required from AA_Trials  WHERE Trials <= {characters[4]} ORDER BY Trials DESC  LIMIT 1")
+        current_mythic_information = cursor.fetchone()
+        cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Cap'")
+        max_tier = cursor.fetchone()
+        cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Rate_Limit_Breakpoint'")
+        break_point = cursor.fetchone()
+        if characters[3] <= int(break_point[0]):
+            cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Rate_Limit_1'")
+            tier_rate_limit = cursor.fetchone()
+        else:
+            cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Rate_Limit_2'")
+            tier_rate_limit = cursor.fetchone()
+        rate_limited_tier = floor(level / int(tier_rate_limit[0]))
+        true_tier = int(max_tier[0]) if current_mythic_information[0] > int(max_tier[0]) else current_mythic_information[0]
+        true_tier = true_tier if true_tier <= rate_limited_tier else rate_limited_tier
+        if true_tier == int(max_tier[0]) or true_tier == rate_limited_tier:
+            cursor.execute(f"SELECT Tier, Trials, Trials_Required from AA_Trials  WHERE Tier = {true_tier}")
+            current_mythic_information = cursor.fetchone()
+        else:
+            current_mythic_information = current_mythic_information
+        trials_required = current_mythic_information[1] + current_mythic_information[2] - characters[4]
+        true_tier = 0 if characters[5] == 0 else true_tier
+        sql = f"UPDATE Player_Characters set Level = ?, Milestones = ?, Milestones_Required = ?, Tier = ?, Trials_Required = ?, Personal_Cap = ? where Character_Name = ? and Player_Name = ?"
+        val = (level, milestone_total, characters[6] - (milestone_information[0] + milestone_information[1]), true_tier, trials_required, level_cap, character_name, author)
+        cursor.execute(sql, val)
+        sql = "INSERT INTO A_Audit_All(Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?)"
+        val = (time, 'player_characters', 'milestones to level', milestone_total, 'N/A')
+        cursor.execute(sql, val)
+        db.commit()
+        cursor.close()
+        db.close()
+
+
     async def adjust_trials(self, character_name, total_trials, guild_id, author):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
+        print(f"MYTHIC INFO: {character_name, total_trials, author}")
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         cursor.execute(f"SELECT Player_Name, Player_ID, Character_Name, Level, Trials FROM Player_Characters where Character_Name = ?", (character_name,))
         characters = cursor.fetchone()
@@ -942,7 +1087,7 @@ class Event(commands.Cog):
         sql = f"UPDATE Player_Characters set Tier = ?, Trials = ?, Trials_Required = ? where Character_Name = ?"
         val = (true_tier, total_trials, trials_required, character_name)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, character_name, time, 'player_characters', 'mythic trials', total_trials, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -954,7 +1099,7 @@ class Event(commands.Cog):
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         cursor.execute(f"DELETE FROM Player_Characters WHERE Character_Name = ?", (character_name,))
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, character_name, time, 'player_characters', f'deleted {character_name}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -966,9 +1111,9 @@ class Event(commands.Cog):
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         cursor.execute(f"DELETE FROM Player_Characters WHERE Player_ID = '{player_id}'")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, player_id, time, 'player_characters', f"deleted {player_id}'s characters", 0, 'N/A')
-        cursor.execute(f"DELETE FROM Gold_History WHERE Author_ID = '{player_id}'")
+        cursor.execute(f"DELETE FROM A_Audit_Gold WHERE Author_ID = '{player_id}'")
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
@@ -979,7 +1124,7 @@ class Event(commands.Cog):
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         cursor.execute(f"DELETE FROM A_STG_Player_Characters WHERE character_name = '{character_name}'")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, character_name, time, 'A_STG_player_characters', f"deleted {character_name}'s characters", 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -993,7 +1138,7 @@ class Event(commands.Cog):
         sql = f"INSERT INTO A_STG_Player_Characters(Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_Value_Max, Mythweavers, Image_Link, Color, Flux, Created_Date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         val = (author, author_id, true_character_name, character_name, nickname, titles, description, oath_name, 3, 0, 0, 3, 0, 0, 0, 0, 0, mythweavers, image_link, color, 0, time)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, character_name, time, 'player_characters', f'staged {character_name}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -1007,11 +1152,11 @@ class Event(commands.Cog):
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_Value_Max, Mythweavers, Image_Link, Color, Flux FROM A_STG_Player_Characters WHERE True_Character_Name = ?", (true_character_name,))
         character_info = cursor.fetchone()
-        sql = f"INSERT INTO Player_Characters(Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_Value_Max, Mythweavers, Image_Link, Color, Flux) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        val = (character_info[0], character_info[1], character_info[2], character_info[3], character_info[4], character_info[5], character_info[6], character_info[7], character_info[8], character_info[9], character_info[10], character_info[11], character_info[12], character_info[13], character_info[14], character_info[15], character_info[16], character_info[17], character_info[18], character_info[19], character_info[20])
+        sql = f"INSERT INTO Player_Characters(Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_Value_Max, Mythweavers, Image_Link, Color, Flux, Fame, Prestige) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        val = (character_info[0], character_info[1], character_info[2], character_info[3], character_info[4], character_info[5], character_info[6], character_info[7], character_info[8], character_info[9], character_info[10], character_info[11], character_info[12], character_info[13], character_info[14], character_info[15], character_info[16], character_info[17], character_info[18], character_info[19], character_info[20], 0 , 0)
         cursor.execute(sql, val)
         cursor.execute(f"DELETE FROM A_STG_Player_Characters WHERE True_Character_Name = ?", (true_character_name,))
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author[0], character_info[2], time, 'player_characters', f'accepted {character_info[2]}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -1034,7 +1179,7 @@ class Event(commands.Cog):
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         cursor.execute(f"DELETE FROM Player_Characters WHERE True_Character_Name = ?", (true_character_name,))
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author[0], true_character_name, time, 'player_characters', f'deleted {true_character_name} from stage', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -1061,14 +1206,14 @@ class Event(commands.Cog):
         val = (true_character_name, new_character_name, new_nickname, titles, description, oath_name, mythweavers, image_link, color, true_name)
         cursor.execute(sql, val)
         if true_name != new_character_name:
-            sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+            sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
             val = (author, true_name, time, 'player_characters', f'edited {true_name} to be {new_character_name}', 0, 'N/A')
             cursor.execute(sql, val)
-            sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+            sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
             val = (author, new_character_name, time, 'player_characters', f'edited {true_name} to be {new_character_name}', 0, 'N/A')
             cursor.execute(sql, val)
         else:
-            sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+            sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
             val = (author, true_name, time, 'player_characters', f"edited {true_name}'s information", 0, 'N/A')
             cursor.execute(sql, val)
         db.commit()
@@ -1084,14 +1229,14 @@ class Event(commands.Cog):
         val = (true_character_name, new_character_name, new_nickname, titles, description, oath_name, mythweavers, image_link, color, true_name)
         cursor.execute(sql, val)
         if true_name != new_character_name:
-            sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+            sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
             val = (author, true_name, time, 'player_characters', f'edited {true_name} to be {new_character_name}', 0, 'N/A')
             cursor.execute(sql, val)
-            sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+            sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
             val = (author, new_character_name, time, 'player_characters', f'edited {true_name} to be {new_character_name}', 0, 'N/A')
             cursor.execute(sql, val)
         else:
-            sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+            sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
             val = (author, true_name, time, 'player_characters', f"edited {true_name}'s information", 0, 'N/A')
             cursor.execute(sql, val)
         db.commit()
@@ -1099,57 +1244,44 @@ class Event(commands.Cog):
         db.close()
 
 
-    async def session_rewards(self, author, guild_id, character_name, level, milestone_total, remaining, flux_total, tier, trials_total, trials_required, session_id):
+    async def session_rewards(self, author, guild_id, character_name, level, milestone_total, remaining, flux_total, tier, trials_total, trials_required, fame_total, prestige_total, reason):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"UPDATE Player_Characters set Level = ?, Milestones = ?, Milestones_Required = ?, Flux = ?, Tier = ?, Trials = ?, Trials_Required = ? where Character_Name = ?"
-        val = (level, milestone_total, remaining, flux_total, tier, trials_total, trials_required, character_name)
+        sql = f"UPDATE Player_Characters set Level = ?, Milestones = ?, Milestones_Required = ?, Flux = ?, Tier = ?, Trials = ?, Trials_Required = ?, fame = ?, prestige = ? where Character_Name = ?"
+        val = (level, milestone_total, remaining, flux_total, tier, trials_total, trials_required, fame_total, prestige_total, character_name)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
-        val = (author, character_name, time, 'player_characters', f'Session {session_id} reward', 0, 'N/A')
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        val = (author, character_name, time, 'player_characters', f'{reason}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
         db.close()
 
 
-    async def session_endowment(self, author, guild_id, player_name, personal_reward, session_id):
+    async def session_endowment(self, author, guild_id, player_name, personal_reward, session_id, character_name):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         sql = f"UPDATE Sessions_Archive set Alt_Reward_Personal = ? where player_name = ? and Session_ID = ?"
         val = (personal_reward, player_name, session_id)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, character_name, time, 'player_characters', f'Session {session_id} personal reward', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
         db.close()
 
-    async def session_unreward(self, author, guild_id, character_name, session_id):
-        print(author, guild_id, character_name, session_id)
-        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-        cursor = db.cursor()
-        print(character_name, session_id)
-        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        cursor.execute(f"DELETE FROM Sessions_Archive where Character_Name = ? and Session_ID = ?", (character_name, session_id))
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
-        val = (author, character_name, time, 'player_characters', f'Deleted Session rewards of {session_id}', 0, 'N/A')
-        cursor.execute(sql, val)
-        db.commit()
-        cursor.close()
-        db.close()
 
-    async def create_session(self, gm_name, session_name, session_range, session_range_id, play_location, play_time, link, guild_id, author, overview, description, player_limit):
+    async def create_session(self, gm_name, session_name, session_range, session_range_id, play_location, play_time, link, guild_id, author, overview, description, player_limit, overflow):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"INSERT INTO Sessions(GM_Name, Session_Name, Session_Range, session_range_ID, Play_Location, Play_Time, Game_Link, Created_Time, overview, description, Player_Limit, IsActive) Values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        val = (gm_name, session_name, session_range, session_range_id, play_location, play_time, link, time, overview, description, player_limit, 1)
+        sql = f"INSERT INTO Sessions(GM_Name, Session_Name, Session_Range, session_range_ID, Play_Location, Play_Time, Game_Link, Created_Time, overview, description, Player_Limit, IsActive, overflow) Values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        val = (gm_name, session_name, session_range, session_range_id, play_location, play_time, link, time, overview, description, player_limit, 1, overflow)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, 'N/A', time, 'Sessions', 'New Session', 0, 'creating a DND session')
         cursor.execute(sql, val)
         db.commit()
@@ -1170,24 +1302,24 @@ class Event(commands.Cog):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        cursor.execute(f"Delete from Sessions WHERE Session_ID = {session_id}")
+        cursor.execute(f"Delete from Sessions WHERE Session_ID = {session_id} and IsActive = 1")
         cursor.execute(f"Delete from Sessions_Participants WHERE Session_ID = {session_id}")
         cursor.execute(f"Delete from Sessions_Signups WHERE Session_ID = {session_id}")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, 'N/A', time, 'Sessions', f'Deleted Session: {session_id}', 0, 'creating a DND session')
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
         db.close()
 
-    async def edit_session(self, guild_id, author, session_id, session_name, session_range_name, session_range_id, play_location, play_time, link):
+    async def edit_session(self, guild_id, author, session_id, session_name, session_range_name, session_range_id, play_location, play_time, link, overflow):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"UPDATE Sessions SET Session_Name = ?, Session_Range = ?, Session_Range_ID = ?, Play_Location = ?, Play_Time = ?, Game_Link = ? WHERE Session_ID = {session_id}"
-        val = (session_name, session_range_name, session_range_id, play_location, play_time, link)
+        sql = f"UPDATE Sessions SET Session_Name = ?, Session_Range = ?, Session_Range_ID = ?, Play_Location = ?, Play_Time = ?, Game_Link = ?, overflow = ? WHERE Session_ID = {session_id}"
+        val = (session_name, session_range_name, session_range_id, play_location, play_time, link, overflow)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, 'N/A', time, 'Sessions', 'Changing the information of a session', 0, 'editing a DnD Session')
         cursor.execute(sql, val)
         db.commit()
@@ -1201,7 +1333,7 @@ class Event(commands.Cog):
         sql = f"INSERT Into Sessions_Participants(Session_Name, Session_ID, Player_Name, Player_ID, Character_Name, Level, Effective_Wealth, tier) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         val = (session_name, session_id, player_name, player_id, character_name, level, gold_value, tier)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, character_name, time, 'Sessions_Participants', f'{character_name} is joining session {session_id}', 0, 'Joining DND session')
         cursor.execute(f"DELETE FROM Sessions_Signups WHERE Character_Name = ?", (character_name,))
         cursor.execute(sql, val)
@@ -1213,11 +1345,12 @@ class Event(commands.Cog):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"""DELETE FROM Sessions_Participants WHERE Session_ID = ? AND Player_Name = ?"""
-        val = (session_id, player_name)
-        cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
-        val = (author, character_name, time, 'Sessions_Participants', f'{player_name} is removed from session {session_id}', 0, 'Joining DND session')
+        cursor.execute(f"DELETE FROM Sessions_Participants WHERE Session_ID = {session_id} AND Player_Name = '{player_name}'")
+        db.commit()
+        cursor.execute(f"DELETE FROM Sessions_Archive WHERE Session_ID = {session_id} AND Player_Name = '{player_name}'")
+        db.commit()
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        val = (author, character_name, time, 'Sessions_Participents', f'{player_name} is removed from session {session_id}', 0, 'Removing player from DnD Session')
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
@@ -1231,7 +1364,7 @@ class Event(commands.Cog):
         sql = f"INSERT Into Sessions_Signups(Session_Name, Session_ID, Player_Name, Player_ID, Character_Name, Level, Effective_Wealth, tier) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         val = (session_name, session_id, player_name, player_id, character_name, level, gold_value, tier)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (player_name, character_name, time, 'Sessions_Signups', f'{character_name} is signing up for session {session_id}', 0, 'Joining DND session')
         cursor.execute(sql, val)
         db.commit()
@@ -1243,8 +1376,10 @@ class Event(commands.Cog):
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         cursor.execute(f"DELETE FROM Sessions_Signups WHERE Session_ID = {session_id} AND Player_Name = '{player_name}'")
+        db.commit()
         cursor.execute(f"DELETE FROM Sessions_Participants WHERE Session_ID = {session_id} AND Player_Name = '{player_name}'")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        db.commit()
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (player_name, true_name, time, 'Sessions_Participants', f'{player_name} has declined to participate in session {session_id}', 0, 'leaving DND session')
         cursor.execute(sql, val)
         db.commit()
@@ -1258,7 +1393,7 @@ class Event(commands.Cog):
         cursor.execute(f"DELETE FROM Sessions WHERE Session_ID = {session_id}' AND IsActive = 1")
         cursor.execute(f"DELETE FROM Sessions_Signups WHERE Session_ID = {session_id}'")
         cursor.execute(f"DELETE FROM Sessions_Participants WHERE Session_ID = {session_id}'")
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, 'N/A', time, 'Sessions', f'cleaning up session information from the stage tables', 0, 'session_cleaning')
         cursor.execute(sql, val)
         db.commit()
@@ -1272,54 +1407,55 @@ class Event(commands.Cog):
         sql = "UPDATE Admin SET Search = ? WHERE Identifier = ?"
         val = (new_search, identifier)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, 'admin', time, 'Admin', f'Updating {identifier} with new {new_search} qualifier', 0, 'administration change')
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
         db.close()
 
-    async def session_log_player(self, guild_id, gm_name, session_name, session_id, player_name, player_id, character_name, level, tier,  effective_gold, rewarded, trials, received_gold):
+    async def session_log_player(self, guild_id, session_id, player_name, player_id, character_name, level, tier,  effective_gold, rewarded, trials, received_gold, received_fame, received_prestige):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         cursor.execute(f"UPDATE Sessions SET IsActive = 0  WHERE Session_ID = ?", (session_id,))
-        sql = f"INSERT INTO Sessions_Archive(GM_Name, Session_Name, Session_ID, Player_Name, Player_ID, Character_Name, Level, Tier,  Effective_Gold, Received_Milestones,  Received_Trials, Received_Gold) Values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        val = (gm_name, session_name, session_id, player_name, player_id, character_name, level, tier,  effective_gold, rewarded, trials, received_gold)
+        sql = f"INSERT INTO Sessions_Archive(Session_ID, Player_Name, Player_ID, Character_Name, Level, Tier,  Effective_Gold, Received_Milestones, Received_Trials, Received_Gold, Received_Fame, Received_Prestige) Values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        val = (session_id, player_name, player_id, character_name, level, tier,  effective_gold, rewarded, trials, received_gold, received_fame, received_prestige)
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
         db.close()
 
-    async def session_log(self, guild_id, session_id, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward):
+    async def session_log(self, guild_id, session_id, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward, rewards_message, rewards_thread, fame, prestige):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"UPDATE Sessions SET IsActive = ?, Completed_Time = ?, Gold = ?, Flux = ?, Easy = ?, Medium = ?, Hard = ?, Deadly = ?, Trials = ?, Reward_All = ?, Party_Reward = ?  WHERE Session_ID = ?"
-        val = (0, time, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward, session_id)
+        sql = f"UPDATE Sessions SET IsActive = ?, Completed_Time = ?, Gold = ?, Flux = ?, Easy = ?, Medium = ?, Hard = ?, Deadly = ?, Trials = ?, Alt_Reward_All = ?, Alt_Reward_Party = ?, Rewards_Message = ?, rewards_thread = ?, Fame = ?, prestige = ? WHERE Session_ID = ?"
+        val = (0, time, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward, rewards_message, rewards_thread, fame, prestige, session_id)
         cursor.execute(sql, val)
         cursor.execute(f"DELETE FROM Sessions_Participants WHERE Session_ID = ?", (session_id, ))
+        db.commit()
         cursor.execute(f"DELETE FROM Sessions_Signups WHERE Session_ID = ?", (session_id,))
         db.commit()
         cursor.close()
         db.close()
 
-    async def update_session_log(self, guild_id, session_id, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward):
+    async def update_session_log(self, guild_id, session_id, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward, rewards_message_id, rewards_thread, fame, prestige):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"UPDATE Sessions SET Gold = ?, Flux = ?, Easy = ?, Medium = ?, Hard = ?, Deadly = ? Trials = ?, Alt_Reward_All = ?, Alt_Reward_Party = ?  WHERE Session_ID = ?"
-        val = (gold, flux, easy, medium, hard, deadly, milestones, trials, received_milestones, received_gold, session_id, character_name, reward_all, party_reward)
+        sql = f"UPDATE Sessions SET Gold = ?, Flux = ?, Easy = ?, Medium = ?, Hard = ?, Deadly = ? Trials = ?, Alt_Reward_All = ?, Alt_Reward_Party = ?, rewards_message_id = ?, rewards_thread = ?, fame = ?, prestige = ?  WHERE Session_ID = ?"
+        val = (gold, flux, easy, medium, hard, deadly, milestones, trials, reward_all, party_reward, rewards_message_id, rewards_thread, fame, prestige, session_id)
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
         db.close()
 
-    async def update_session_log_player(self, guild_id, session_id, character_name, received_milestones, trials, received_gold):
+    async def update_session_log_player(self, guild_id, session_id, character_name, received_milestones, trials, received_gold, received_fame, received_prestige):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
-        sql = f"UPDATE Sessions_Archive SET Received_Milestones = ?, Received_Trials = ?, Received_Gold = ? WHERE Session_ID = ? AND Character_Name = ?"
-        val = (received_milestones, trials, received_gold, session_id, character_name)
+        sql = f"UPDATE Sessions_Archive SET Received_Milestones = ?, Received_Trials = ?, Received_Gold = ?, Received_Fame = ?, received_prestige = ? WHERE Session_ID = ? AND Character_Name = ?"
+        val = (received_milestones, trials, received_gold, session_id, character_name, received_fame, received_prestige)
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
@@ -1337,7 +1473,7 @@ class Event(commands.Cog):
         characters_info = cursor.fetchall()
         if characters_info is not None:
             for characters in characters_info:
-                sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+                sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
                 val = (author, 'admin', time, 'Player_Characters', f'Updating {characters[2]} with new level cap of {new_level}', 0, 'administration change')
                 cursor.execute(sql, val)
                 cursor.execute(f"SELECT Tier, Trials, Trials_Required from AA_Trials  WHERE Trials <= {characters[3]} ORDER BY Trials DESC  LIMIT 1")
@@ -1353,8 +1489,11 @@ class Event(commands.Cog):
                     cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Rate_Limit_2'")
                     tier_rate_limit = cursor.fetchone()
                 rate_limited_tier = floor(new_level / int(tier_rate_limit[0]))
-                true_tier = int(max_tier[0]) if current_mythic_information[0] > int(max_tier[0]) else current_mythic_information[0]
+                print(current_mythic_information[0])
+                true_tier = current_mythic_information[0] if current_mythic_information[0] < int(max_tier[0]) else int(max_tier[0])
+                print(true_tier)
                 true_tier = true_tier if true_tier <= rate_limited_tier else rate_limited_tier
+                print(true_tier)
                 if true_tier == int(max_tier[0]) or true_tier == rate_limited_tier:
                     cursor.execute(f"SELECT Tier, Trials, Trials_Required from AA_Trials  WHERE Tier = {true_tier}")
                     current_mythic_information = cursor.fetchone()
@@ -1362,7 +1501,7 @@ class Event(commands.Cog):
                     current_mythic_information = current_mythic_information
                 trials_required = current_mythic_information[1] + current_mythic_information[2] - characters[3]
                 sql = f"UPDATE Player_Characters SET Level = ?, Milestones_Required = ?, Tier = ?, Trials_Required = ? WHERE Character_Name = ?"
-                val = (new_level, level_info[0] + level_info[1] - characters[4], true_tier, trials_required, {characters[2]})
+                val = (new_level, level_info[0] + level_info[1] - characters[4], true_tier, trials_required, characters[2])
                 cursor.execute(sql, val)
         db.commit()
         cursor.close()
@@ -1380,7 +1519,7 @@ class Event(commands.Cog):
         characters_info = cursor.fetchall()
         if characters_info is not None:
             for characters in characters_info:
-                sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+                sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
                 val = (author, 'admin', time, 'Player_Characters', f'Updating {characters[2]} with new tier cap of {new_tier}', 0, 'administration change')
                 cursor.execute(sql, val)
                 sql = f"UPDATE Player_Characters SET Tier = ?, Trials_Required = ? WHERE Character_Name = ?"
@@ -1397,7 +1536,7 @@ class Event(commands.Cog):
         sql = f"UPDATE Player_Characters SET flux = ? WHERE Character_Name = ?"
         val = (new_flux, true_name)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, f'{true_name}', time, 'Player_Characters', f'adjusting flux by {amount} to be {new_flux}', amount, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -1411,7 +1550,7 @@ class Event(commands.Cog):
         sql = f"UPDATE Level_Range SET Role_Name = ?, Role_ID = ? WHERE level >= ? AND level <= ?"
         val = (range_name, range_id, minimum, maximum)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, f'N/A', time, 'Level_Range', f'Numbers {minimum}-{maximum} have been changed to be {range_name}', 0, 'N/A')
         cursor.execute(sql, val)
         db.commit()
@@ -1425,9 +1564,98 @@ class Event(commands.Cog):
         sql = f"UPDATE Player_characters SET {destination_name} = ?, {destination_link} = ?, flux = ? WHERE character_name = ?"
         val = (customized_name, link, flux_remaining, character_name)
         cursor.execute(sql, val)
-        sql = "INSERT INTO Audit(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, f'{character_name}', time, 'Player_Characters', f'{character_name} has been given {destination_name} of {customized_name} leaving them with {flux_remaining} flux', flux_cost, 'N/A')
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
         db.close()
+
+
+    async def add_fame_store(self, guild_id, author, fame_required, prestige_cost, name, effect, limit):
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        sql = f"INSERT INTO Store_Fame(Fame_Required, Prestige_Cost, Name, Effect, Use_Limit) VALUES (?, ?, ?, ?, ?)"
+        val = (fame_required, prestige_cost, name, effect, limit)
+        cursor.execute(sql, val)
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        val = (author, f'{name}', time, 'Store_Fame', f'added {name} with effect {effect} requiring {fame_required} fame and {prestige_cost} prestige', 0, 'N/A')
+        cursor.execute(sql, val)
+        db.commit()
+        cursor.close()
+        db.close()
+
+
+    async def remove_fame_store(self, guild_id, author, name):
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        val = (author, f'{name}', time, 'Store_Fame', f'deleted {name}', 0, 'N/A')
+        cursor.execute(sql, val)
+        cursor.execute(f"DELETE FROM Store_Fame WHERE Item = ?", (name,))
+        db.commit()
+        cursor.close()
+        db.close()
+
+
+    async def update_fame_store(self, guild_id, author, fame_required, prestige_cost, name, effect, limit):
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        sql = f"UPDATE Store_Fame SET Fame_Required = ?, Prestige_Cost = ?, Effect = ?, Use_Limit = ? WHERE Item = ?"
+        val = (fame_required, prestige_cost, effect, limit, name)
+        cursor.execute(sql, val)
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        val = (author, f'{name}', time, 'Store_Fame', f'updated {name} with effect {effect}', cost, 'N/A')
+        cursor.execute(sql, val)
+        db.commit()
+        cursor.close()
+        db.close()
+
+    async def add_title_store(self, guild_id, author, ubb_id, effect, fame, masculine_name, feminine_name):
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        sql = f"INSERT INTO Store_Title(ID, Masculine_Name, Feminine_Name, Fame, Effect) VALUES (?, ?, ?, ?, ?)"
+        val = (ubb_id, masculine_name, feminine_name, fame, effect)
+        cursor.execute(sql, val)
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        val = (author, f'{masculine_name} / {feminine_name}', time, 'Store_Title', f'added {masculine_name} / {feminine_name} with effect {effect}', fame, 'N/A')
+        cursor.execute(sql, val)
+        db.commit()
+        cursor.close()
+        db.close()
+
+    async def remove_title_store(self, guild_id, author, fame, masculine_name, feminine_name):
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        cursor.execute(f"select fame, Character_Name from Player_Characters where Title = ? or Title = ?", (masculine_name, feminine_name))
+        characters = cursor.fetchall()
+        if characters is not None:
+            for character in characters:
+                cursor.execute(f"UPDATE Player_Characters SET fame = ?, Title WHERE Character_Name = ?", (character[0] - fame, None, character[1]))
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        val = (author, f'{name}', time, 'Store_Title', f'deleted {name}', 0, 'N/A')
+        cursor.execute(sql, val)
+        cursor.execute(f"DELETE FROM Store_Title WHERE Masculine_Name = ?", (masculine_name,))
+        db.commit()
+        cursor.close()
+        db.close()
+
+    async def update_title_store(self, guild_id, author, ubb_id, effect, fame, masculine_name, feminine_name):
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        sql = f"UPDATE Store_Title SET Cost = ?, Effect = ? WHERE Item = ?"
+        val = (cost, effect, name)
+        cursor.execute(sql, val)
+        sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        val = (author, f'{name}', time, 'Store_Title', f'updated {name} with effect {effect}', cost, 'N/A')
+        cursor.execute(sql, val)
+        db.commit()
+        cursor.close()
+        db.close()
+
