@@ -3,6 +3,7 @@ import sqlite3
 from discord.ext import commands
 import datetime
 import os
+from pywaclient.api import BoromirApiClient as WaClient
 os.chdir("C:\\pathparser")
 
 
@@ -824,9 +825,9 @@ class Event(commands.Cog):
     async def gold_set(self, guild_id, author_name, author_id, character_name, amount, expected_value, lifetime_value, reason, source, table):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
-        new_gold = amount - character_information[1]
-        new_gold_value = expected_value - character_information[2]
-        new_gold_value_max = lifetime_value - character_information[3]
+        new_gold = amount
+        new_gold_value = expected_value
+        new_gold_value_max = lifetime_value
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         if table == 1:
             sql = f"UPDATE Player_Characters SET gold = ?, gold_value = ?, gold_value_max = ? WHERE Character_Name = ?"
@@ -997,6 +998,7 @@ class Event(commands.Cog):
         rate_limited_tier = floor(character_level / int(tier_rate_limit[0]))
         true_tier = int(max_tier[0]) if current_mythic_information[0] > int(max_tier[0]) else current_mythic_information[0]
         true_tier = true_tier if true_tier <= rate_limited_tier else rate_limited_tier
+        print(character_level)
         if true_tier == int(max_tier[0]) or true_tier == rate_limited_tier:
             cursor.execute(f"SELECT Tier, Trials, Trials_Required from AA_Trials  WHERE Tier = {true_tier}")
             current_mythic_information = cursor.fetchone()
@@ -1004,8 +1006,9 @@ class Event(commands.Cog):
             current_mythic_information = current_mythic_information
         trials_required = current_mythic_information[1] + current_mythic_information[2] - characters[4]
         true_tier = 0 if characters[5] == 0 else true_tier
-        sql = f"UPDATE Player_Characters set Level = ?, Milestones = ?, Milestones_Required = ?, Tier = ?, Trials_Required = ? where Character_Name = ? and Player_Name = ?"
-        val = (character_level, milestone_total, remaining, true_tier, trials_required, character_name, author)
+        print(character_name)
+        sql = f"UPDATE Player_Characters set Level = ?, Milestones = ?, Milestones_Required = ?, Tier = ?, Trials_Required = ? where Character_Name = ?"
+        val = (character_level, milestone_total, remaining, true_tier, trials_required, character_name)
         cursor.execute(sql, val)
         sql = "INSERT INTO A_Audit_All(Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?)"
         val = (time, 'player_characters', 'milestones to level', milestone_total, 'N/A')
@@ -1018,9 +1021,14 @@ class Event(commands.Cog):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        cursor.execute(f"SELECT Player_Name, Player_ID, Character_Name, Level, Trials, Tier, Milestones FROM Player_Characters where Author_Name = ? and Character_Name = ?", (author, character_name))
+        cursor.execute(f"SELECT Player_Name, Player_ID, Character_Name, Level, Trials, Tier, Milestones FROM Player_Characters where Player_Name = ? and Character_Name = ?", (author, character_name))
         characters = cursor.fetchone()
-        level = characters[3] if characters[3] < level_cap else level_cap
+        cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Level_Cap'")
+        max_level = cursor.fetchone()
+        cursor.execute(f"SELECT Level, Minimum_Milestones, Milestones_To_Level FROM AA_Milestones WHERE Minimum_Milestones <= {characters[6]} ORDER BY Minimum_Milestones DESC  LIMIT 1")
+        milestone_level = cursor.fetchone()
+        level = milestone_level[0] if milestone_level[0] < level_cap else level_cap
+        level = level if level <= int(max_level[0]) else int(max_level[0])
         cursor.execute(f"SELECT Minimum_Milestones, Milestones_To_Level FROM AA_Milestones WHERE Level = {level}")
         milestone_information = cursor.fetchone()
         cursor.execute(f"SELECT Tier, Trials, Trials_Required from AA_Trials  WHERE Trials <= {characters[4]} ORDER BY Trials DESC  LIMIT 1")
@@ -1046,10 +1054,10 @@ class Event(commands.Cog):
         trials_required = current_mythic_information[1] + current_mythic_information[2] - characters[4]
         true_tier = 0 if characters[5] == 0 else true_tier
         sql = f"UPDATE Player_Characters set Level = ?, Milestones = ?, Milestones_Required = ?, Tier = ?, Trials_Required = ?, Personal_Cap = ? where Character_Name = ? and Player_Name = ?"
-        val = (level, milestone_total, characters[6] - (milestone_information[0] + milestone_information[1]), true_tier, trials_required, level_cap, character_name, author)
+        val = (level, characters[6], characters[6] - (milestone_information[0] + milestone_information[1]), true_tier, trials_required, level_cap, character_name, author)
         cursor.execute(sql, val)
         sql = "INSERT INTO A_Audit_All(Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?)"
-        val = (time, 'player_characters', 'milestones to level', milestone_total, 'N/A')
+        val = (time, 'player_characters', 'milestones to level', level_cap, 'N/A')
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
@@ -1131,12 +1139,12 @@ class Event(commands.Cog):
         cursor.close()
         db.close()
 
-    async def stage_character(self, true_character_name, character_name, author, author_id, guild_id, nickname, titles, description, oath_name, mythweavers, image_link, color):
+    async def stage_character(self, true_character_name, character_name, author, author_id, guild_id, nickname, titles, description, oath_name, mythweavers, image_link, color, backstory):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"INSERT INTO A_STG_Player_Characters(Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_Value_Max, Mythweavers, Image_Link, Color, Flux, Created_Date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        val = (author, author_id, true_character_name, character_name, nickname, titles, description, oath_name, 3, 0, 0, 3, 0, 0, 0, 0, 0, mythweavers, image_link, color, 0, time)
+        sql = f"INSERT INTO A_STG_Player_Characters(Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_Value_Max, Mythweavers, Image_Link, Color, Flux, Created_Date, tmp_bio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        val = (author, author_id, true_character_name, character_name, nickname, titles, description, oath_name, 3, 0, 0, 3, 0, 0, 0, 0, 0, mythweavers, image_link, color, 0, time, backstory)
         cursor.execute(sql, val)
         sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, character_name, time, 'player_characters', f'staged {character_name}', 0, 'N/A')
@@ -1162,6 +1170,67 @@ class Event(commands.Cog):
         db.commit()
         cursor.close()
         db.close()
+
+    async def create_bio(self, guild_id, true_character_name, bio):
+        if guild_id == 883009758179762208:
+            client = WaClient(
+                'Pathparser',
+                'https://github.com/Solfyrism/Pathparser',
+                'V1.1',
+                os.getenv('WORLD_ANVIL_API'),
+                os.getenv('WORLD_ANVIL_USER')
+            )
+            world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
+            new_page = client.article.put({
+                'title': f'{true_character_name}',
+                'content': f'{bio}',
+                'category': {'id': 'c8fd1251-1077-4bbd-a9a5-797b3dbdf356'},
+                'templateType': 'person',  # generic article template
+                'state': 'public',
+                'isDraft': False,
+                'entityClass': 'Person',
+                'world': {'id': world_id}
+            })
+            db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+            cursor = db.cursor()
+            cursor.execute(f"UPDATE Player_Characters SET Article_Link = ?, Article_ID = ? WHERE True_Character_Name = ?", (new_page['url'], new_page['id'], true_character_name))
+            db.commit()
+            cursor.close()
+            db.close()
+
+
+    async def edit_bio(self, guild_id, true_character_name, bio, article_id):
+        if guild_id == 883009758179762208:
+            client = WaClient(
+                'Pathparser',
+                'https://github.com/Solfyrism/Pathparser',
+                'V1.1',
+                os.getenv('WORLD_ANVIL_API'),
+                os.getenv('WORLD_ANVIL_USER')
+            )
+            world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
+            new_page = client.article.patch({article_id}, {
+                'title': f'{true_character_name}',
+                'content': f'{bio}',
+                'category': {'id': 'c8fd1251-1077-4bbd-a9a5-797b3dbdf356'},
+                'templateType': 'person',  # generic article template
+                'state': 'public',
+                'isDraft': False,
+                'entityClass': 'Person',
+                'world': {'id': world_id}
+            })
+
+
+    async def edit_stage_bio(self, guild_id, true_character_name, bio):
+        if guild_id == 883009758179762208:
+            db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+            cursor = db.cursor()
+            cursor.execute(f"UPDATE a_stg_player_characters SET tmp_bio = ?, WHERE True_Character_Name = ?", (bio, true_character_name))
+            db.commit()
+            cursor.close()
+            db.close()
+
+
 
     async def fix_character(self, guild_id, character_name):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -1202,7 +1271,7 @@ class Event(commands.Cog):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"UPDATE Player_Characters SET True_Character_Name = ?, Character_name = ?, Nickname = ?, Titles = ?, Description = ?, Oath = ?, Mythweavers = ?, Image_Link = ?, Color = ? WHERE Character_Name = ?"
+        sql = f"UPDATE Player_Characters SET True_Character_Name = ?, Character_name = ?, Nickname = ?, Titles = ?, Description = ?, Oath = ?, Mythweavers = ?, Image_Link = ?, Color = ? WHERE True_Character_Name = ?"
         val = (true_character_name, new_character_name, new_nickname, titles, description, oath_name, mythweavers, image_link, color, true_name)
         cursor.execute(sql, val)
         if true_name != new_character_name:
@@ -1445,7 +1514,7 @@ class Event(commands.Cog):
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         sql = f"UPDATE Sessions SET Gold = ?, Flux = ?, Easy = ?, Medium = ?, Hard = ?, Deadly = ? Trials = ?, Alt_Reward_All = ?, Alt_Reward_Party = ?, rewards_message_id = ?, rewards_thread = ?, fame = ?, prestige = ?  WHERE Session_ID = ?"
-        val = (gold, flux, easy, medium, hard, deadly, milestones, trials, reward_all, party_reward, rewards_message_id, rewards_thread, fame, prestige, session_id)
+        val = (gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward, rewards_message_id, rewards_thread, fame, prestige, session_id)
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
@@ -1469,40 +1538,42 @@ class Event(commands.Cog):
         cursor.execute(f"SELECT Minimum_Milestones, Milestones_to_level FROM AA_Milestones where Level = {new_level}")
         level_info = cursor.fetchone()
         minimum_milestones = level_info[0]
-        cursor.execute(f"SELECT Player_Name, Player_ID, Character_Name, Trials, Milestones FROM Player_Characters WHERE Milestones >= {minimum_milestones}")
+        cursor.execute(f"SELECT Player_Name, Player_ID, Character_Name, Trials, Milestones, Personal_Cap FROM Player_Characters WHERE Milestones >= {minimum_milestones}")
         characters_info = cursor.fetchall()
         if characters_info is not None:
             for characters in characters_info:
-                sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
-                val = (author, 'admin', time, 'Player_Characters', f'Updating {characters[2]} with new level cap of {new_level}', 0, 'administration change')
-                cursor.execute(sql, val)
-                cursor.execute(f"SELECT Tier, Trials, Trials_Required from AA_Trials  WHERE Trials <= {characters[3]} ORDER BY Trials DESC  LIMIT 1")
-                current_mythic_information = cursor.fetchone()
-                cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Cap'")
-                max_tier = cursor.fetchone()
-                cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Rate_Limit_Breakpoint'")
-                break_point = cursor.fetchone()
-                if new_level <= int(break_point[0]):
-                    cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Rate_Limit_1'")
-                    tier_rate_limit = cursor.fetchone()
-                else:
-                    cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Rate_Limit_2'")
-                    tier_rate_limit = cursor.fetchone()
-                rate_limited_tier = floor(new_level / int(tier_rate_limit[0]))
-                print(current_mythic_information[0])
-                true_tier = current_mythic_information[0] if current_mythic_information[0] < int(max_tier[0]) else int(max_tier[0])
-                print(true_tier)
-                true_tier = true_tier if true_tier <= rate_limited_tier else rate_limited_tier
-                print(true_tier)
-                if true_tier == int(max_tier[0]) or true_tier == rate_limited_tier:
-                    cursor.execute(f"SELECT Tier, Trials, Trials_Required from AA_Trials  WHERE Tier = {true_tier}")
+                personal_cap = 20 if characters[5] is None else characters[5]
+                if personal_cap >= characters[4]:
+                    sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
+                    val = (author, 'admin', time, 'Player_Characters', f'Updating {characters[2]} with new level cap of {new_level}', 0, 'administration change')
+                    cursor.execute(sql, val)
+                    cursor.execute(f"SELECT Tier, Trials, Trials_Required from AA_Trials  WHERE Trials <= {characters[3]} ORDER BY Trials DESC  LIMIT 1")
                     current_mythic_information = cursor.fetchone()
-                else:
-                    current_mythic_information = current_mythic_information
-                trials_required = current_mythic_information[1] + current_mythic_information[2] - characters[3]
-                sql = f"UPDATE Player_Characters SET Level = ?, Milestones_Required = ?, Tier = ?, Trials_Required = ? WHERE Character_Name = ?"
-                val = (new_level, level_info[0] + level_info[1] - characters[4], true_tier, trials_required, characters[2])
-                cursor.execute(sql, val)
+                    cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Cap'")
+                    max_tier = cursor.fetchone()
+                    cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Rate_Limit_Breakpoint'")
+                    break_point = cursor.fetchone()
+                    if new_level <= int(break_point[0]):
+                        cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Rate_Limit_1'")
+                        tier_rate_limit = cursor.fetchone()
+                    else:
+                        cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Rate_Limit_2'")
+                        tier_rate_limit = cursor.fetchone()
+                    rate_limited_tier = floor(new_level / int(tier_rate_limit[0]))
+                    print(current_mythic_information[0])
+                    true_tier = current_mythic_information[0] if current_mythic_information[0] < int(max_tier[0]) else int(max_tier[0])
+                    print(true_tier)
+                    true_tier = true_tier if true_tier <= rate_limited_tier else rate_limited_tier
+                    print(true_tier)
+                    if true_tier == int(max_tier[0]) or true_tier == rate_limited_tier:
+                        cursor.execute(f"SELECT Tier, Trials, Trials_Required from AA_Trials  WHERE Tier = {true_tier}")
+                        current_mythic_information = cursor.fetchone()
+                    else:
+                        current_mythic_information = current_mythic_information
+                    trials_required = current_mythic_information[1] + current_mythic_information[2] - characters[3]
+                    sql = f"UPDATE Player_Characters SET Level = ?, Milestones_Required = ?, Tier = ?, Trials_Required = ? WHERE Character_Name = ?"
+                    val = (new_level, level_info[0] + level_info[1] - characters[4], true_tier, trials_required, characters[2])
+                    cursor.execute(sql, val)
         db.commit()
         cursor.close()
         db.close()
