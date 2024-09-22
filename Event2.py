@@ -4,8 +4,30 @@ from discord.ext import commands
 import datetime
 import os
 from pywaclient.api import BoromirApiClient as WaClient
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 os.chdir("C:\\pathparser")
 
+
+def drive_word_document(link):
+    SERVICE_ACCOUNT_FILE = os.getenv('SERVICE_ACCOUNT_FILE')
+    SCOPES = ['https://www.googleapis.com/auth/documents.readonly']
+    credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    service = build('docs', 'v1', credentials=credentials)
+    DOCUMENT_ID = link
+    document = service.documents().get(documentId=DOCUMENT_ID).execute()
+    word_blob = ""
+    for element in document.get('body').get('content'):
+        if 'paragraph' in element:
+            for text_run in element.get('paragraph').get('elements'):
+                word_blob += (text_run.get('textRun').get('content'))
+    print(word_blob)
+    return(word_blob)
+
+
+def time_to_minutes(t):
+    hours, minutes = map(int, t.split(':'))
+    return hours * 60 + minutes
 
 class Event(commands.Cog):
     def __init__(self, bot):
@@ -864,17 +886,18 @@ class Event(commands.Cog):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"INSERT INTO A_Audit_Prestige(Author_ID, Character_Name, Item_Name, Prestige_Cost, IsAllowed VALUES(?, ?, ?, ?, ?)"
+        sql = f"INSERT INTO A_Audit_Prestige(Author_ID, Character_Name, Item_Name, Prestige_Cost, IsAllowed) VALUES (?, ?, ?, ?, ?)"
         val = (author_id, true_character_name, item_name, prestige_cost, 1)
         cursor.execute(sql, val)
         sql = f"Select Prestige from Player_Characters WHERE Character_Name = ?"
         val = (true_character_name, )
-        prestige = cursor.execute(sql, val)
+        cursor.execute(sql, val)
+        prestige = cursor.fetchone()
         new_prestige = prestige[0] - prestige_cost
         sql = f"UPDATE Player_Characters SET Prestige = ? WHERE Character_Name = ?"
         val = (new_prestige, true_character_name)
         cursor.execute(sql, val)
-        sql = "INSERT INTO A_Audit_All(Author, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?)"
+        sql = "INSERT INTO A_Audit_All(Author, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?)"
         val = (author, time, 'A_Audit_Prestige', source, prestige_cost, reason)
         cursor.execute(sql, val)
         db.commit()
@@ -1160,8 +1183,8 @@ class Event(commands.Cog):
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_Value_Max, Mythweavers, Image_Link, Color, Flux FROM A_STG_Player_Characters WHERE True_Character_Name = ?", (true_character_name,))
         character_info = cursor.fetchone()
-        sql = f"INSERT INTO Player_Characters(Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_Value_Max, Mythweavers, Image_Link, Color, Flux, Fame, Prestige) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        val = (character_info[0], character_info[1], character_info[2], character_info[3], character_info[4], character_info[5], character_info[6], character_info[7], character_info[8], character_info[9], character_info[10], character_info[11], character_info[12], character_info[13], character_info[14], character_info[15], character_info[16], character_info[17], character_info[18], character_info[19], character_info[20], 0 , 0)
+        sql = f"INSERT INTO Player_Characters(Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_Value_Max, Mythweavers, Image_Link, Color, Flux, Fame, Prestige, Accepted_Date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        val = (character_info[0], character_info[1], character_info[2], character_info[3], character_info[4], character_info[5], character_info[6], character_info[7], character_info[8], character_info[9], character_info[10], character_info[11], character_info[12], character_info[13], character_info[14], character_info[15], character_info[16], character_info[17], character_info[18], character_info[19], character_info[20], 0 , 0, time)
         cursor.execute(sql, val)
         cursor.execute(f"DELETE FROM A_STG_Player_Characters WHERE True_Character_Name = ?", (true_character_name,))
         sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
@@ -1171,8 +1194,20 @@ class Event(commands.Cog):
         cursor.close()
         db.close()
 
-    async def create_bio(self, guild_id, true_character_name, bio):
+    async def create_bio(self, guild_id, true_character_name, bio, link):
         if guild_id == 883009758179762208:
+            if bio[:4] == "http":
+                parts = bio.split('/')
+                if len(parts) == 5:
+                    link = parts[3]
+                elif len(parts) == 7:
+                    link = parts[5]
+                else:
+                    link = None
+            if link is not None:
+                bio = drive_word_document(link)
+            else:
+                bio = bio
             client = WaClient(
                 'Pathparser',
                 'https://github.com/Solfyrism/Pathparser',
@@ -1181,16 +1216,23 @@ class Event(commands.Cog):
                 os.getenv('WORLD_ANVIL_USER')
             )
             world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
-            new_page = client.article.put({
-                'title': f'{true_character_name}',
-                'content': f'{bio}',
-                'category': {'id': 'c8fd1251-1077-4bbd-a9a5-797b3dbdf356'},
-                'templateType': 'person',  # generic article template
-                'state': 'public',
-                'isDraft': False,
-                'entityClass': 'Person',
-                'world': {'id': world_id}
-            })
+            new_page = None
+            if 'worldanvil' in link:
+                article_list = [article for article in client.world.articles('f7a60480-ea15-4867-ae03-e9e0c676060a', 'c8fd1251-1077-4bbd-a9a5-797b3dbdf356')]
+                for articles in article_list:
+                    if true_character_name in articles['title']:
+                        new_page = articles
+            else:
+                new_page = client.article.put({
+                    'title': f'{true_character_name}',
+                    'content': f'{bio}',
+                    'category': {'id': 'c8fd1251-1077-4bbd-a9a5-797b3dbdf356'},
+                    'templateType': 'person',  # generic article template
+                    'state': 'public',
+                    'isDraft': False,
+                    'entityClass': 'Person',
+                    'world': {'id': world_id}
+                })
             db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
             cursor = db.cursor()
             cursor.execute(f"UPDATE Player_Characters SET Article_Link = ?, Article_ID = ? WHERE True_Character_Name = ?", (new_page['url'], new_page['id'], true_character_name))
@@ -1209,17 +1251,254 @@ class Event(commands.Cog):
                 os.getenv('WORLD_ANVIL_USER')
             )
             world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
-            new_page = client.article.patch({article_id}, {
-                'title': f'{true_character_name}',
-                'content': f'{bio}',
-                'category': {'id': 'c8fd1251-1077-4bbd-a9a5-797b3dbdf356'},
-                'templateType': 'person',  # generic article template
-                'state': 'public',
-                'isDraft': False,
-                'entityClass': 'Person',
-                'world': {'id': world_id}
-            })
+            if bio is None:
+                new_page = client.article.patch(article_id, {
+                    'title': f'{true_character_name}',
+                    'world': {'id': world_id}
+                })
+            elif bio is not None:
+                if bio[:4] == "http":
+                    parts = bio.split('/')
+                    if len(parts) == 5:
+                        link = parts[3]
+                    elif len(parts) == 7:
+                        link = parts[5]
+                    else:
+                        link = None
+                if link is not None:
+                    bio = drive_word_document(link)
+                else:
+                    bio = bio
+                new_page = client.article.patch(article_id, {
+                    'title': f'{true_character_name}',
+                    'content': f'{bio}',
+                    'world': {'id': world_id}
+                })
+            db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+            cursor = db.cursor()
+            cursor.execute(f"UPDATE Player_Characters SET Article_Link = ?, Article_ID = ? WHERE True_Character_Name = ?", (new_page['url'], new_page['id'], true_character_name))
+            db.commit()
+            cursor.close()
+            db.close()
 
+    async def session_report(self, guild_id,  overview, session_id, character_name, author):
+            if guild_id == 883009758179762208:
+                time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                client = WaClient(
+                    'pathparser',
+                    'https://github.com/Solfyrism/Pathparser',
+                    'V1.1',
+                    os.getenv('WORLD_ANVIL_API'),
+                    os.getenv('WORLD_ANVIL_USER')
+                )
+                world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
+                if overview[:4] == "http":
+                    parts = overview.split('/')
+                    if len(parts) == 5:
+                        link = parts[3]
+                    elif len(parts) == 7:
+                        link = parts[5]
+                    else:
+                        link = None
+                else:
+                    link = None
+                if link is not None:
+                    overview = drive_word_document(link)
+                else:
+                    overview = overview
+                db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+                cursor = db.cursor()
+                cursor.execute(f"SELECT Article_ID from Sessions where Session_ID = ?", (session_id,))
+                session_info = cursor.fetchone()
+                specific_article = client.article.get(f'{session_info[0]}', granularity=str(1))
+                cursor.close()
+                db.close()
+                new_overview = f'{specific_article["reportNotes"]} [br] [br] {character_name} - {time} [br] {overview}' if specific_article["reportNotes"] is not None else f'{character_name} - {time} [br] {overview}'
+                new_page = client.article.patch(session_info[0], {
+                    'reportNotes': f'{new_overview}',
+                    'world': {'id': world_id}
+                })
+
+    async def plot(self, guild_id, type, plot, overview, author):
+        if guild_id == 883009758179762208:
+            client = WaClient(
+                'pathparser',
+                'https://github.com/Solfyrism/Pathparser',
+                'V1.1',
+                os.getenv('WORLD_ANVIL_API'),
+                os.getenv('WORLD_ANVIL_USER')
+            )
+            world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
+            if overview[:4] == "http":
+                parts = overview.split('/')
+                print(len(parts))
+                if len(parts) == 5:
+                    print(f"No HTTPS")
+                    link = parts[3]
+                elif len(parts) == 7:
+                    print(f"Yes HTTPS")
+                    link = parts[5]
+                else:
+                    link = None
+                print(f"Link yelled! {link}")
+            else:
+                link = None
+            if link is not None:
+                print(f"linkie found")
+                overview = drive_word_document(link)
+            else:
+                overview = overview
+                print(f"no linkie")
+            if type == 1:
+                print(1)
+                new_page = client.article.patch(plot, {
+                    'content': f'{overview}',
+                    'world': {'id': world_id}
+                })
+            elif type == 2:
+                new_page = client.article.put({
+                    'title': f'{plot}',
+                    'content': f'{overview}',
+                    'category': {'id': '9ad3d530-1a42-4e99-9a09-9c4dccddc70a'},
+                    'templateType': 'plot',  # generic article template
+                    'state': 'public',
+                    'isDraft': False,
+                    'entityClass': 'Plot',
+                    'tags': f'{author}',
+                    'world': {'id': world_id}
+                })
+                print(2)
+            print(new_page)
+
+
+    async def report(self, guild_id, request_type, plot, overview, session_id, author, significance):
+        if guild_id == 883009758179762208:
+            client = WaClient(
+                'pathparser',
+                'https://github.com/Solfyrism/Pathparser',
+                'V1.1',
+                os.getenv('WORLD_ANVIL_API'),
+                os.getenv('WORLD_ANVIL_USER')
+            )
+            world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
+            if overview[:4] == "http":
+                parts = overview.split('/')
+                if len(parts) == 5:
+                    link = parts[3]
+                elif len(parts) == 7:
+                    link = parts[5]
+                else:
+                    link = None
+            else:
+                link = None
+            if link is not None:
+                overview = drive_word_document(link)
+            else:
+                overview = overview
+            if request_type == 1:
+                print(1)
+                db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+                cursor = db.cursor()
+                cursor.execute(
+                    f"SELECT Article_ID, History_ID from Sessions where Session_ID = ?", (session_id,))
+                session_info = cursor.fetchone()
+                specific_article = client.article.get(f'{session_info[0]}', granularity=str(1))
+
+                original_article = specific_article['content']
+                cursor.execute(
+                    f"SELECT Article_ID from Sessions where Session_ID = ?", (session_id,))
+
+                session_info = cursor.fetchone()
+                new_page = client.article.patch(session_info[0], {
+                    'content': f'{overview}',
+                    'world': {'id': world_id}
+                })
+                new_history = client.history.patch(session_info[0], {
+                    'content': f'{overview}',
+                    'world': {'id': world_id}
+                })
+                cursor.close()
+                db.close()
+            elif request_type == 2:
+                db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+                cursor = db.cursor()
+                cursor.execute(f"SELECT Session_Name, Completed_Time, Alt_Reward_Party, Alt_Reward_All, Overview from Sessions where Session_ID = ?", (session_id,))
+                session_info = cursor.fetchone()
+                cursor.execute(f"SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Archive as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ", (session_id, author))
+                characters = cursor.fetchall()
+                print(len(characters))
+                if len(characters) == 0:
+                    cursor.execute(f"SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Participants as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ", (session_id, author))
+                    characters = cursor.fetchall()
+                else:
+                    characters = characters
+                relatedpersonsblock = []
+                counter = 0
+                completed_str = session_info[1] if session_info[1] is not None else datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                completed_time = datetime.datetime.strptime(completed_str, '%Y-%m-%d %H:%M')
+                day_test = datetime.datetime.strftime(completed_time, '%d')
+                month_test = datetime.datetime.strftime(completed_time, '%m')
+
+                new_report_page = client.article.put({
+                    'title': f'{str(session_id).rjust(3, "0")}: {session_info[0]}',
+                    'content': f'{overview}',
+                    'category': {'id': 'b71f939a-f72d-413b-b4d7-4ebff1e162ca'},
+                    'templateType': 'report',  # generic article template
+                    'state': 'public',
+                    'isDraft': False,
+                    'entityClass': 'Report',
+                    'tags': f'{author}',
+                    'world': {'id': world_id},
+                    #                  'reportDate': report_date,  # Convert the date to a string
+                    'plots': [{'id': plot}]
+                })
+                for character in characters:
+                    print(f" This is a character {character[0]} Do they have an article: {character[2]}?")
+                    if character[2] is not None:
+                        person = {'id': character[2]}
+                        relatedpersonsblock.append(person)
+                        counter += 1
+                if counter == 0:
+                    new_timeline_page = client.history.put({
+                        'title': f'{session_info[0]}',
+                        'content': f'{session_info[4]}',
+                        'fullcontent': f'{overview}',
+                        'timelines': [{'id': '906c8c14-2283-47e0-96e2-0fcd9f71d0d0'}],
+                        'significance': significance,
+                        'parsedContent': session_info[4],
+                        'report': {'id': new_report_page['id']},
+                        'year': 22083,
+                        'month': int(month_test),
+                        'day': int(day_test),
+                        'endingYear': int(22083),
+                        'endingMonth': int(month_test),
+                        'endingDay': int(day_test),
+                        'world': {'id': world_id}
+                    })
+                else:
+                    relatedpersonsblock = relatedpersonsblock
+                    print(f"this is the related person's block {relatedpersonsblock}")
+                    new_timeline_page = client.history.put({
+                        'title': f'{session_info[0]}',
+                        'content': f'{session_info[4]}',
+                        'fullcontent': f'{overview}',
+                        'timelines': [{'id': '906c8c14-2283-47e0-96e2-0fcd9f71d0d0'}],
+                        'significance': significance,
+                        'characters': relatedpersonsblock,
+                        'parsedContent': session_info[4],
+                        'report': {'id': new_report_page['id']},
+                        'year': 22083,
+                        'month': int(month_test),
+                        'day': int(day_test),
+                        'endingYear': int(22083),
+                        'endingMonth': int(month_test),
+                        'endingDay': int(day_test),
+                        'world': {'id': world_id}
+                    })
+                cursor.execute(f"UPDATE Sessions SET Article_Link = ?, Article_ID = ?, History_ID = ? WHERE Session_ID = ?", (new_report_page['url'], new_report_page['id'], new_timeline_page['id'], session_id))
+                db.commit()
+                cursor.close()
+                db.close()
 
     async def edit_stage_bio(self, guild_id, true_character_name, bio):
         if guild_id == 883009758179762208:
@@ -1271,9 +1550,12 @@ class Event(commands.Cog):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"UPDATE Player_Characters SET True_Character_Name = ?, Character_name = ?, Nickname = ?, Titles = ?, Description = ?, Oath = ?, Mythweavers = ?, Image_Link = ?, Color = ? WHERE True_Character_Name = ?"
-        val = (true_character_name, new_character_name, new_nickname, titles, description, oath_name, mythweavers, image_link, color, true_name)
-        cursor.execute(sql, val)
+        cursor.close()
+        db.close()
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        cursor.execute(f"UPDATE Player_Characters SET True_Character_Name = ?, Character_name = ?, Nickname = ?, Titles = ?, Description = ?, Oath = ?, Mythweavers = ?, Image_Link = ?, Color = ? WHERE True_Character_Name = ?", (true_character_name, new_character_name, new_nickname, titles, description, oath_name, mythweavers, image_link, color, true_name))
+        print(true_name, true_character_name, new_character_name)
         if true_name != new_character_name:
             sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
             val = (author, true_name, time, 'player_characters', f'edited {true_name} to be {new_character_name}', 0, 'N/A')
@@ -1281,6 +1563,12 @@ class Event(commands.Cog):
             sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
             val = (author, new_character_name, time, 'player_characters', f'edited {true_name} to be {new_character_name}', 0, 'N/A')
             cursor.execute(sql, val)
+            cursor.execute("UPDATE A_Audit_Gold SET Character_Name = ? WHERE Character_Name = ?",(new_character_name, true_name))
+            cursor.execute("UPDATE A_Audit_Prestige SET Character_Name = ? WHERE Character_Name = ?",(new_character_name, true_name))
+            cursor.execute("UPDATE A_Audit_All SET Character = ? WHERE Character = ?", (new_character_name, true_name))
+            cursor.execute("UPDATE Sessions_Participants SET Character_Name = ? WHERE Character_Name = ?", (new_character_name, true_name))
+            cursor.execute("UPDATE Sessions_Signups SET Character_Name = ? WHERE Character_Name = ?", (new_character_name, true_name))
+            cursor.execute("UPDATE Sessions_Archive SET Character_Name = ? WHERE Character_Name = ?", (new_character_name, true_name))
         else:
             sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
             val = (author, true_name, time, 'player_characters', f"edited {true_name}'s information", 0, 'N/A')
@@ -1294,7 +1582,7 @@ class Event(commands.Cog):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"UPDATE Player_Characters SET True_Character_Name = ?, Character_name = ?, Nickname = ?, Titles = ?, Description = ?, Oath = ?, Mythweavers = ?, Image_Link = ?, Color = ? WHERE Character_Name = ?"
+        sql = f"UPDATE A_STG_Player_Characters SET True_Character_Name = ?, Character_name = ?, Nickname = ?, Titles = ?, Description = ?, Oath = ?, Mythweavers = ?, Image_Link = ?, Color = ? WHERE Character_Name = ?"
         val = (true_character_name, new_character_name, new_nickname, titles, description, oath_name, mythweavers, image_link, color, true_name)
         cursor.execute(sql, val)
         if true_name != new_character_name:
@@ -1343,12 +1631,12 @@ class Event(commands.Cog):
         db.close()
 
 
-    async def create_session(self, gm_name, session_name, session_range, session_range_id, play_location, play_time, link, guild_id, author, overview, description, player_limit, overflow):
+    async def create_session(self, gm_name, session_name, session_range, session_range_id, play_location, play_time, link, guild_id, author, overview, description, player_limit, overflow, plot):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"INSERT INTO Sessions(GM_Name, Session_Name, Session_Range, session_range_ID, Play_Location, Play_Time, Game_Link, Created_Time, overview, description, Player_Limit, IsActive, overflow) Values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        val = (gm_name, session_name, session_range, session_range_id, play_location, play_time, link, time, overview, description, player_limit, 1, overflow)
+        sql = f"INSERT INTO Sessions(GM_Name, Session_Name, Session_Range, session_range_ID, Play_Location, Play_Time, Game_Link, Created_Time, overview, description, Player_Limit, IsActive, overflow, Related_Plot) Values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        val = (gm_name, session_name, session_range, session_range_id, play_location, play_time, link, time, overview, description, player_limit, 1, overflow, plot)
         cursor.execute(sql, val)
         sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, 'N/A', time, 'Sessions', 'New Session', 0, 'creating a DND session')
@@ -1404,7 +1692,7 @@ class Event(commands.Cog):
         cursor.execute(sql, val)
         sql = "INSERT INTO A_Audit_All(Author, Character, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?, ?, ?)"
         val = (author, character_name, time, 'Sessions_Participants', f'{character_name} is joining session {session_id}', 0, 'Joining DND session')
-        cursor.execute(f"DELETE FROM Sessions_Signups WHERE Character_Name = ?", (character_name,))
+        cursor.execute(f"DELETE FROM Sessions_Signups WHERE Character_Name = ? AND Session_ID = ?", (character_name,session_id))
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
@@ -1483,13 +1771,13 @@ class Event(commands.Cog):
         cursor.close()
         db.close()
 
-    async def session_log_player(self, guild_id, session_id, player_name, player_id, character_name, level, tier,  effective_gold, rewarded, trials, received_gold, received_fame, received_prestige):
+    async def session_log_player(self, guild_id, session_id, player_name, player_id, character_name, level, tier,  effective_gold, rewarded, trials, received_gold, received_fame, received_prestige, received_flux):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         cursor.execute(f"UPDATE Sessions SET IsActive = 0  WHERE Session_ID = ?", (session_id,))
-        sql = f"INSERT INTO Sessions_Archive(Session_ID, Player_Name, Player_ID, Character_Name, Level, Tier,  Effective_Gold, Received_Milestones, Received_Trials, Received_Gold, Received_Fame, Received_Prestige) Values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        val = (session_id, player_name, player_id, character_name, level, tier,  effective_gold, rewarded, trials, received_gold, received_fame, received_prestige)
+        sql = f"INSERT INTO Sessions_Archive(Session_ID, Player_Name, Player_ID, Character_Name, Level, Tier,  Effective_Gold, Received_Milestones, Received_Trials, Received_Gold, Received_Fame, Received_Prestige, Received_Flux) Values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        val = (session_id, player_name, player_id, character_name, level, tier,  effective_gold, rewarded, trials, received_gold, received_fame, received_prestige, received_flux)
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
@@ -1513,7 +1801,7 @@ class Event(commands.Cog):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        sql = f"UPDATE Sessions SET Gold = ?, Flux = ?, Easy = ?, Medium = ?, Hard = ?, Deadly = ? Trials = ?, Alt_Reward_All = ?, Alt_Reward_Party = ?, rewards_message_id = ?, rewards_thread = ?, fame = ?, prestige = ?  WHERE Session_ID = ?"
+        sql = f"UPDATE Sessions SET Gold = ?, Flux = ?, Easy = ?, Medium = ?, Hard = ?, Deadly = ?, Trials = ?, Alt_Reward_All = ?, Alt_Reward_Party = ?, rewards_message = ?, rewards_thread = ?, fame = ?, prestige = ?  WHERE Session_ID = ?"
         val = (gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward, rewards_message_id, rewards_thread, fame, prestige, session_id)
         cursor.execute(sql, val)
         db.commit()
@@ -1730,3 +2018,275 @@ class Event(commands.Cog):
         cursor.close()
         db.close()
 
+    async def timesheet(self, guild_id, author, utc_offset, start_day, start_hours, start_minutes, end_day, end_hours, end_minutes, change):
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        time_columns = [
+            "00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30",
+            "04:00", "04:30", "05:00", "05:30", "06:00", "06:30", "07:00", "07:30",
+            "08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
+            "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
+            "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30",
+            "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
+        ]
+        columns_to_nullify = []
+        start_minutes = start_hours * 60 + start_minutes + utc_offset * 60
+        end_minutes = end_hours * 60 + end_minutes + utc_offset * 60
+        cursor.execute(f"select count(player_name) from Player_Timecard where player_name = ?", (author,))
+        player_exists = cursor.fetchone()
+        if player_exists[0] != 7:
+            print(player_exists[0])
+            if player_exists[0] > 0:
+                cursor.execute(f"DELETE from Player_Timecard where Player_Name = ?", (author,))
+
+                db.commit()
+                cursor.close()
+                db.close()
+                db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+                cursor = db.cursor()
+            x = 1
+            while x < 8:
+                cursor.execute(f"INSERT INTO Player_Timecard(Player_Name, Day) VALUES(?, ?)", (author, x))
+                x += 1
+        if change == 1:
+            print("adding")
+            if start_day == end_day:
+                for col in time_columns:
+                    col_minutes = time_to_minutes(col)
+                    if col_minutes >= start_minutes or col_minutes <= end_minutes:
+                        columns_to_nullify.append(f'"{col}" = 1')
+                # Build the SQL query dynamically
+                set_clause = ', '.join(columns_to_nullify)
+                print(set_clause)
+                query = f"""
+                    UPDATE Player_Timecard
+                    SET {set_clause}
+                    WHERE Player_Name = ? AND Day = ?;
+                """
+                # Execute the query
+                cursor.execute(query, (author, start_day))
+                print(f"ran query")
+                db.commit()
+                cursor.execute(f"UPDATE Player_Timecard SET utc_offset = ? WHERE Player_Name = ?", (utc_offset, author))
+            else:
+                for col in time_columns:
+                    col_minutes = time_to_minutes(col)
+                    if col_minutes >= start_minutes or col_minutes <= 1440:
+                        columns_to_nullify.append(f'"{col}" = 1')
+                # Build the SQL query dynamically
+                set_clause = ', '.join(columns_to_nullify)
+                print(set_clause)
+                query = f"""
+                    UPDATE Player_Timecard
+                    SET {set_clause}
+                    WHERE Player_Name = ? AND Day = ?;
+                """
+                cursor.execute(query, (author, start_day))
+                columns_to_nullify = []
+                for col in time_columns:
+                    col_minutes = time_to_minutes(col)
+                    if col_minutes >= 0 or col_minutes <= end_minutes:
+                        columns_to_nullify.append(f'"{col}" = 1')
+                # Build the SQL query dynamically
+                set_clause = ', '.join(columns_to_nullify)
+                query = f"""
+                    UPDATE Player_Timecard
+                    SET {set_clause}
+                    WHERE Player_Name = ? AND Day = ?;
+                """
+                print(set_clause)
+                cursor.execute(query, (author, end_day))
+        else:
+            if start_day == end_day:
+                for col in time_columns:
+                    col_minutes = time_to_minutes(col)
+                    if col_minutes >= start_minutes or col_minutes <= end_minutes:
+                        columns_to_nullify.append(f'"{col}" = NULL')
+                # Build the SQL query dynamically
+                set_clause = ', '.join(columns_to_nullify)
+                query = f"""
+                    UPDATE Player_Timecard
+                    SET {set_clause}
+                    WHERE Player_Name = ? AND Day = ?;
+                """
+                # Execute the query
+                cursor.execute(query, (author, start_day))
+            else:
+                print(f"I did else.")
+                for col in time_columns:
+                    col_minutes = time_to_minutes(col)
+                    if col_minutes >= start_minutes or col_minutes <= 1440:
+                        columns_to_nullify.append(f'"{col}" = NULL')
+                # Build the SQL query dynamically
+                set_clause = ', '.join(columns_to_nullify)
+                query = f"""
+                    UPDATE Player_Timecard
+                    SET {set_clause}
+                    WHERE Player_Name = ? AND Day = ?;
+                """
+                cursor.execute(query, (author, start_day))
+                columns_to_nullify = []
+                for col in time_columns:
+                    col_minutes = time_to_minutes(col)
+                    if col_minutes >= 0 or col_minutes <= end_minutes:
+                        columns_to_nullify.append(f'"{col}" = NULL')
+                # Build the SQL query dynamically
+                set_clause = ', '.join(columns_to_nullify)
+                query = f"""
+                    UPDATE Player_Timecard
+                    SET {set_clause}
+                    WHERE Player_Name = ? AND Day = ?;
+                """
+                cursor.execute(query, (author, end_day))
+        db.commit()
+        cursor.close()
+        db.close()
+
+    async def clear_timesheet(self, guild_id, change, day, author):
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        if change == 4:
+            cursor.execute(f"DELETE FROM Timesheet WHERE player_name = ?", (author,))
+        else:
+            time_columns = [
+                "00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30",
+                "04:00", "04:30", "05:00", "05:30", "06:00", "06:30", "07:00", "07:30",
+                "08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
+                "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
+                "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30",
+                "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
+            ]
+            columns_to_nullify = []
+            cursor.execute(f"SELECT UTC_Offset FROM player_Timecard WHERE player_name = ? and UTC_Offset is not Null", (day,))
+            utc_offset_info = cursor.fetchone()
+            utc_offset = 0 if utc_offset_info is None else utc_offset_info[0]
+            if utc_offset == 0:
+                hour_clear_window_start = "0:00"
+                hour_clear_window_end = "24:00"
+                start_minutes = time_to_minutes(hour_clear_window_start)
+                end_minutes = time_to_minutes(hour_clear_window_end)
+                columns_to_nullify = []
+                for col in time_columns:
+                    col_minutes = time_to_minutes(col)
+                    if col_minutes >= start_minutes or col_minutes <= end_minutes:
+                        columns_to_nullify.append(f'"{col}" = NULL')
+                # Build the SQL query dynamically
+                set_clause = ', '.join(columns_to_nullify)
+                query = f"""
+                    UPDATE Player_Timecard
+                    SET {set_clause}
+                    WHERE Player_Name = ? AND Day = ?;
+                """
+                # Execute the query
+                cursor.execute(query, (author, day))
+            elif utc_offset > 0:
+                hour_clear_window_start = utc_offset
+                hour_clear_window_end = utc_offset
+                start_minutes = time_to_minutes(hour_clear_window_start)
+                end_minutes = time_to_minutes(hour_clear_window_end)
+                day_clear_window_start = day
+                day_clear_window_end = day+1 if day < 7 else 1
+                columns_to_nullify = []
+                for col in time_columns:
+                    col_minutes = time_to_minutes(col)
+                    if col_minutes >= start_minutes or col_minutes <= 1440:
+                        columns_to_nullify.append(f'"{col}" = NULL')
+                # Build the SQL query dynamically
+                set_clause = ', '.join(columns_to_nullify)
+                query = f"""
+                    UPDATE Player_Timecard
+                    SET {set_clause}
+                    WHERE Player_Name = ? AND Day = ?;
+                """
+                cursor.execute(query, (author, day_clear_window_start))
+                columns_to_nullify = []
+                for col in time_columns:
+                    col_minutes = time_to_minutes(col)
+                    if col_minutes >= 0 or col_minutes <= end_minutes:
+                        columns_to_nullify.append(f'"{col}" = NULL')
+                # Build the SQL query dynamically
+                set_clause = ', '.join(columns_to_nullify)
+                query = f"""
+                    UPDATE Player_Timecard
+                    SET {set_clause}
+                    WHERE Player_Name = ? AND Day = ?;
+                """
+                cursor.execute(query, (author, day_clear_window_end))
+
+            else:
+                hour_clear_window_start = 24 + utc_offset
+                hour_clear_window_end = 24 + utc_offset
+                day_clear_window_start = day-1 if day > 1 else 7
+                day_clear_window_end = day
+                start_minutes = time_to_minutes(hour_clear_window_start)
+                end_minutes = time_to_minutes(hour_clear_window_end)
+                columns_to_nullify = []
+                for col in time_columns:
+                    col_minutes = time_to_minutes(col)
+                    if start_minutes >= hour_clear_window_start or col_minutes <= 1440:
+                        columns_to_nullify.append(f'"{col}" = NULL')
+                # Build the SQL query dynamically
+                set_clause = ', '.join(columns_to_nullify)
+                query = f"""
+                                    UPDATE Player_Timecard
+                                    SET {set_clause}
+                                    WHERE Player_Name = ? AND Day = ?;
+                                """
+                cursor.execute(query, (author, day_clear_window_start))
+                columns_to_nullify = []
+                for col in time_columns:
+                    col_minutes = time_to_minutes(col)
+                    if col_minutes >= 0 or col_minutes <= end_minutes:
+                        columns_to_nullify.append(f'"{col}" = NULL')
+                # Build the SQL query dynamically
+                set_clause = ', '.join(columns_to_nullify)
+                query = f"""
+                                    UPDATE Player_Timecard
+                                    SET {set_clause}
+                                    WHERE Player_Name = ? AND Day = ?;
+                                """
+                cursor.execute(query, (author, day_clear_window_end))
+
+        db.commit()
+        cursor.close()
+        db.close()
+
+    async def group_request(self, guild_id, author, character_name, group_name, choice):
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        if choice == 1:
+            cursor.execute(f"INSERT INTO Sessions_Group(Group_Name, Player_Name, Created_date) VALUES (?, ?, ?)", (group_name, author, datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
+            db.commit()
+            cursor.execute(f"SELECT Group_ID from Sessions_Group where Player_Name = ?", (author,))
+            group_info = cursor.fetchone()
+            cursor.execute(f"INSERT INTO Sessions_Presign(Group_ID, Player_name, Character_Name) VALUES (?, ?)", (group_info[0], author, character_name))
+        else:
+            cursor.execute(f"SELECT Group_ID from sessions_group where host = ?", (author,))
+            group_info = cursor.fetchone()
+            cursor.execute(f"DELETE FROM Sessions_Group WHERE host = ?", (author))
+            db.commit()
+            cursor.execute(f"Delete from Sessions_Presign where group_id = ?", (group_info[0],))
+            db.commit()
+        db.commit()
+        cursor.close()
+        db.close()
+
+    async def group_join(self, guild_id, group_id, author, character_name, choice):
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        if choice == 1:
+            cursor.execute(f"INSERT INTO Sessions_Presign(Group_ID, player_name, Character_Name) VALUES (?, ?)", (group_id, author, character_name))
+        else:
+            cursor.execute(f"Delete from Sessions_Presign where group_id = ? and character_name = ?", (group_id, character_name))
+        db.commit()
+        cursor.close()
+        db.close()
+
+    async def clear_group(self, guild_id, group_id):
+        db = sqlite.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        cursor.execute(f"DELETE FROM Sessions_Group WHERE Group_ID = ?", (group_id,))
+        cursor.execute(f"DELETE FROM Sessions_Presign WHERE Group_ID = ?", (group_id,))
+        db.commit()
+        cursor.close()
+        db.close()
