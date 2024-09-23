@@ -900,8 +900,8 @@ async def bp(interaction: discord.Interaction, kingdom: str, password: str, char
     cursor = db.cursor()
     cursor.execute(f"""SELECT Kingdom, Password, Build_Points FROM Kingdoms where Kingdom = '{kingdom}'""", {'Kingdom': kingdom})
     result = cursor.fetchone()
-    sql = f"""Select True_Character_Name, Gold from Player_Characters where Player_Name = ? and Character_Name = ? OR Nickname = ?"""
-    val = (author, character_name, character_name)
+    sql = f"""Select True_Character_Name, Gold from Player_Characters where Player_Name = ? and Character_Name = ? OR  Player_Name = ? and Nickname = ?"""
+    val = (author, character_name, author, character_name)
     cursor.execute(sql, val)
     character_info = cursor.fetchone()
     if character_info is None:
@@ -943,8 +943,8 @@ async def sp(interaction: discord.Interaction, kingdom: str, password: str, char
     if decay[0]:  # IF THE SERVER HAS DECAY ON
         cursor.execute(f"""SELECT Kingdom, Password, Stabilization_Points FROM Kingdoms where Kingdom = '{kingdom}'""", {'Kingdom': kingdom})
         result = cursor.fetchone()
-        sql = f"""Select True_Character_Name, Gold from Player_Characters where Character_Name = ? or Nickname = ?"""
-        val = (character_name, character_name)
+        sql = f"""Select True_Character_Name, Gold from Player_Characters where Player_Name = ? and  Character_Name = ? or  Player_Name = ? and Nickname = ?"""
+        val = (author, character_name, author, character_name)
         cursor.execute(sql, val)
         character_info = cursor.fetchone()
         cost = amount * 4000
@@ -1259,7 +1259,7 @@ async def character_milestones(ctx: commands.Context, character_name: str, amoun
         job_name = 'Deadly'
     else:
         job_name = 'None'
-    cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Character_Name = ? OR Nickname = ?", (character_name,character_name))
+    cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Character_Name = ? OR Nickname = ?", (character_name, character_name))
     player_info = cursor.fetchone()
     if player_info is None:
         await ctx.response.send_message(f"{author} does not have {character_name} registered to their account.")
@@ -3995,14 +3995,14 @@ async def edit(ctx: commands.Context, name: str, new_character_name: str = None,
     author_id = ctx.user.id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
-    sql = f"""Select True_Character_Name, Nickname, Titles, Description, Mythweavers, Image_Link, Oath, Color, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Gold_Value, Gold_Value_Max, Flux, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? OR Nickname = ?"""
-    val = (author, name, name)
+    sql = f"""Select True_Character_Name, Nickname, Titles, Description, Mythweavers, Image_Link, Oath, Color, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Gold_Value, Gold_Value_Max, Flux, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? OR Player_Name = ? AND  Nickname = ?"""
+    val = (author, name, author, name)
     cursor.execute(sql, val)
     results = cursor.fetchone()
     await ctx.response.defer(thinking=True, ephemeral=True)
     if results is None:
-        sql = f"""Select True_Character_Name, Nickname, Titles, Description, Mythweavers, Image_Link, Oath, Color, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Gold_Value, Gold_Value_Max, Flux, Character_Name from A_STG_Player_Characters where Player_Name = ? AND Character_Name = ? OR Nickname = ?"""
-        val = (author, name, name)
+        sql = f"""Select True_Character_Name, Nickname, Titles, Description, Mythweavers, Image_Link, Oath, Color, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Gold_Value, Gold_Value_Max, Flux, Character_Name from A_STG_Player_Characters where Player_Name = ? AND Character_Name = ? OR  Player_Name = ? AND Nickname = ?"""
+        val = (author, name, author, name)
         cursor.execute(sql, val)
         results = cursor.fetchone()
         if results is None:
@@ -4215,8 +4215,8 @@ async def retire(ctx: commands.Context, character_name: str):
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
     author = ctx.user.name
-    sql = f"""SELECT True_Character_Name, Thread_ID from Player_Characters where  Player_Name = ? AND Character_Name = ? or Nickname = ?"""
-    val = (author, character_name, character_name)
+    sql = f"""SELECT True_Character_Name, Thread_ID from Player_Characters where  Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND  Nickname = ?"""
+    val = (author, character_name, author, character_name)
     cursor.execute(sql, val)
     results = cursor.fetchone()
     cursor.close()
@@ -4274,7 +4274,7 @@ async def levelup(interaction: discord.Interaction, character_name: str, amount:
         try:
             inventory = await client.get_inventory_item(guild_id, author_id, item_id[0])
             if 0 < amount <= inventory.quantity:
-                cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
+                cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND Nickname = ?", (author, character_name, author, character_name))
                 player_info = cursor.fetchone()
                 if player_info is not None:
                     cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Level_Cap'")
@@ -4393,7 +4393,7 @@ async def trialup(interaction: discord.Interaction, character_name: str, amount:
         inventory = await client.get_inventory_item(guild_id, author_id, item)
         inventory_remaining = inventory.quantity
         if 0 < amount <= inventory.quantity:
-            cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
+            cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND Nickname = ?", (author, character_name, author, character_name))
             player_info = cursor.fetchone()
             if player_info is not None:
                 cursor.execute(f"SELECT Search from Admin WHERE Identifier = 'Tier_Cap'")
@@ -4478,7 +4478,7 @@ async def pouch(interaction: discord.Interaction, character_name: str):
     try:
         inventory = await client.get_inventory_item(guild_id, author_id, item_id[0])
         if inventory is not None:
-            cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
+            cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND Nickname = ?", (author, character_name, author, character_name))
             player_info = cursor.fetchone()
             if player_info is not None:
                 true_character_name = player_info[3]
@@ -4538,7 +4538,7 @@ async def entitle(ctx: commands.Context, character_name: str, title: str, usage:
             title_name = item_id[2] if usage == 2 else item_id[3]
             inventory = await client.get_inventory_item(guild_id, author_id, item_id[0])
             if inventory is not None:
-                cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
+                cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND  Nickname = ?", (author, character_name, author, character_name))
                 player_info = cursor.fetchone()
                 if player_info is not None:
                     true_character_name = player_info[3]
@@ -4567,7 +4567,7 @@ async def entitle(ctx: commands.Context, character_name: str, title: str, usage:
             await ctx.response.send_message(f"{author} does not have any {title_name} in their inventory.")
         await client.close()
     elif usage == 4:
-        cursor.execute( f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
+        cursor.execute( f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND  Nickname = ?", (author, character_name, author, character_name))
         player_info = cursor.fetchone()
         if player_info is not None:
             true_character_name = player_info[3]
@@ -4669,7 +4669,7 @@ async def proposition(ctx: commands.Context, character_name: typing.Optional[str
     cursor.execute(f"SELECT Fame_Required, Prestige_Cost, Name, Effect, Use_Limit from Store_Fame Where name = ?", (name, ))
     item_id = cursor.fetchone()
     if modify == 2 and approver != "N/A" and item_id is not None:
-        cursor.execute( f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
+        cursor.execute( f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND  Nickname = ?", (author, character_name, author, character_name))
         player_info = cursor.fetchone()
         if player_info is not None:
             true_character_name = player_info[3]
@@ -4771,7 +4771,7 @@ async def cap(ctx: commands.Context, character_name: str, level_cap: int):
     guild = ctx.guild
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
-    cursor.execute(f"""SELECT Character_Name FROM Player_Characters where Player_Name = ? and Character_Name = ? or Nickname = ?""", (author, character_name, character_name))
+    cursor.execute(f"""SELECT Character_Name FROM Player_Characters where Player_Name = ? and Character_Name = ? or  Player_Name = ? AND Nickname = ?""", (author, character_name, author, character_name))
     character_info = cursor.fetchone()
     if character_info is not None:
         await Event.adjust_personal_cap(self, guild_id, author, character_name, level_cap)
@@ -5054,7 +5054,7 @@ async def backstory(ctx: commands.Context, character_name: str, backstory: str, 
     guild = ctx.guild
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
-    cursor.execute(f"""SELECT Character_Name, Article_ID, Mythweavers FROM Player_Characters where Player_Name = ? and Character_Name = ? or Nickname = ?""", (author, character_name, character_name))
+    cursor.execute(f"""SELECT Character_Name, Article_ID, Mythweavers FROM Player_Characters where Player_Name = ? and Character_Name = ? or  Player_Name = ? AND Nickname = ?""", (author, character_name, author, character_name))
     character_info = cursor.fetchone()
     if character_info is not None:
         if modify == 1:
@@ -5066,7 +5066,7 @@ async def backstory(ctx: commands.Context, character_name: str, backstory: str, 
                 accepted_bio_channel = cursor.fetchone()
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
                 character_log_channel_id = cursor.fetchone()
-                cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
+                cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND Nickname = ?", (author, character_name, author, character_name))
                 player_info = cursor.fetchone()
                 bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5], player_info[6], player_info[7], player_info[8], player_info[9], player_info[10], player_info[11], player_info[12], player_info[13], player_info[14], player_info[16], player_info[17], player_info[18], player_info[19], player_info[20], player_info[21], player_info[22], player_info[23], player_info[27], player_info[28], player_info[30], player_info[31])
                 bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
@@ -5085,7 +5085,7 @@ async def backstory(ctx: commands.Context, character_name: str, backstory: str, 
                 accepted_bio_channel = cursor.fetchone()
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
                 character_log_channel_id = cursor.fetchone()
-                cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
+                cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND Nickname = ?", (author, character_name, author, character_name))
                 player_info = cursor.fetchone()
                 bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5], player_info[6], player_info[7], player_info[8], player_info[9], player_info[10], player_info[11], player_info[12], player_info[13], player_info[14], player_info[16], player_info[17], player_info[18], player_info[19], player_info[20], player_info[21], player_info[22], player_info[23], player_info[27], player_info[28], player_info[30], player_info[31])
                 bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
@@ -5096,7 +5096,7 @@ async def backstory(ctx: commands.Context, character_name: str, backstory: str, 
                 await logging_thread.send(embed=logging_embed)
                 await ctx.response.send_message(f"{author} has edited the backstory for {character_name}.", ephemeral=True)
     else:
-        cursor.execute(f"""SELECT Character_Name FROM A_STG_Player_Characters where Player_Name = ? and Character_Name = ? or Nickname = ?""", (author, character_name, character_name))
+        cursor.execute(f"""SELECT Character_Name FROM A_STG_Player_Characters where Player_Name = ? and Character_Name = ? or  Player_Name = ? AND Nickname = ?""", (author, character_name, author, character_name))
         character_info = cursor.fetchone()
         if character_info is not None:
             await Event.edit_stage_bio(self, guild_id, character_info[0], backstory)
@@ -5180,7 +5180,7 @@ async def buy(ctx: commands.Context, character_name: str, expenditure: float, ma
     elif market_value < 0:
         await ctx.response.send_message(f"Little comrade! You cannot have an expected value of: {market_value}, it is too little gold to work with!")
     elif expenditure > 0:
-        cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
+        cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND Nickname = ?", (author, character_name, author, character_name))
         player_info = cursor.fetchone()
         if player_info[0] is None:
             await ctx.response.send_message(f"{ctx.user.name} does not have a character named {character_name}")
@@ -5242,7 +5242,7 @@ async def consume(ctx: commands.Context, character_name: str, consumption: float
     if consumption <= 0:
         await ctx.response.send_message(f"MY FREN, YOU MUST BE CONSUMING GOLD. {consumption} IS FAR TOO LOW A NUMBER. REMEMBER, IF IT ISN'T TOIGHT, IT ISN'T ROIGHT.")
     else:
-        cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
+        cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND Nickname = ?", (author, character_name, author, character_name))
         player_info = cursor.fetchone()
         if player_info[0] is None:
             await ctx.response.send_message(f"{ctx.user.name} does not have a character named {character_name}")
@@ -6469,7 +6469,7 @@ async def claim(interaction: discord.Interaction, session_id: int, character_nam
     elif session_info[0] == 1:
         await interaction.response.send_message(f"The Session of {session_info[2]} is still active! !")
     else:
-        cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link, Accepted_Date FROM Player_Characters WHERE Player_Name = ? AND Character_Name = ? OR Nickname =?", (author, character_name, character_name))
+        cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link, Accepted_Date FROM Player_Characters WHERE Player_Name = ? AND Character_Name = ? OR  Player_Name = ? AND Nickname =?", (author, character_name, author, character_name))
         validate_recipient = cursor.fetchone()
         if validate_recipient is not None:
             cursor.execute(f"SELECT Player_Name, Character_Name, Received_Milestones, Received_Trials, Received_Gold, Forego  FROM Sessions_Archive WHERE Session_ID = ? AND Player_Name = ?", (session_id, author))
@@ -6508,7 +6508,7 @@ async def claim(interaction: discord.Interaction, session_id: int, character_nam
                                 await msg.clear_reactions()
                                 await msg.edit(embed=embed)
                                 character_name = reward_info[1]
-                                cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Character_Name = ? OR Nickname = ?", (character_name, character_name))
+                                cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Character_Name = ? OR  Nickname = ?", (character_name, character_name))
                                 player_info = cursor.fetchone()
                                 cursor.execute(f'SELECT MAX(Transaction_ID) FROM A_Audit_Gold Order By Transaction_ID DESC LIMIT 1')
                                 transaction_id = cursor.fetchone()
@@ -6801,8 +6801,8 @@ async def join(interaction: discord.Interaction, session_id: int, character_name
         quest_thread = guild.get_thread(session_info[6])
         role = interaction.guild.get_role(session_info[4])
         if role in user.roles or session_info[7] == 4 or session_info[7] == 3 or session_info[7] == 2:
-            sql = f"""Select Character_Name, Level, Gold_Value, Tier from Player_Characters where Player_Name = ? and Character_Name = ? OR Nickname = ?"""
-            val = (author, character_name, character_name)
+            sql = f"""Select Character_Name, Level, Gold_Value, Tier from Player_Characters where Player_Name = ? and Character_Name = ? OR  Player_Name = ? AND Nickname = ?"""
+            val = (author, character_name, author, character_name)
             cursor.execute(sql, val)
             character_info = cursor.fetchone()
             if character_info is None:
