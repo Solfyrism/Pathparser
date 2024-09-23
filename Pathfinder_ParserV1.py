@@ -399,7 +399,7 @@ async def stg_character_select_autocompletion(interaction: discord.Interaction, 
     character_list = cursor.fetchall()
     for characters in character_list:
         if current in characters[1]:
-            data.append(app_commands.Choice(name=characters[0], value=characters[0]))
+             data.append(app_commands.Choice(name=characters[0], value=characters[0]))
     cursor.close()
     db.close()
     return data
