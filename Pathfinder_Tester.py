@@ -8,7 +8,7 @@ import sqlite3
 import os
 from discord import app_commands
 from discord.ext import commands
-from Event_List import Mangaged_events as EventCommand
+from Event_List import Event
 from unbelievaboat import Client
 import unbelievaboat
 import asyncio
@@ -98,6 +98,7 @@ content = Content(name="content", description="Content Reviewer commands")
 
 @bot.event
 async def on_ready():
+    await bot.tree.sync()
     await bot.wait_until_ready()
     print(f"We have logged in as {bot.user}.")
     bot.tree.add_command(kingdom)
@@ -130,7 +131,7 @@ def hide_me(ctx, modify):
 
 def adjust_day(day, hours, utc_offset):
     print(type(day), hours, type(utc_offset))
-    adjusted_day = day + (1 if int(hours) - int(utc_offset) >= 24 else -1 if int(hours) - utc_offset <= 0 else 0)
+    adjusted_day = day + (1 if int(hours) + int(utc_offset) >= 24 else -1 if int(hours) + utc_offset <= 0 else 0)
     # Ensure the day wraps around in the range 1 to 7 (days of the week)
     return (adjusted_day - 1) % 7 + 1
 
@@ -325,15 +326,8 @@ def ordinal(n):
     return str(n) + suffix
 
 
-
-def time_to_minutes(t):
-    hours, minutes = map(int, t.split(':'))
-    return hours * 60 + minutes
-
-
-
-def fetch_timecard_data_from_db(guild_id, player_name, day):
-    conn = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+def get_timecard_data(player_name, day):
+    conn = sqlite3.connect('your_database.db')
     cursor = conn.cursor()
 
     # Fetch time slots for the specific player and day
@@ -346,7 +340,7 @@ def fetch_timecard_data_from_db(guild_id, player_name, day):
 
 
 # Function to plot and save the graph as an image
-async def create_timecard_plot(guild_id, player_name, day):
+def create_timecard_plot(player_name, day):
     # Time intervals (x-axis)
     time_labels = [
         "00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30",
@@ -356,19 +350,19 @@ async def create_timecard_plot(guild_id, player_name, day):
         "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30",
         "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
     ]
+
     # Get timecard data for the player and day
-    row = fetch_timecard_data_from_db(guild_id, player_name, day)
-    player_availability = [] # Initialize an empty list to store player availability
+    row = get_timecard_data(player_name, day)
+
     if row:
-        player_availability = row[3:]  # Skip the first 3 columns (Player_Name, UTC_Offset, Day)
+        availability = list(row[3:])  # Skip first 3 columns (Player_Name, UTC_Offset, Day)
     else:
-        player_availability = [0] * len(time_labels)  # Default to 0 if no data found
-    player_availability = [int(x) if str(x).isdigit() else 0 for x in player_availability]
+        availability = [0] * len(time_labels)  # Default to 0 if no data found
 
     # Create a plot
     plt.figure(figsize=(10, 6))
-    plt.plot(time_labels, player_availability, marker='o', linestyle='-', color='b', label=f'{player_name} Availability')
-    plt.fill_between(time_labels, player_availability, color='lightblue', alpha=0.5)
+    plt.plot(time_labels, availability, marker='o', linestyle='-', color='b', label=f'{player_name} Availability')
+    plt.fill_between(time_labels, availability, color='lightblue', alpha=0.5)
 
     # Labeling the graph
     plt.title(f"Availability for {player_name} on {day}")
@@ -378,7 +372,7 @@ async def create_timecard_plot(guild_id, player_name, day):
     plt.grid(True)
 
     # Save the plot as an image file
-    plt.savefig('C:\\Pathparser\\plots\\timecard_plot.png')  # Ensure the path is correct for your system
+    plt.savefig('timecard_plot.png')
     plt.close()
 
 async def character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
@@ -537,7 +531,7 @@ async def title_lookup(interaction: discord.Interaction, current: str) -> typing
     return data
 
 
-# noinspection PyUnresolvedReferences
+
 @bot.tree.command(name="sync_tree", description="Sync commands to server", guild=discord.Object(id=280061170231017472))
 async def self(interaction: discord.Interaction):
     fmt = await bot.tree.sync()
@@ -615,7 +609,7 @@ async def create(ctx: commands.Context, kingdom: str, password: str, government:
         loyalty = alignment_validity[2]
         stability = alignment_validity[3]
         status = f"Congratulations you have made the kingdom of **{kingdom}** a reality"
-        await EventCommand.create_kingdom(self, kingdom, password, government, alignment, economy, loyalty, stability, guild_id, author)
+        await Event.create_kingdom(self, kingdom, password, government, alignment, economy, loyalty, stability, guild_id, author)
         await ctx.response.send_message(content=status)
     cursor.close()
     db.close()
@@ -639,7 +633,7 @@ async def destroy(ctx: commands.Context, kingdom: str, password: str):
         await ctx.response.send_message(content=status)
     if result is not None and result[1] == password:
         status = f"The Kingdom of {kingdom} can no longer be found, whether it be settlements, political figures, or Buildings"
-        await EventCommand.destroy_kingdom(self, kingdom, guild_id, author)
+        await Event.destroy_kingdom(self, kingdom, guild_id, author)
         await ctx.response.send_message(content=status)
     else:
         status = f"You have entered an invalid password for this kingdom."
@@ -680,7 +674,7 @@ async def modify(ctx: commands.Context, old_kingdom: str, new_kingdom: str, old_
         status = f"H-Have you lied to me slash commander-kun? That password wasn't correct for the kingdom of {kingdom}!"
         await ctx.response.send_message(status)
     elif result is not None and result[1] == old_password:
-        await EventCommand.modify_kingdom(self, old_kingdom, new_kingdom, new_password, new_government, new_alignment, guild_id, author)
+        await Event.modify_kingdom(self, old_kingdom, new_kingdom, new_password, new_government, new_alignment, guild_id, author)
         status = f"the specified kingdom of {old_kingdom} has been modified with the relevant changes to make it into {new_kingdom}"
         await ctx.response.send_message(status)
 
@@ -894,7 +888,6 @@ async def detail(ctx: commands.Context, kingdom: str, custom_stats: bool = False
 """THIS CALLS FOR A SINGULAR KINGDOM OR IT'S CUSTOM INFORMATION"""
 
 
-# noinspection PyUnresolvedReferences
 @kingdom.command()
 @app_commands.autocomplete(character_name=own_character_select_autocompletion)
 async def bp(interaction: discord.Interaction, kingdom: str, password: str, character_name: str, amount: int):
@@ -930,12 +923,11 @@ async def bp(interaction: discord.Interaction, kingdom: str, password: str, char
                 if build_points < 0:
                     await interaction.response.send_message(f"Impossible! the kingdom of {kingdom} would have {build_points} remaining build points and go into anarchy!!")
                 if build_points >= 0:
-                    await EventCommand.adjust_build_points(self, kingdom, amount, guild_id, character_info[0], author)
+                    await Event.adjust_build_points(self, kingdom, amount, guild_id, character_info[0], author)
                     await interaction.response.send_message(f"the kingdom of {kingdom} has been adjusted by {amount} build points and has a new value of {build_points}! {character_info[0]} has been charged {cost} GP leaving {gold_value} remaining!")
 """We can make this ALL settlements for that kingdom, or a specific settlement"""
 
 
-# noinspection PyUnresolvedReferences
 @kingdom.command()
 @app_commands.autocomplete(character_name=own_character_select_autocompletion)
 async def sp(interaction: discord.Interaction, kingdom: str, password: str, character_name: str, amount: int):
@@ -974,7 +966,7 @@ async def sp(interaction: discord.Interaction, kingdom: str, password: str, char
                     if stabilization_points < 0:
                         await interaction.response.send_message(f"Impossible! the kingdom of {kingdom} would have {stabilization_points} remaining stabilization_points and go into anarchy!!")
                     if stabilization_points >= 0:
-                        await EventCommand.adjust_stabilization_points(self, kingdom, amount, guild_id, author, character_info[0])
+                        await Event.adjust_stabilization_points(self, kingdom, amount, guild_id, author, character_info[0])
                         await interaction.response.send_message(f"The kingdom of {kingdom} has been adjusted by {amount} Stabilization Points and has a new value of {stabilization_points}! {character_info[0]} has been charged {cost} GP leaving {gold_value} remaining!")
         if not decay[0]:
             await interaction.response.send_message(f"this server does not have decay enabled!")
@@ -1012,7 +1004,7 @@ async def blueprint_add(ctx: commands.Context, building: str, build_points: int,
     db.close()
     if result is None:
         status = f"Congratulations you have allowed the construction of **{building}**"
-        await EventCommand.create_blueprint(self, building, build_points, lots, economy, loyalty, stability, fame, unrest, corruption, crime, productivity, law, lore, society, danger, defence, base_value, spell_casting, supply, settlement_limit, district_limit, description, guild_id, author)
+        await Event.create_blueprint(self, building, build_points, lots, economy, loyalty, stability, fame, unrest, corruption, crime, productivity, law, lore, society, danger, defence, base_value, spell_casting, supply, settlement_limit, district_limit, description, guild_id, author)
         await ctx.response.send_message(status)
     if result is not None:
         status = f"you have already allowed the construction of **{building}**"
@@ -1036,7 +1028,7 @@ async def blueprint_remove(ctx: commands.Context, building: str):
         await ctx.response.send_message(status)
     if result is not None:
         status = f"You have done the YEETETH of this particular building which is {building}."
-        await EventCommand.remove_blueprint(self, building, guild_id, author)
+        await Event.remove_blueprint(self, building, guild_id, author)
         await ctx.response.send_message(status)
 
 
@@ -1057,7 +1049,7 @@ async def blueprint_modify(ctx: commands.Context, building: str, build_points: i
         await ctx.response.send_message(status)
     if result is not None:
         status = f"The blueprint of {building} has been modified for all times built, and in the records!"
-        await EventCommand.modify_blueprint(self, building, build_points, lots, economy, loyalty, stability, fame, unrest, corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting, supply, settlement_limit, district_limit, description, guild_id, author)
+        await Event.modify_blueprint(self, building, build_points, lots, economy, loyalty, stability, fame, unrest, corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting, supply, settlement_limit, district_limit, description, guild_id, author)
         await ctx.response.send_message(status)
 
 
@@ -1078,7 +1070,7 @@ async def kingdom_modifiers(ctx: commands.Context, kingdom: str, control_dc: int
         await ctx.response.send_message(status)
     if result is not None:
         status = f"The kingdom of {kingdom} which you have set new modifiers for has been adjusted"
-        await EventCommand.customize_kingdom_modifiers(self, kingdom, control_dc, economy, loyalty, stability, fame, unrest, consumption, guild_id, author)
+        await Event.customize_kingdom_modifiers(self, kingdom, control_dc, economy, loyalty, stability, fame, unrest, consumption, guild_id, author)
         await ctx.response.send_message(status)
 
 
@@ -1101,7 +1093,7 @@ async def settlement_modifiers(ctx: commands.Context, kingdom: str, settlement: 
     if result is not None:
         status = f"You have modified the settlement of {settlement} congratulations!"
         await ctx.response.send_message(status)
-        await EventCommand.custom_settlement_modifiers(self, kingdom, settlement, corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting, supply, guild_id, author)
+        await Event.custom_settlement_modifiers(self, kingdom, settlement, corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting, supply, guild_id, author)
 
 
 @overseer.command()
@@ -1123,7 +1115,7 @@ async def settlement_decay(ctx: commands.Context, kingdom: str, settlement: str,
             await ctx.response.send_message(f"You have failed to specify a valid settlement to adjust the decay!!")
             return
         if result is not None:
-            await EventCommand.settlement_decay_set(self, kingdom, settlement, decay, guild_id, author)
+            await Event.settlement_decay_set(self, kingdom, settlement, decay, guild_id, author)
             await ctx.response.send_message(f"The settlement of {settlement} within the kingdom of {kingdom} has had it's decay set to {decay}!")
     if not server_decay[0]:
         await ctx.response.send_message(f"Decay is not enabled in this server!")
@@ -1142,7 +1134,7 @@ async def improvement_add(ctx: commands.Context, improvement: str, build_points:
     cursor.close()
     db.close()
     if result is None:
-        await EventCommand.add_hex_improvements(self, improvement, build_points, road_multiplier, economy, loyalty, stability, unrest, consumption, defence, taxation, cavernous, coastline, desert, forest, hills, jungle, marsh, mountain, plains, water, guild_id, author)
+        await Event.add_hex_improvements(self, improvement, build_points, road_multiplier, economy, loyalty, stability, unrest, consumption, defence, taxation, cavernous, coastline, desert, forest, hills, jungle, marsh, mountain, plains, water, guild_id, author)
         status = f"You have allowed the creation the new hex improvement: {improvement}!"
         await ctx.response.send_message(status)
     if result is not None:
@@ -1163,7 +1155,7 @@ async def improvement_remove(ctx: commands.Context, improvement: str):
     cursor.close()
     db.close()
     if result is not None:
-        await EventCommand.remove_hex_improvement(self, improvement, guild_id, author)
+        await Event.remove_hex_improvement(self, improvement, guild_id, author)
         status = f"You have removed {improvement} from the list of available improvements."
         await ctx.response.send_message(status)
     if result is None:
@@ -1193,9 +1185,9 @@ async def improvement_modify(ctx: commands.Context, old_improvement: str, new_im
         if result2 is None:
             status = f"You have made this improvement into something new... something different. {new_improvement} has been altered for all settlements."
             await ctx.response.send_message(status)
-            await EventCommand.modify_hex_improvement(self, old_improvement, new_improvement, new_build_points, new_road_multiplier, new_economy, new_loyalty, new_stability, new_unrest, new_consumption, new_defence, new_taxation, new_cavernous, new_coastline, new_desert, new_forest, new_hills, new_jungle, new_marsh, new_mountains, new_plains, new_water, guild_id, author)
+            await Event.modify_hex_improvement(self, old_improvement, new_improvement, new_build_points, new_road_multiplier, new_economy, new_loyalty, new_stability, new_unrest, new_consumption, new_defence, new_taxation, new_cavernous, new_coastline, new_desert, new_forest, new_hills, new_jungle, new_marsh, new_mountains, new_plains, new_water, guild_id, author)
         elif result1[0] == result2[0]:
-            await EventCommand.modify_hex_improvement(self, old_improvement, new_improvement, new_build_points, new_road_multiplier, new_economy, new_loyalty, new_stability, new_unrest, new_consumption, new_defence, new_taxation, new_cavernous, new_coastline, new_desert, new_forest, new_hills, new_jungle, new_marsh, new_mountains, new_plains, new_water, guild_id, author)
+            await Event.modify_hex_improvement(self, old_improvement, new_improvement, new_build_points, new_road_multiplier, new_economy, new_loyalty, new_stability, new_unrest, new_consumption, new_defence, new_taxation, new_cavernous, new_coastline, new_desert, new_forest, new_hills, new_jungle, new_marsh, new_mountains, new_plains, new_water, guild_id, author)
             status = f"You have kept the name the same for this building. The stats of {new_improvement} have been altered.."
             await ctx.response.send_message(status)
         elif result2 is not None:
@@ -1210,7 +1202,7 @@ async def kingdom_tables_rebalance(ctx: commands.Context):
     author = ctx.user.name
     time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     shutil.copyfile(f"C:/pathparser/pathparser_{guild_id}.sqlite", f"C:/pathparser/pathparser_{guild_id}_{time}.sqlite")
-    await EventCommand.balance_tables(self, guild_id, author)
+    await Event.balance_tables(self, guild_id, author)
     status = f"TABLE UPDATE HAS BEEN COMPLETED"
     await ctx.response.send_message(status)
 
@@ -1307,7 +1299,7 @@ async def character_milestones(ctx: commands.Context, character_name: str, amoun
             if current_level is None:
                 await ctx.response.send_message(f"Comrade, one cannot degrade this character: {character_name} past level 3, please train them to  best level up in the future!")
             else:
-                await EventCommand.adjust_milestones(self, character_name, milestone_total, remaining, character_level, guild_id, author)
+                await Event.adjust_milestones(self, character_name, milestone_total, remaining, character_level, guild_id, author)
                 if character_level != player_info[1]:
                     cursor.execute(f"SELECT Level, Role_name, Role_ID FROM Level_Range WHERE level = '{player_info[7]}'")
                     level_range = cursor.fetchone()
@@ -1397,7 +1389,7 @@ async def character_trials(ctx: commands.Context, character_name: str, amount: i
                 logging_embed = log_embed(player_info[2], author, None, None, None, None, trial_info[0], amount, total_trials, trial_info[1] + trial_info[2] - total_trials, None, None, None, None, None, None, None, None,None, None, None, None, None, None, None, source)
                 logging_thread = guild.get_thread(player_info[25])
                 await logging_thread.send(embed=logging_embed)
-                await EventCommand.adjust_trials(self, character_name, total_trials, guild_id, author)
+                await Event.adjust_trials(self, character_name, total_trials, guild_id, author)
                 if player_info[8] != trial_info[0]:
                     remaining = trial_info[1] + trial_info[2] - total_trials
                     await ctx.response.send_message(f"{ctx.user.name} has adjusted {character_name}'s trials by {amount}, reaching a tier of {trial_info[0]} with {remaining} trials to increase their tier.")
@@ -1435,7 +1427,7 @@ async def gold_adjust(ctx: commands.Context, character_name: str, amount: typing
             gold_info = gold_calculation(player_info[7], player_info[6], player_info[13], player_info[14], player_info[15], amount)
             lifetime_gold_change = lifetime_gold if lifetime_gold is not None else amount
             effective_gold_change = effective_gold if effective_gold is not None else gold_info[3]
-            await EventCommand.gold_change(self, guild_id, author, author_id, player_info[3], gold_info[3], effective_gold_change, lifetime_gold_change, reason, 'Admin Gold Adjust')
+            await Event.gold_change(self, guild_id, author, author_id, player_info[3], gold_info[3], effective_gold_change, lifetime_gold_change, reason, 'Admin Gold Adjust')
             cursor.execute(f'SELECT MAX(Transaction_ID) FROM A_Audit_Gold Order By Transaction_ID DESC LIMIT 1')
             transaction_id = cursor.fetchone()
             cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -1479,7 +1471,7 @@ async def undo_transaction(ctx: commands.Context, transaction_id: int):
         embed.add_field(name=f"**{transaction_info[2]}'s Transaction Info:**", value=f'**Gold:** {transaction_info[3]} GP, **Effective Gold**: {transaction_info[4]} GP, **Lifetime Gold**: {transaction_info[5]}.', inline=False)
         cursor.execute(f"Select Author_Name, Author_ID, Character_Name, Gold_Value, Effective_Gold_Value, Effective_Gold_value_max, Transaction_ID FROM A_Audit_Gold WHERE Related_Transaction_ID = {transaction_id}")
         related_transaction_info = cursor.fetchone()
-        await EventCommand.undo_transaction(self, guild_id, transaction_id, gold, effective_gold, max_effective_gold, transaction_info[2], transaction_info[0])
+        await Event.undo_transaction(self, guild_id, transaction_id, gold, effective_gold, max_effective_gold, transaction_info[2], transaction_info[0])
         cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
         accepted_bio_channel = cursor.fetchone()
         cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
@@ -1503,7 +1495,7 @@ async def undo_transaction(ctx: commands.Context, transaction_id: int):
             cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Character_Name = ?",(related_transaction_info[2],))
             player_info = cursor.fetchone()
             embed.add_field(name=f"**{related_transaction_info[2]}'s Transaction Info:**", value=f'**Gold:** {related_transaction_info[3]} GP, **Effective Gold**: {related_transaction_info[4]} GP, **Lifetime Gold**: {related_transaction_info[5]}.', inline=False)
-            await EventCommand.undo_transaction(self, guild_id, related_transaction_info[6], gold, effective_gold, max_effective_gold, related_transaction_info[0], related_transaction_info[2])
+            await Event.undo_transaction(self, guild_id, related_transaction_info[6], gold, effective_gold, max_effective_gold, related_transaction_info[0], related_transaction_info[2])
             bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5], player_info[6], player_info[7], player_info[8], player_info[9], player_info[10], player_info[11],player_info[12], player_info[13] + gold, player_info[14] + effective_gold,player_info[16], player_info[17], player_info[18], player_info[19],player_info[20], player_info[21], player_info[22], player_info[23], player_info[27], player_info[28], player_info[30], player_info[31])
             bio_message = await bio_channel.fetch_message(player_info[24])
             await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
@@ -1570,7 +1562,7 @@ async def session_management(interaction: discord.Interaction, session_id: int, 
                     rewards_channel = cursor.fetchone()
                     reward_channel = await bot.fetch_channel(rewards_channel[0])
                     reward_msg = await reward_channel.fetch_message(session_simple[16])
-                    reward_thread = await reward_msg.create_thread(name=f"Session name: {session_simple[1]} Party Rewards, Session ID: {session_simple[0]}", auto_archive_duration=60, reason=f"{party_reward}")
+                    reward_thread = await reward_msg.create_thread(name=f"Session name: {session_name} Party Rewards, Session ID: {info[0]}", auto_archive_duration=60, reason=f"{description}")
                     reward_thread_id = reward_thread.id
                     reward_message_id = reward_msg.id
                     await reward_thread.send(embed=party_reward_embed)
@@ -1699,9 +1691,9 @@ async def session_management(interaction: discord.Interaction, session_id: int, 
                         difference = gold_difference
 #                    DONE WITH GOLD
                 difference = round(difference, 2)
-                await EventCommand.session_rewards(self, player[0], guild_id, player[1], true_level, new_milestone_total, remaining, flux_total, true_tier, trials_total, trials_required, fame_total, prestige_total, f"Adjusting Session {session_id} reward")
-                await EventCommand.gold_change(self, guild_id, player[0], player[6], player[1], difference, difference, gold, 'Session Reward', 'Session Reward')
-                await EventCommand.update_session_log_player(self, guild_id, session_id, player[1], rewarded, trials, difference, fame, prestige)
+                await Event.session_rewards(self, player[0], guild_id, player[1], true_level, new_milestone_total, remaining, flux_total, true_tier, trials_total, trials_required, fame_total, prestige_total, f"Adjusting Session {session_id} reward")
+                await Event.gold_change(self, guild_id, player[0], player[6], player[1], difference, difference, gold, 'Session Reward', 'Session Reward')
+                await Event.update_session_log_player(self, guild_id, session_id, player[1], rewarded, trials, difference, fame, prestige)
                 embed.add_field(name="Character Info", value=f'Player: {player[0]} Character:{player[1]} \n **Level**: {true_level} \n **Milestone change**: {rewarded} **Gold change**: {difference}', inline=False)
                 cursor.execute(f'SELECT MAX(Transaction_ID) FROM A_Audit_Gold Order By Transaction_ID DESC LIMIT 1')
                 transaction_id = cursor.fetchone()
@@ -1717,7 +1709,7 @@ async def session_management(interaction: discord.Interaction, session_id: int, 
                 logging_embed = log_embed(player_info[2], player_info[2], true_level, rewarded, new_milestone_total, remaining, true_tier, trials - session_simple[10], trials_total, trials_required, player_info[13] + difference, difference, player_info[14] + difference, transaction_id[0], flux_total, flux - session_simple[5], None, None, None, None, reward_all, fame_total, fame, prestige_total, prestige, source)
                 logging_thread = guild.get_thread(player_info[25])
                 await logging_thread.send(embed=logging_embed)
-            await EventCommand.update_session_log(self, guild_id, session_id, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward, reward_message_id, reward_thread_id, fame, prestige)
+            await Event.update_session_log(self, guild_id, session_id, gold, flux, easy, medium, hard, deadly, trials, reward_all, party_reward, reward_message_id, reward_thread_id, fame, prestige)
             await interaction.followup.send(embed=embed)
             cursor.close()
             db.close()
@@ -1823,7 +1815,7 @@ async def settings_define(interaction: discord.Interaction, identifier: str, new
         if information is None:
             await interaction.response.send_message('The identifier you have supplied is incorrect.')
         if information is not None:
-            await EventCommand.update_settings(self, guild_id, author, new_search, identifier)
+            await Event.update_settings(self, guild_id, author, new_search, identifier)
             await interaction.response.send_message(f'The identifier of {identifier} is now looking for {new_search}.')
     cursor.close()
     db.close()
@@ -1843,7 +1835,7 @@ async def level_cap(interaction: discord.Interaction, new_level: int):
         await interaction.response.send_message(f"Your server does not have a milestone system for above level 20")
     else:
         await interaction.response.defer(thinking=True)
-        await EventCommand.update_level_cap(self, guild_id, author, new_level)
+        await Event.update_level_cap(self, guild_id, author, new_level)
         cursor.execute(f"SELECT Minimum_Milestones FROM AA_Milestones where Level = {new_level}")
         level_info = cursor.fetchone()
         minimum_milestones = level_info[0]
@@ -1944,7 +1936,7 @@ async def tier_cap(interaction: discord.Interaction, new_tier: int):
         count_of_characters = cursor.fetchone()
         cursor.execute(f"SELECT Player_Name, Player_ID, Character_Name FROM Player_Characters WHERE Trials >= {minimum_milestones} LIMIT 20")
         characters_info = cursor.fetchall()
-        await EventCommand.update_tier_cap(self, guild_id, author, new_tier, minimum_level)
+        await Event.update_tier_cap(self, guild_id, author, new_tier, minimum_level)
         embed = discord.Embed(title=f"New Trial Cap", description=f'The Server Trial cap has been adjusted', colour=discord.Colour.blurple())
         if count_of_characters is not None:
             x = 0
@@ -2001,7 +1993,7 @@ async def flux_adjust(ctx: commands.Context, character_name: str, amount: int):
         elif player_info is not None:
             true_name = player_info[2]
             new_flux = player_info[16] + amount
-            await EventCommand.flux(self, guild_id, true_name, amount, new_flux, author)
+            await Event.flux(self, guild_id, true_name, amount, new_flux, author)
             response = f"{character_name}'s Flux has changed by {amount} to become {new_flux}."
             await ctx.response.send_message(response, ephemeral=True)
             cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -2034,7 +2026,7 @@ async def level_range(ctx: commands.Context, range: discord.Role, minimum_level:
         author = ctx.user.name
         role_name = range.name
         role_id = range.id
-        await EventCommand.set_range(self, guild_id, author, role_name, role_id, minimum_level, maximum_level)
+        await Event.set_range(self, guild_id, author, role_name, role_id, minimum_level, maximum_level)
         embed = discord.Embed(title=f"Range Update", description=f'a new role name and role ID has been applied', colour=discord.Colour.green())
         embed.add_field(name=f'**Role**', value=f'{role_name} with ID: {role_id}.', inline=False)
         embed.add_field(name=f'**Range**', value=f'{minimum_level} level to {maximum_level} level have been updated', inline=False)
@@ -2162,7 +2154,7 @@ async def clean_playerbase(ctx: commands.Context, player: typing.Optional[discor
                     await msg.clear_reactions()
                     await msg.edit(embed=embed)
                     for wiped in overall_wipe_list:
-                        await EventCommand.wipe_unapproved(self, wiped[0], guild_id, author)
+                        await Event.wipe_unapproved(self, wiped[0], guild_id, author)
 
 
 
@@ -2250,7 +2242,7 @@ async def manage(ctx: commands.Context, character_name: str, player_id: typing.O
                         print(overall_wipe_list)
                         print(type(overall_wipe_list))
                         for wiped in overall_wipe_list:
-                            await EventCommand.wipe_unapproved(self, wiped, guild_id, author)
+                            await Event.wipe_unapproved(self, wiped, guild_id, author)
     else:
         e = None
         try:
@@ -2269,13 +2261,13 @@ async def manage(ctx: commands.Context, character_name: str, player_id: typing.O
             if player_id_info[1] is not None or 'worldanvil' in player_id_info[2]:
                 try:
                     e = None
-                    await EventCommand.create_bio(self, guild_id, player_id_info[0], player_id_info[1], player_id_info[2])
+                    await Event.create_bio(self, guild_id, player_id_info[0], player_id_info[1], player_id_info[2])
                 except Exception as e:
                     print(e)
                     pass
             else:
                 e = None
-            await EventCommand.create_character(self, guild_id, author, player_id_info[0])
+            await Event.create_character(self, guild_id, author, player_id_info[0])
             cursor.execute(f"SELECT Search FROM Admin WHERE Identifier = 'Approved_Character'")
             approved_character = cursor.fetchone()
             cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -2321,16 +2313,16 @@ async def manage(ctx: commands.Context, character_name: str, player_id: typing.O
             character_log_channel = await bot.fetch_channel(character_log_channel_id[0])
             character_log_message = await character_log_channel.send(content=mentions, embed=embed, allowed_mentions=discord.AllowedMentions(users=True))
             thread = await character_log_message.create_thread(name=f'{character_info[1]}')
-            await EventCommand.log_character(self, guild_id, character_name, bio_message.id, character_log_message.id, thread.id)
+            await Event.log_character(self, guild_id, character_name, bio_message.id, character_log_message.id, thread.id)
             if e is None:
                 await ctx.followup.send(content=f"{character_name} has been accepted into the server!")
             else:
-                await ctx.send(f"{character_name} has been accepted into the server!")
+                ctx.send(f"{character_name} has been accepted into the server!")
         else:
             if e is None:
                 await ctx.followup.send(f"{character_name} could not be found in the database.", ephemeral=True)
             else:
-                await ctx.send(f"{character_name} has been accepted into the server!")
+                ctx.send(f"{character_name} has been accepted into the server!")
 
 @content.command()
 @app_commands.autocomplete(character_name=stg_character_select_autocompletion)
@@ -2416,7 +2408,7 @@ async def manage(ctx: commands.Context, character_name: str, player_id: typing.O
                         print(overall_wipe_list)
                         print(type(overall_wipe_list))
                         for wiped in overall_wipe_list:
-                            await EventCommand.wipe_unapproved(self, wiped, guild_id, author)
+                            await Event.wipe_unapproved(self, wiped, guild_id, author)
     else:
         e = None
         try:
@@ -2436,13 +2428,13 @@ async def manage(ctx: commands.Context, character_name: str, player_id: typing.O
             if player_id_info[1] is not None or 'worldanvil' in player_id_info[2]:
                 try:
                     e = None
-                    await EventCommand.create_bio(self, guild_id, player_id_info[0], player_id_info[1], player_id_info[2])
+                    await Event.create_bio(self, guild_id, player_id_info[0], player_id_info[1], player_id_info[2])
                 except Exception as e:
                     print(e)
                     pass
             else:
                 e = None
-            await EventCommand.create_character(self, guild_id, author, player_id_info[0])
+            await Event.create_character(self, guild_id, author, player_id_info[0])
             cursor.execute(f"SELECT Search FROM Admin WHERE Identifier = 'Approved_Character'")
             approved_character = cursor.fetchone()
             cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -2488,16 +2480,16 @@ async def manage(ctx: commands.Context, character_name: str, player_id: typing.O
             character_log_channel = await bot.fetch_channel(character_log_channel_id[0])
             character_log_message = await character_log_channel.send(content=mentions, embed=embed, allowed_mentions=discord.AllowedMentions(users=True))
             thread = await character_log_message.create_thread(name=f'{character_info[1]}')
-            await EventCommand.log_character(self, guild_id, character_name, bio_message.id, character_log_message.id, thread.id)
+            await Event.log_character(self, guild_id, character_name, bio_message.id, character_log_message.id, thread.id)
             if e is None:
                 await ctx.followup.send(content=f"{character_name} has been accepted into the server!")
             else:
-                await ctx.send(f"{character_name} has been accepted into the server!")
+                ctx.send(f"{character_name} has been accepted into the server!")
         else:
             if e is None:
                 await ctx.followup.send(f"{character_name} could not be found in the database.", ephemeral=True)
             else:
-                await ctx.send(f"{character_name} has been accepted into the server!")
+                ctx.send(f"{character_name} has been accepted into the server!")
 
 
 
@@ -2533,7 +2525,7 @@ async def customize(ctx: commands.Context, character_name: str, destination: dis
         template_name = customized_name if destination == 2 else None
         template_link = link if destination == 2 else None
         flux_remaining = player_info[16] - flux_cost
-        await EventCommand.customize_characters(self, guild_id, author, player_info[3], destination_name, destination_link, customized_name, link, flux_remaining, flux_cost)
+        await Event.customize_characters(self, guild_id, author, player_info[3], destination_name, destination_link, customized_name, link, flux_remaining, flux_cost)
         embed = discord.Embed(title=f"{destination_name_pretty} change for {player_info[3]}", description=f"<@{player_info[1]}>'s {player_info[3]} has spent {flux_cost} flux leaving them with {player_info[16] - flux_cost} flux!", colour=discord.Colour.blurple())
         embed.add_field(name=f'**{destination_name_pretty} Information:**', value=f'[{customized_name}](<{link}>)', inline=False)
         cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -2583,7 +2575,7 @@ async def customize(ctx: commands.Context, character_name: str, destination: dis
         template_name = customized_name if destination == 2 else None
         template_link = link if destination == 2 else None
         flux_remaining = player_info[16] - flux_cost
-        await EventCommand.customize_characters(self, guild_id, author, player_info[3], destination_name, destination_link, customized_name, link, flux_remaining, flux_cost)
+        await Event.customize_characters(self, guild_id, author, player_info[3], destination_name, destination_link, customized_name, link, flux_remaining, flux_cost)
         embed = discord.Embed(title=f"{destination_name_pretty} change for {player_info[3]}", description=f"<@{player_info[1]}>'s {player_info[3]} has spent {flux_cost} flux leaving them with {player_info[16] - flux_cost} flux!", colour=discord.Colour.blurple())
         embed.add_field(name=f'**{destination_name_pretty} Information:**', value=f'[{customized_name}](<{link}>)', inline=False)
         cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -2626,17 +2618,17 @@ async def fame_store(ctx: commands.Context, name: str, fame_required: typing.Opt
     cursor.close()
     db.close()
     if item_info is None and modify == 2:
-        await EventCommand.add_fame_store(self, guild_id, author, fame_required, prestige_cost, name, effect, limit)
+        await Event.add_fame_store(self, guild_id, author, fame_required, prestige_cost, name, effect, limit)
         embed = discord.Embed(title=f"New Fame Store Item", description=f'{name} has been added to the fame store!', colour=discord.Colour.blurple())
         embed.add_field(name=f'**Cost:**', value=f'Requires {fame_required} fame, Costs: {prestige_cost} prestige, Limited to {limit}', inline=False)
         embed.add_field(name=f'**Effect:**', value=f'{effect}', inline=False)
         await ctx.response.send_message(embed=embed, ephemeral=True)
     elif item_info is not None and modify == 3:
-        await EventCommand.remove_fame_store(self, guild_id, author, name)
+        await Event.remove_fame_store(self, guild_id, author, name)
         embed = discord.Embed(title=f"Removed Fame Store Item", description=f'{name} has been removed from the fame store!', colour=discord.Colour.blurple())
         await ctx.response.send_message(embed=embed, ephemeral=True)
     elif item_info is not None and modify == 4:
-        await EventCommand.edit_fame_store(self, guild_id, author, fame_required, prestige_cost, name, effect, limit)
+        await Event.edit_fame_store(self, guild_id, author, fame_required, prestige_cost, name, effect, limit)
         embed = discord.Embed(title=f"Edited Fame Store Item", description=f'{name} has been edited in the fame store!', colour=discord.Colour.blurple())
         embed.add_field(name=f'**Cost:**', value=f'Requires {fame_required} fame, Costs: {prestige_cost} prestige, Limited to {limit}', inline=False)
         embed.add_field(name=f'**Effect:**', value=f'{effect}', inline=False)
@@ -2647,7 +2639,7 @@ async def fame_store(ctx: commands.Context, name: str, fame_required: typing.Opt
         cursor.execute(f"""SELECT Fame_Required, Prestige_Cost, Name, Effect, Use_Limit FROM Store_Fame where Name = ?""", (name,))
         item_info = cursor.fetchone()
         if item_info is not None:
-            embed = discord.Embed(title=f'**Fame Required**: {item_info[0]} **Prestige Cost**: {item_info[1]}, **Limit**: {item_info[4]} \r\n **Effect**: {item_info[3]}', colour=discord.Colour.blurple())
+            embed = discord.Embed(title=f'**Fame Required**: {result[0]} **Prestige Cost**: {result[1]}, **Limit**: {result[4]} \r\n **Effect**: {result[3]}', colour=discord.Colour.blurple())
             await ctx.response.send_message(embed=embed)
         else:
             buttons = ["⏪", "⬅", "➡", "⏩"]  # skip to start, left, right, skip to end
@@ -2723,16 +2715,16 @@ async def title_store(ctx: commands.Context, masculine_name: typing.Optional[str
     cursor.close()
     db.close()
     if item_info is None and modify == 1:
-        await EventCommand.add_title_store(self, guild_id, author, ubb_id, effect, fame, masculine_name, feminine_name)
+        await Event.add_title_store(self, guild_id, author, ubb_id, effect, fame, masculine_name, feminine_name)
         embed = discord.Embed(title=f"New Title Store Item", description=f'{masculine_name}/{feminine_name} has been added to the title store!', colour=discord.Colour.blurple())
         embed.add_field(name=f'**description:**', value=f'{effect}', inline=False)
         await ctx.response.send_message(embed=embed, ephemeral=True)
     elif item_info is not None and modify == 2:
-        await EventCommand.remove_title_store(self, guild_id, author, item_info[2], item_info[3], item_info[4])
+        await Event.remove_title_store(self, guild_id, author, item_info[2], item_info[3], item_info[4])
         embed = discord.Embed(title=f"Removed Title Store Item", description=f'{masculine_name}/{feminine_name} has been removed from the title store!', colour=discord.Colour.blurple())
         await ctx.response.send_message(embed=embed, ephemeral=True)
     elif item_info is not None and modify == 3:
-        await EventCommand.edit_title_store(self, guild_id, author, ubb_id, effect, fame, masculine_name, feminine_name)
+        await Event.edit_title_store(self, guild_id, author, ubb_id, effect, fame, masculine_name, feminine_name)
         embed = discord.Embed(title=f"Edited Title Store Item", description=f'{masculine_name}/{feminine_name} has been edited in the title store!', colour=discord.Colour.blurple())
         embed.add_field(name=f'**description:**', value=f'{effect}', inline=False)
         await ctx.response.send_message(embed=embed, ephemeral=True)
@@ -2797,7 +2789,7 @@ async def title_store(ctx: commands.Context, masculine_name: typing.Optional[str
                             embed.add_field(name=f"Title Store Item: {result[3]}/{result[4]}", value=f'**ID**: {result[0]}, **Effect**: {result[1]}, **Rewarded Fame**: {result[2]}', inline=False)
                         await msg.edit(embed=embed)
     else:
-        await ctx.response.send_message(f"you were trying to do the following {modify} modification in the title store, but {masculine_name} was incorrect!", ephemeral=True)
+        await ctx.response.send_message(f"you were trying to do the following {modify} modification in the title store, but {name} was incorrect!", ephemeral=True)
 
 
 @admin.command()
@@ -2870,7 +2862,7 @@ async def claim(ctx: commands.Context, kingdom: str, password: str, settlement: 
     if settlement_result is None and kingdom_result[1] == password:
         status = f"You have claimed {settlement} for your kingdom of {kingdom}"
         await ctx.response.send_message(status)
-        await EventCommand.claim_settlement(self, kingdom, settlement, guild_id, author)
+        await Event.claim_settlement(self, kingdom, settlement, guild_id, author)
 
 
 @settlement.command()
@@ -2895,14 +2887,13 @@ async def destroy(ctx: commands.Context, kingdom: str, password: str, settlement
         await ctx.response.send_message(f'you have submitted an invalid password for {kingdom}')
     elif settlement_result is not None and kingdom_result[1] == password:
         status = f"Your kingdom of {kingdom} has let their control over the settlement of {settlement} lapse."
-        await EventCommand.destroy_settlement(self, kingdom, settlement, guild_id, author)
+        await Event.destroy_settlement(self, kingdom, settlement, guild_id, author)
         await ctx.response.send_message(status)
     elif settlement_result is None:
         status = f"You cannot have {kingdom} make a war crime out of {settlement} if it doesn't exist!"
         await ctx.response.send_message(status)
 
 
-# noinspection PyTypeChecker
 @settlement.command()
 async def modify(ctx: commands.Context, kingdom: str, password: str, old_settlement: str, new_settlement: str):
     """This will modify the name of a settlement by the kingdom owner."""
@@ -2930,7 +2921,7 @@ async def modify(ctx: commands.Context, kingdom: str, password: str, old_settlem
     if result is not None and password == kingdom_result[1]:
         status = f"Congratulations you have changed the settlement from {old_settlement} to {new_settlement}"
         await ctx.response.send_message(status)
-        await EventCommand.modify_settlement(self, kingdom, old_settlement, new_settlement, guild_id, author)
+        await Event.modify_settlement(self, kingdom, old_settlement, new_settlement, guild_id, author)
 
 
 @settlement.command()
@@ -3287,7 +3278,7 @@ async def build(ctx: commands.Context, kingdom: str, password: str, settlement: 
     if blueprint_result is not None and settlement_result is not None and kingdom_result[0] == password:
         status = f"You have built {amount} of {building} within your settlement!"
         await ctx.response.send_message(status)
-        await EventCommand.construct_building(self, kingdom, settlement, building, amount, guild_id, author)
+        await Event.construct_building(self, kingdom, settlement, building, amount, guild_id, author)
 
 
 @buildings.command()
@@ -3318,7 +3309,7 @@ async def destroy(ctx: commands.Context, kingdom: str, password: str, settlement
     else:
         status = f"You have destroyed {amount} of {building} within your settlement of {settlement}!"
         await ctx.response.send_message(status)
-        await EventCommand.destroy_building(self, kingdom, settlement, building, amount, guild_id, author)
+        await Event.destroy_building(self, kingdom, settlement, building, amount, guild_id, author)
 
 
 @leadership.command()
@@ -3440,7 +3431,7 @@ async def modify(ctx: commands.Context, kingdom: str, password: str, leader: str
         embed.add_field(name=f"Leader Focus:", value=f"{kingdom_modifier}", inline=False)
         await msg.edit(embed=embed)
         column = kingdom_modifier
-        await EventCommand.modify_leader(self, kingdom, leader, title, modifier, column, economy_modifier, loyalty_modifier, stability_modifier, guild_id, author)
+        await Event.modify_leader(self, kingdom, leader, title, modifier, column, economy_modifier, loyalty_modifier, stability_modifier, guild_id, author)
     cursor.close()
     db.close()
 
@@ -3468,7 +3459,7 @@ async def remove(ctx: commands.Context, kingdom: str, password: str, title: str)
     if kingdom_results[0] != password:
         await ctx.response.send_message(f"yametikeraSTOP giving me the wrong password for the kingdom of {kingdom}!")
     if leadership_results[0] is not None and kingdom_results[0] == password:
-        await EventCommand.remove_leader(self, kingdom, title, guild_id, author)
+        await Event.remove_leader(self, kingdom, title, guild_id, author)
         await ctx.response.send_message(f"You have removed {leadership_results[0]} from the position of {leadership_results[1]} for {kingdom}")
 
 
@@ -3611,7 +3602,7 @@ async def claim(ctx: commands.Context, kingdom: str, password: str, hex_terrain:
         await ctx.response.send_message(f"you cannot claim hexes of the {hex_terrain} hex terrain! it doesn't exist!")
     if kingdom_results is not None and password == kingdom_results[1] and hex_results is not None:
         status = f"You have claimed a hex for the kingdom of {kingdom}"
-        await EventCommand.claim_hex(self, kingdom, hex_terrain, guild_id, author)
+        await Event.claim_hex(self, kingdom, hex_terrain, guild_id, author)
         await ctx.response.send_message(status)
 
 
@@ -3645,7 +3636,7 @@ async def remove(ctx: commands.Context, kingdom: str, password: str, hex_terrain
         await ctx.response.send_message(f"you do not have any unimproved hexes of the {hex_terrain} hex terrain to release!")
     if kingdom_results is not None and password == kingdom_results[1] and hex_results is not None:
         status = f"You have released a hex from the kingdom of {kingdom}"
-        await EventCommand.relinquish_hex(self, kingdom, hex_terrain, guild_id, author)
+        await Event.relinquish_hex(self, kingdom, hex_terrain, guild_id, author)
         await ctx.response.send_message(status)
 
 
@@ -3680,7 +3671,7 @@ async def improve(ctx: commands.Context, kingdom: str, password: str, hex_terrai
         if kingdom_results is not None and kingdom_results[1] == password:
             if hex_results is not None:
                 status = f"You have built a improvement on a hex for the kingdom of {kingdom}"
-                await EventCommand.improve_hex(self, kingdom, hex_terrain, improvement, guild_id, author)
+                await Event.improve_hex(self, kingdom, hex_terrain, improvement, guild_id, author)
                 await ctx.response.send_message(status)
         if kingdom_results[1] != password:
             await ctx.response.send_message(f"you have specified an incorrect password for the kingdom.")
@@ -3722,7 +3713,7 @@ async def diminish(ctx: commands.Context, kingdom: str, password: str, hex_terra
         await ctx.response.send_message(f"Your password was incorrect for the kingdom of {kingdom}")
     elif kingdom_results is not None and hexes_results is not None and kingdom_results[1] == password:
         status = f"You have removed a improvement on a hex for the kingdom of {kingdom}"
-        await EventCommand.diminish_hex(self, kingdom, hex_terrain, improvement, guild_id, author)
+        await Event.diminish_hex(self, kingdom, hex_terrain, improvement, guild_id, author)
         await ctx.response.send_message(status)
 
 
@@ -3948,8 +3939,8 @@ async def register(ctx: commands.Context, character_name: str, mythweavers: str,
         print(results, results2)
         if results is None and results2 is None:
             int_color = int(color[1:], 16)
-            await EventCommand.stage_character(self, true_character_name, character_name, author, author_id, guild_id, nickname, titles, description, oath_name, mythweavers, image_link, color, backstory)
-            await EventCommand.stg_gold_change(self, guild_id, author, author_id, character_name, starting_gold, starting_gold, 3000, 'Character Creation', 'Character Create')
+            await Event.stage_character(self, true_character_name, character_name, author, author_id, guild_id, nickname, titles, description, oath_name, mythweavers, image_link, color, backstory)
+            await Event.stg_gold_change(self, guild_id, author, author_id, character_name, starting_gold, starting_gold, 3000, 'Character Creation', 'Character Create')
             embed = discord.Embed(title=f"{character_name}", url=f'{mythweavers}', description=f"Other Names: {titles}", color=int_color)
             embed.set_author(name=f'{author}')
             embed.set_thumbnail(url=f'{image_link}')
@@ -3980,7 +3971,7 @@ async def register(ctx: commands.Context, character_name: str, mythweavers: str,
                 embed.add_field(name="Current Flux", value=f'**Flux**: 0')
                 embed.set_footer(text=f'Oops! You used a bad URL, please fix it.')
                 await ctx.response.send_message(embed=embed)
-                await EventCommand.fix_character(self, guild_id, character_name)
+                await Event.fix_character(self, guild_id, character_name)
         else:
             await ctx.response.send_message(f"{character_name} has already been registered by {author}", ephemeral=True)
     else:
@@ -4085,8 +4076,8 @@ async def edit(ctx: commands.Context, name: str, new_character_name: str = None,
                     int_color = int(color[1:], 16)
                     true_name = results[0]
                     if oath_name != results[6]:
-                        await EventCommand.gold_set(self, guild_id, author, author_id, name, gold, gold, gold, 'Oath Change', 'Character Edit', 2)
-                    await EventCommand.edit_stg_character(self, true_name, true_character_name, new_character_name, guild_id, new_nickname, titles, description, oath_name, mythweavers, image_link, color, author)
+                        await Event.gold_set(self, guild_id, author, author_id, name, gold, gold, gold, 'Oath Change', 'Character Edit', 2)
+                    await Event.edit_stg_character(self, true_name, true_character_name, new_character_name, guild_id, new_nickname, titles, description, oath_name, mythweavers, image_link, color, author)
                     embed = discord.Embed(title=f"Edited Character: {new_character_name}", url=f'{mythweavers}', description=f"Other Names: {titles}", color=int_color)
                     embed.set_author(name=f'{author}')
                     embed.set_thumbnail(url=f'{image_link}')
@@ -4165,13 +4156,13 @@ async def edit(ctx: commands.Context, name: str, new_character_name: str = None,
                 true_name = results[0]
                 if oath_name != results[6] and results[8] < 7:
                     if oath == 2:
-                        await EventCommand.gold_set(self, guild_id, author, author_id, name, results[14] / 2, results[15] - results[14] / 2, results[15], 'Oath Change', 'Character Edit', 1)
+                        await Event.gold_set(self, guild_id, author, author_id, name, results[14] / 2, results[15] - results[14] / 2, results[15], 'Oath Change', 'Character Edit', 1)
                     else:
-                        await EventCommand.gold_set(self, guild_id, author, author_id, name, results[14], results[15], results[15], 'Oath Change', 'Character Edit', 1)
+                        await Event.gold_set(self, guild_id, author, author_id, name, results[14], results[15], results[15], 'Oath Change', 'Character Edit', 1)
                 print(f"printing {oath_name}")
-                await EventCommand.edit_character(self, true_name, true_character_name, new_character_name, guild_id, new_nickname, titles, description, oath_name, mythweavers, image_link, color, author)
+                await Event.edit_character(self, true_name, true_character_name, new_character_name, guild_id, new_nickname, titles, description, oath_name, mythweavers, image_link, color, author)
                 if results[23] is not None:
-                    await EventCommand.edit_bio(self, guild_id, new_character_name, None, results[22])
+                    await Event.edit_bio(self, guild_id, new_character_name, None, results[22])
                 cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link, Article_ID FROM Player_Characters where Character_Name = ? or Nickname = ?", (new_character_name, new_nickname))
                 player_info = cursor.fetchone()
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -4258,7 +4249,7 @@ async def retire(ctx: commands.Context, character_name: str):
                     embed = discord.Embed(title=f"{true_character_name} has retired", description=f"Have a pleasant retirement.", colour=discord.Colour.red())
                     await msg.edit(embed=embed)
                     await msg.clear_reactions()
-                    await EventCommand.retire_character(self, guild_id, true_character_name, author)
+                    await Event.retire_character(self, guild_id, true_character_name, author)
                     source = f"Character has retired!"
                     logging_embed = log_embed(results[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, source)
                     logging_thread = guild.get_thread(results[1])
@@ -4312,7 +4303,7 @@ async def levelup(interaction: discord.Interaction, character_name: str, amount:
                                 remaining = current_level[1] + current_level[2] - milestone_total
                                 character_level = current_level[0]
                                 if x+1 == amount or character_level == int_max_level or character_level == personal_cap:
-                                    await EventCommand.adjust_milestones(self, true_character_name, milestone_total, remaining, character_level, guild_id, author)
+                                    await Event.adjust_milestones(self, true_character_name, milestone_total, remaining, character_level, guild_id, author)
                                     await client.delete_inventory_item(guild_id, author_id, item_id[0], used)
                                     mythic_information = mythic_calculation(guild_id, character_level, player_info[11], 0)
                                     tier = 0 if player_info[8] == 0 else mythic_information[0]
@@ -4435,7 +4426,7 @@ async def trialup(interaction: discord.Interaction, character_name: str, amount:
                                 if x+1 == amount or tier == tier_max:
                                     inventory_remaining = inventory_remaining - used
                                     trials_required = current_level[1] + current_level[2] - trial_total
-                                    await EventCommand.adjust_trials(self, character_name, trial_total, guild_id, author)
+                                    await Event.adjust_trials(self, character_name, trial_total, guild_id, author)
                                     await client.delete_inventory_item(guild_id, author_id, item_id[0], used)
                                     cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
                                     accepted_bio_channel = cursor.fetchone()
@@ -4501,7 +4492,7 @@ async def pouch(interaction: discord.Interaction, character_name: str):
                 else:
                     gold = wpl_info[0] - player_info[15]
                     gold_info = gold_calculation(player_info[7], player_info[6], player_info[13], player_info[14], player_info[15], gold)
-                    await EventCommand.gold_change(self, guild_id, author, author_id, true_character_name, gold_info[3], gold_info[3], gold, 'Used Unbelievaboat Pouch', 'Used Unbelievaboat Pouch')
+                    await Event.gold_change(self, guild_id, author, author_id, true_character_name, gold_info[3], gold_info[3], gold, 'Used Unbelievaboat Pouch', 'Used Unbelievaboat Pouch')
                     cursor.execute(f'SELECT MAX(Transaction_ID) FROM A_Audit_Gold Order By Transaction_ID DESC LIMIT 1')
                     transaction_id = cursor.fetchone()
                     cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -4559,7 +4550,7 @@ async def entitle(ctx: commands.Context, character_name: str, title: str, usage:
                         await ctx.response.send_message(f'Unlike a repo-man, you do not need to collect titles. You already have the title {title_information[1]}')
                     else:
                         title_fame = item_id[1] - title_fame
-                        await EventCommand.title_change(self, guild_id, author, author_id, true_character_name, title_name, player_info[27] + title_fame, player_info[30] + title_fame, f'Became the title of {title_name}', 'Used entitle!')
+                        await Event.title_change(self, guild_id, author, author_id, true_character_name, title_name, player_info[27] + title_fame, player_info[30] + title_fame, f'Became the title of {title_name}', 'Used entitle!')
                         cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
                         accepted_bio_channel = cursor.fetchone()
                         bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5], player_info[6], player_info[7], player_info[8], player_info[9], player_info[10], player_info[11], player_info[12], player_info[13], player_info[14], player_info[16], player_info[17], player_info[18], player_info[19], player_info[20], player_info[21], player_info[22], player_info[23], player_info[27], title_name, player_info[30], player_info[31])
@@ -4585,14 +4576,14 @@ async def entitle(ctx: commands.Context, character_name: str, title: str, usage:
             title_information = cursor.fetchone()
             if title_information is not None:
                 title_name = title_information[2] if player_info[27] != title_information[2] else title_information[3]
-                await EventCommand.title_change(self, guild_id, author, author_id, true_character_name, title_name, player_info[27], f'Became the title of {title_name}', 'Used entitle!')
+                await Event.title_change(self, guild_id, author, author_id, true_character_name, title_name, player_info[27], f'Became the title of {title_name}', 'Used entitle!')
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
                 accepted_bio_channel = cursor.fetchone()
                 bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5], player_info[6], player_info[7], player_info[8], player_info[9], player_info[10], player_info[11], player_info[12], player_info[13], player_info[14], player_info[16], player_info[17], player_info[18], player_info[19], player_info[20], player_info[21], player_info[22], player_info[23], player_info[27], title_name, player_info[30], player_info[31])
                 bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
                 bio_message = await bio_channel.fetch_message(player_info[24])
                 await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
-                logging_embed = discord.Embed(title=f"{true_character_name} has changed their title to {title_name}", description=f"{author} has changed their title to {title_name} using {title} from the shop.", colour=discord.Colour.blurple())
+                logging_embed = discord.Embed(title=f"{true_character_name} has changed their title to {title_name}", description=f"{author} has changed their title to {title_name} using {title_fame} fame from the shop.", colour=discord.Colour.blurple())
                 logging_thread = guild.get_thread(player_info[25])
                 await logging_thread.send(embed=logging_embed)
                 await ctx.response.send_message( content=f"you have changed your title to {title_name} for {character_name}.", ephemeral=True)
@@ -4686,7 +4677,7 @@ async def proposition(ctx: commands.Context, character_name: typing.Optional[str
             cursor.execute(f"SELECT Count(Item_name) from A_Audit_Prestige where Author_ID = ? and Character_Name = ? and Item_Name = ? and IsAllowed = ?", (author_id, character_name, name, 1))
             title_information = cursor.fetchone()
             if title_information[0] < item_id[4] and player_info[27] >= item_id[0] and player_info[30] >= item_id[1]:
-                await EventCommand.proposition_open(self, guild_id, author, author_id, player_info[3], item_id[2], item_id[1], 'Attempting to open a proposition', 'Proposition Open!')
+                await Event.proposition_open(self, guild_id, author, author_id, player_info[3], item_id[2], item_id[1], 'Attempting to open a proposition', 'Proposition Open!')
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
                 accepted_bio_channel = cursor.fetchone()
                 cursor.execute(f"Select MAX(Transaction_ID) FROM A_Audit_Prestige WHERE Character_Name = ?", (character_name, ))
@@ -4784,7 +4775,7 @@ async def cap(ctx: commands.Context, character_name: str, level_cap: int):
     cursor.execute(f"""SELECT Character_Name FROM Player_Characters where Player_Name = ? and Character_Name = ? or  Player_Name = ? AND Nickname = ?""", (author, character_name, author, character_name))
     character_info = cursor.fetchone()
     if character_info is not None:
-        await EventCommand.adjust_personal_cap(self, guild_id, author, character_name, level_cap)
+        await Event.adjust_personal_cap(self, guild_id, author, character_name, level_cap)
         await ctx.response.send_message(f"{author} has adjusted the personal cap of {character_name} to {level_cap}.", ephemeral=True)
         cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
         player_info = cursor.fetchone()
@@ -5071,7 +5062,7 @@ async def backstory(ctx: commands.Context, character_name: str, backstory: str, 
             if character_info[1] is not None:
                 await ctx.response.send_message(f"{author} already has a backstory associated with {character_name}. If you wish to edit it, use the Edit Option of this command", ephemeral=True)
             else:
-                await EventCommand.create_bio(self, guild_id, character_info[0], backstory, character_info[2])
+                await Event.create_bio(self, guild_id, character_info[0], backstory, character_info[2])
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
                 accepted_bio_channel = cursor.fetchone()
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
@@ -5090,7 +5081,7 @@ async def backstory(ctx: commands.Context, character_name: str, backstory: str, 
             if character_info[1] is None:
                 await ctx.response.send_message(f"{author} does not have a backstory associated with {character_name}. If you wish to create one, use the Create Option of this command", ephemeral=True)
             else:
-                await EventCommand.edit_bio(self, guild_id, character_info[0], backstory, character_info[1])
+                await Event.edit_bio(self, guild_id, character_info[0], backstory, character_info[1])
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
                 accepted_bio_channel = cursor.fetchone()
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
@@ -5109,7 +5100,7 @@ async def backstory(ctx: commands.Context, character_name: str, backstory: str, 
         cursor.execute(f"""SELECT Character_Name FROM A_STG_Player_Characters where Player_Name = ? and Character_Name = ? or  Player_Name = ? AND Nickname = ?""", (author, character_name, author, character_name))
         character_info = cursor.fetchone()
         if character_info is not None:
-            await EventCommand.edit_stage_bio(self, guild_id, character_info[0], backstory)
+            await Event.edit_stage_bio(self, guild_id, character_info[0], backstory)
         else:
             await ctx.response.send_message(f"{author} does not have a {character_name} registered under this character name or nickname.", ephemeral=True)
 
@@ -5153,7 +5144,7 @@ async def claim(ctx: commands.Context, character_name: str, amount: float, reaso
             await ctx.response.send_message(f"{author} does not have a character named {character_name}")
         else:
             gold_info = gold_calculation(player_info[7], player_info[6], player_info[13], player_info[14], player_info[15], amount)
-            await EventCommand.gold_change(self, guild_id, author, author_id, character_name, gold_info[3], gold_info[3], amount, reason, 'Gold_Claim')
+            await Event.gold_change(self, guild_id, author, author_id, character_name, gold_info[3], gold_info[3], amount, reason, 'Gold_Claim')
             cursor.execute(f'SELECT MAX(Transaction_ID) FROM A_Audit_Gold Order By Transaction_ID DESC LIMIT 1')
             transaction_id = cursor.fetchone()
             cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -5214,7 +5205,7 @@ async def buy(ctx: commands.Context, character_name: str, expenditure: float, ma
                         return
                 expenditure = round(expenditure, 2)
                 market_value_adjusted = round(market_value_adjusted, 2)
-                await EventCommand.gold_change(self, guild_id, author, author_id, character_name, expenditure, market_value_adjusted, market_value_adjusted, reason, 'Gold_Buy')
+                await Event.gold_change(self, guild_id, author, author_id, character_name, expenditure, market_value_adjusted, market_value_adjusted, reason, 'Gold_Buy')
                 cursor.execute(f'SELECT MAX(Transaction_ID) FROM A_Audit_Gold Order By Transaction_ID DESC LIMIT 1')
                 transaction_id = cursor.fetchone()
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -5258,9 +5249,9 @@ async def consume(ctx: commands.Context, character_name: str, consumption: float
             await ctx.response.send_message(f"{ctx.user.name} does not have a character named {character_name}")
         else:
             consumption = -abs(round(consumption,2))
-            if player_info[14] - player_info[13] >= abs(consumption):
+            if player_info[14] - player_info[13] >= abs(expenditure):
                 remaining = round(consumption + player_info[14], 2)
-                await EventCommand.gold_change(self, guild_id, author, author_id, character_name, player_info[13], remaining, player_info[14], reason, 'Gold_Consume')
+                await Event.gold_change(self, guild_id, author, author_id, character_name, player_info[13], remaining, player_info[14], reason, 'Gold_Consume')
                 cursor.execute(f'SELECT MAX(Transaction_ID) FROM A_Audit_Gold Order By Transaction_ID DESC LIMIT 1')
                 transaction_id = cursor.fetchone()
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -5342,10 +5333,10 @@ async def send(ctx: commands.Context, character_from: str, character_to: str, am
                                 print(type(-abs(amount)))
                                 expected_value_adjusted = round(expected_value_adjusted, 2)
                                 amount = round(amount, 2)
-                                await EventCommand.gold_change(self, guild_id, author, author_id, character_from, -abs(amount), expected_value_adjusted, expected_value_adjusted, reason, 'gold send')
+                                await Event.gold_change(self, guild_id, author, author_id, character_from, -abs(amount), expected_value_adjusted, expected_value_adjusted, reason, 'gold send')
                                 cursor.execute(f"Select MAX(Transaction_ID) from A_Audit_Gold order by Transaction_ID desc limit 1")
                                 transaction_id_from = cursor.fetchone()
-                                await EventCommand.gold_change(self, guild_id, send_info[0], send_info[1], send_info[2], amount, amount, amount, reason, 'Gold_Buy')
+                                await Event.gold_change(self, guild_id, send_info[0], send_info[1], send_info[2], amount, amount, amount, reason, 'Gold_Buy')
                                 cursor.execute(f"Select MAX(Transaction_ID) from A_Audit_Gold order by Transaction_ID desc limit 1")
                                 transaction_id_to = cursor.fetchone()
                                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -5365,8 +5356,8 @@ async def send(ctx: commands.Context, character_from: str, character_to: str, am
                                 to_logging_embed = log_embed(send_info[0], author, None, None, None, None, None, None, None, None, send_info[13] + amount, amount, send_info[14] + amount, transaction_id_to[0], None, None, None, None, None, None, None, None, None, None, None, to_source)
                                 to_logging_thread = guild.get_thread(send_info[25])
                                 await to_logging_thread.send(embed=to_logging_embed)
-                                await EventCommand.gold_transact(self, transaction_id_from[0], transaction_id_to[0], guild_id)
-                                await EventCommand.gold_transact(self, transaction_id_to[0], transaction_id_from[0], guild_id)
+                                await Event.gold_transact(self, transaction_id_from[0], transaction_id_to[0], guild_id)
+                                await Event.gold_transact(self, transaction_id_to[0], transaction_id_from[0], guild_id)
                                 embed.set_footer(text=f"Transaction ID was {transaction_id_from[0]}")
                                 await msg.edit(embed=embed)
                                 break
@@ -5469,10 +5460,10 @@ async def help(ctx: commands.Context):
     embed.add_field(name=f'**Join**', value=f'**PLAYER**: join a session using one your characters!', inline=False)
     embed.add_field(name=f'**Leave**', value=f'**PLAYER**: Leave a session that you have joined!', inline=False)
     embed.add_field(name=f'**Display**', value=f'**ALL**: Display the details of a session.', inline=False)
-    embed.add_field(name=f'**Timesheet**', value=f'Use this to create a timesheet for your availability.', inline=False)
+    embed.add_field(name=f'**timesheet**', value=f'Use this to create a timesheet for your availability.', inline=False)
     embed.add_field(name=f'**Request**', value=f'Mark a session request using a character and create a session group.', inline=False)
-    embed.add_field(name=f'**GroupUp**', value=f'Join in a group created by a "request".', inline=False)
-    embed.add_field(name=f'**Requests**', value=f'Display Requests for a specific Group.', inline=False)
+    embed.add_field(name=f'**GroupUp**', value=f'Use this to create a timesheet for your availability.', inline=False)
+    embed.add_field(name=f'**Requests**', value=f'Display Requests or a specific Group.', inline=False)
     embed.add_field(name=f'**Availability**', value=f'Display Availability of a Specific Player on a specific day of the week.', inline=False)
     await ctx.response.send_message(embed=embed)
 
@@ -5505,9 +5496,8 @@ async def proposition(ctx: commands.Context, proposition_id: int, reason: typing
             logging_embed = discord.Embed(title=f"{author} has rejected the proposition!", description=f"Proposition ID: {proposition_id}", color=discord.Colour.red())
             logging_embed.add_field(name=f'Reason:', value=f'{reason}', inline=False)
             logging_thread = guild.get_thread(player_info[0])
-            source = "proposition"
             await logging_thread.send(embed=logging_embed)
-            await EventCommand.proposition_reject(self, guild_id, author, proposition_id, reason, source)
+            await Event.proposition_reject(self, guild_id, author, proposition_id, reason, source)
         await ctx.response.send_message(embed=logging_embed)
     cursor.close()
     db.close()
@@ -5520,27 +5510,28 @@ async def glorify(ctx: commands.Context, character: str, fame: int, prestige: in
     guild_id = ctx.guild_id
     author = ctx.user.name
     guild = ctx.guild
+    acceptance = 1 if acceptance == 1 else acceptance.value
     author_id = ctx.user.id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
+    cursor.execute(f"SELECT Character_Name from A_Audit_Prestige Where Proposition_ID = ?", (proposition_id, ))
     item_id = cursor.fetchone()
     reason = "N/A" if reason is None else reason
     cursor.execute(f"Select Thread_ID, Fame, Prestige from Player_Characters where Character_Name = ?", (item_id[0],))
     player_info = cursor.fetchone()
     if player_info is not None:
         logging_embed = discord.Embed(title=f"{author} has adjusted your fame or prestige!", description=f"**changed fame**: {fame} **changed prestige**: {prestige}", color=discord.Colour.red())
-        logging_embed.add_field(name=f'New Totals:', value=f'**fame**: {fame + player_info[1]}, **prestige**: {prestige + player_info[2]} ', inline=False)
+        embed.add_field(name=f'New Totals:', value=f'**fame**: {fame + player_info[1]}, **prestige**: {prestige + player_info[2]} ', inline=False)
         logging_thread = guild.get_thread(player_info[0])
-        ctx.response.send_message(embed=logging_embed)
         await logging_thread.send(embed=logging_embed)
-        await EventCommand.glorify(self, guild_id, author, character, fame + player_info[1], prestige + player_info[2], reason)
+        await Event.glorify(self, guild_id, author, character, fame + player_info[1], prestige + player_info[2], reason)
     else:
         await ctx.response.send_message(f"Character {character} does not exist!")
     cursor.close()
     db.close()
 
 
-# noinspection PyUnresolvedReferences
+
 @gamemaster.command()
 @app_commands.describe(hammer_time="Please use the plain code hammer time provides that appears like </>, ")
 @app_commands.describe(overflow="Allow for adjust role ranges!")
@@ -5582,7 +5573,7 @@ async def create(interaction: discord.Interaction, session_name: str, session_ra
         date = "<t:" + timing + ":D>"
         hour = "<t:" + timing + ":t>"
         arrival = "<t:" + timing + ":R>"
-    await EventCommand.create_session(self, author, session_name, session_range_name, session_range_id, play_location, timing, game_link, guild_id, author, overview, description, player_limit, overflow, plot)
+    await Event.create_session(self, author, session_name, session_range_name, session_range_id, play_location, timing, game_link, guild_id, author, overview, description, player_limit, overflow, plot)
     sql = f"SELECT Session_ID from Sessions WHERE Session_Name = ? AND GM_Name = ? ORDER BY Session_ID Desc Limit 1"
     val = (session_name, author)
     cursor.execute(sql, val)
@@ -5629,7 +5620,7 @@ async def create(interaction: discord.Interaction, session_name: str, session_ra
         msg = await session_channel.send(content=session_text, embed=embed, allowed_mentions=discord.AllowedMentions(roles=True))
         message = msg.id
         thread = await msg.create_thread(name=f"{info[0]}: {session_name}", auto_archive_duration=60, reason=f"{description}")
-        await EventCommand.create_session_message(self, info[0], message, thread.id, guild_id)
+        await Event.create_session_message(self, info[0], message, thread.id, guild_id)
         await interaction.response.send_message(f"Session created! Session ID: {info[0]}.", ephemeral=True)
         cursor.close()
         db.close()
@@ -5650,7 +5641,7 @@ async def create(interaction: discord.Interaction, session_name: str, session_ra
         thread = await msg.create_thread(name=f"Session name: {session_name} Session ID: {info[0]}", auto_archive_duration=60, reason=f"{description}")
         message = msg.id
         await interaction.response.send_message(f"Session created! Session ID: {info[0]}.", ephemeral=True)
-        await EventCommand.create_session_message(self, {info[0]}, message, thread.id, guild_id)
+        await Event.create_session_message(self, {info[0]}, message, thread.id, guild_id)
         cursor.close()
         db.close()
 
@@ -5759,7 +5750,7 @@ async def edit(interaction: discord.Interaction, session_id: int, session_range:
             session_ranges = f'<@&{session_range_id}>'
             footer_text = f'Session ID: {session_id}. Any level can join.'
         print(footer_text)
-        await EventCommand.edit_session(self, guild_id, author, session_id, session_name, session_range_name, session_range_id, play_location, timing, game_link, overflow)
+        await Event.edit_session(self, guild_id, author, session_id, session_name, session_range_name, session_range_id, play_location, timing, game_link, overflow)
         embed.set_author(name=f'{author}')
         embed.add_field(name="Session Range", value=session_ranges)
         embed.add_field(name="Play Location", value=f'{play_location}')
@@ -5798,7 +5789,7 @@ async def delete(interaction: discord.Interaction, session_id: int):
     info = cursor.fetchone()
     if info is not None:
         embed = discord.Embed(title=f"{info[1]}", description=f"This session has been cancelled.", color=discord.Colour.red())
-        await EventCommand.delete_session(self, session_id, guild_id, author)
+        await Event.delete_session(self, session_id, guild_id, author)
         embed.set_author(name=f'{author}')
         embed.set_footer(text=f'Session ID: {session_id}.')
         cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
@@ -5873,7 +5864,7 @@ async def accept(interaction: discord.Interaction, session_id: int, player_1: ty
                             embed.add_field(name=f'**No Duplicates!**:', value=f" <@{player_1.id}> already has {signups_information[0]} signed up!")
                         else:
                             accepted_characters += 1
-                            await EventCommand.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_1.name, player_1.id, author, player_info[3])
+                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_1.name, player_1.id, author, player_info[3])
                             embed.add_field(name=f'{player_info[0]}', value=f"has been accepted with Player: <@{player_1.id}>!")
                     if player_2 is not None and player_2 != player_1:
                         player_name = player_2.name
@@ -5892,7 +5883,7 @@ async def accept(interaction: discord.Interaction, session_id: int, player_1: ty
                             embed.add_field(name=f'**No Duplicates!**:', value=f" <@{player_2.id}> already has {signups_information[0]} signed up!")
                         else:
                             accepted_characters += 1
-                            await EventCommand.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_2.name, player_2.id, author, player_info[3])
+                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_2.name, player_2.id, author, player_info[3])
                             embed.add_field(name=f'{player_info[0]}', value=f"has been accepted with Player: <@{player_2.id}>!")
                     if player_3 is not None and player_3 != player_1 and player_3 != player_2:
                         player_name = player_3.name
@@ -5911,7 +5902,7 @@ async def accept(interaction: discord.Interaction, session_id: int, player_1: ty
                             embed.add_field(name=f'**No Duplicates!**:', value=f" <@{player_3.id}> already has {signups_information[0]} signed up!")
                         else:
                             accepted_characters += 1
-                            await EventCommand.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_3.name, player_3.id, author, player_info[3])
+                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_3.name, player_3.id, author, player_info[3])
                             embed.add_field(name=f'{player_info[0]}', value=f"has been accepted with Player: <@{player_3.id}>!")
                     if player_4 is not None and player_4 != player_1 and player_4 != player_2 and player_4 != player_3:
                         player_name = player_4.name
@@ -5932,7 +5923,7 @@ async def accept(interaction: discord.Interaction, session_id: int, player_1: ty
                                             value=f" <@{player_4.id}> already has {signups_information[0]} signed up!")
                         else:
                             accepted_characters += 1
-                            await EventCommand.accept_player(self, guild_id, session_info[0], session_id, player_info[0],
+                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0],
                                                       player_info[1], player_info[2], player_4.name, player_4.id, author,
                                                       player_info[3])
                             embed.add_field(name=f'{player_info[0]}',
@@ -5956,7 +5947,7 @@ async def accept(interaction: discord.Interaction, session_id: int, player_1: ty
                                             value=f" <@{player_5.id}> already has {signups_information[0]} signed up!")
                         else:
                             accepted_characters += 1
-                            await EventCommand.accept_player(self, guild_id, session_info[0], session_id, player_info[0],
+                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0],
                                                       player_info[1], player_info[2], player_5.name, player_5.id, author,
                                                       player_info[3])
                             embed.add_field(name=f'{player_info[0]}',
@@ -5980,7 +5971,7 @@ async def accept(interaction: discord.Interaction, session_id: int, player_1: ty
                                             value=f" <@{player_6.id}> already has {signups_information[0]} signed up!")
                         else:
                             accepted_characters += 1
-                            await EventCommand.accept_player(self, guild_id, session_info[0], session_id, player_info[0],
+                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0],
                                                       player_info[1], player_info[2], player_6.name, player_6.id, author,
                                                       player_info[3])
                             embed.add_field(name=f'{player_info[0]}',
@@ -5992,7 +5983,7 @@ async def accept(interaction: discord.Interaction, session_id: int, player_1: ty
                         player_info = cursor.fetchone()
                         if player_info is not None:
                             accepted_characters += 1
-                            await EventCommand.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_info[3], player_info[4], author, player_info[5])
+                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_info[3], player_info[4], author, player_info[5])
                             embed.add_field(name=f'{player_info[0]}', value=f"has been accepted with player: @{player_info[4]}!")
                             mentions += f'<@{player_info[4]}> '
                     if randomizer > 0:
@@ -6007,7 +5998,7 @@ async def accept(interaction: discord.Interaction, session_id: int, player_1: ty
                             player_info = cursor.fetchone()
                             print(x, player_info)
                             if accepted_characters <= 20:
-                                await EventCommand.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_info[3], player_info[4], author, player_info[5])
+                                await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_info[3], player_info[4], author, player_info[5])
                                 embed.add_field(name=f'{player_info[0]}', value=f"has been accepted with player: @{player_info[3]}!")
                                 mentions += f'<@{player_info[4]}> '
                             else:
@@ -6038,7 +6029,7 @@ async def accept(interaction: discord.Interaction, session_id: int, player_1: ty
                                                   color=discord.Colour.green())
                         embed.set_author(name=f'{author}')
                         accepted_characters += 1
-                        await EventCommand.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_info[3], player_info[4], author, player_info[5])
+                        await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_info[3], player_info[4], author, player_info[5])
                         embed.add_field(name=f'{player_info[0]}', value=f"has been accepted with player: @{player_info[4]}!")
                         mentions += f'<@{player_info[4]}> '
                         embed.set_footer(text=f"Session ID: {session_id}")
@@ -6087,7 +6078,7 @@ async def remove(interaction: discord.Interaction, session_id: int, player: disc
             else:
                 player_name = player.name
                 character_name = player_info[1]
-                await EventCommand.remove_player(self, guild_id, session_id, player_name, character_name, author)
+                await Event.remove_player(self, guild_id, session_id, player_name, character_name, author)
                 await interaction.response.send_message(f"{player.name} has been removed from Session {session_info[0]} with ID: {session_id}")
         else:
             cursor.execute(f"SELECT Player_Name, Character_Name, Level, Effective_Gold, Received_Milestones, Received_Trials, Received_Gold, Alt_Reward_Personal, Received_Fame FROM Sessions_Archive WHERE Session_ID = '{session_id}' and Player_Name = '{player.name}'")
@@ -6129,8 +6120,8 @@ async def remove(interaction: discord.Interaction, session_id: int, player: disc
                             milestone_total = player_info[9] - reward_info[4]
                             level_information = level_calculation(guild_id, player_info[9], -abs(reward_info[4]), player_info[29])
                             mythic_information = mythic_calculation(guild_id, player_info[7], player_info[11], -abs(reward_info[5]))
-                            await EventCommand.session_rewards(self, author, guild_id, player_info[2], level_information[0], milestone_total, level_information[1], player_info[16] - session_info[6], mythic_information[0], player_info[11] - reward_info[5], mythic_information[1], player_info[27] - reward_info[8], player[30] - reward_info[8], session_id)
-                            await EventCommand.gold_change(self, guild_id, player_info[0], player_info[1], player_info[2], reward_info[6] * -1, reward_info[6] * -1, session_info[5] * -1, 'Session removing session_reward', 'removing session_reward')
+                            await Event.session_rewards(self, author, guild_id, player_info[2], level_information[0], milestone_total, level_information[1], player_info[16] - session_info[6], mythic_information[0], player_info[11] - reward_info[5], mythic_information[1], player_info[27] - reward_info[8], player[30] - reward_info[8], session_id)
+                            await Event.gold_change(self, guild_id, player_info[0], player_info[1], player_info[2], reward_info[6] * -1, reward_info[6] * -1, session_info[5] * -1, 'Session removing session_reward', 'removing session_reward')
                             bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5], player_info[6], level_information[0], mythic_information[0], player_info[9] + -abs(reward_info[4]), level_information[1], player_info[11] + -abs(reward_info[5]), mythic_information[1], player_info[13] - reward_info[6], player_info[14] - reward_info[6], player_info[16] - session_info[6], player_info[17], player_info[18], player_info[19], player_info[20], player_info[21], player_info[22], player_info[23], player_info[27], player_info[28], player_info[30], player_info[31])
                             bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
                             bio_message = await bio_channel.fetch_message(player_info[24])
@@ -6142,7 +6133,7 @@ async def remove(interaction: discord.Interaction, session_id: int, player: disc
                             await logging_thread.send(embed=logging_embed)
                             cursor.close()
                             db.close()
-                            await EventCommand.remove_player(self, guild_id, session_id, reward_info[0], reward_info[1], author)
+                            await Event.remove_player(self, guild_id, session_id, reward_info[0], reward_info[1], author)
     cursor.close()
     db.close()
 
@@ -6182,7 +6173,7 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
                     significance = 0
                     significance += 1 * easy + 2 * medium + 3 * hard + 4 * deadly + 2 * trials
                     significance = 5 if significance > 5 else significance
-                    await EventCommand.report(self, guild_id, 2, plot, overview, session_id, author, significance)
+                    await Event.report(self, guild_id, 2, plot, overview, session_id, author, significance)
                     cursor.execute(f"""SELECT Article_Link from Sessions where Session_ID = ?""", (session_id,))
                     session_link = cursor.fetchone()
                     embed = discord.Embed(title=f"{session_info[1]}", description=f"Session Report", url=session_link[0], color=discord.Colour.green())
@@ -6277,9 +6268,9 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
                     if awarded_flux != 0:
                         response += f" and {awarded_flux} flux for a total of {flux_total}!"
                     embed.add_field(name=f'**Character**: {player[2]}', value=response)
-                    await EventCommand.session_rewards(self, author, guild_id, player[2], level_info[0], player_info[9] + rewarded, level_info[1], flux_total, mythic_info[0], player_info[11] + trials, mythic_info[1], player_info[27] + fame, player_info[30] + prestige, f"Session {session_id} reward")
-                    await EventCommand.gold_change(self, guild_id, player[0], player[1], player[2], gold_info[3], gold_info[3], gold, 'Session Reward', 'Session Reward')
-                    await EventCommand.session_log_player(self, guild_id, session_id, player_info[0], player_info[1], player_info[2], player[3], player[4], player[5], rewarded, trials, gold_info[3], fame, prestige, awarded_flux)
+                    await Event.session_rewards(self, author, guild_id, player[2], level_info[0], player_info[9] + rewarded, level_info[1], flux_total, mythic_info[0], player_info[11] + trials, mythic_info[1], player_info[27] + fame, player_info[30] + prestige, f"Session {session_id} reward")
+                    await Event.gold_change(self, guild_id, player[0], player[1], player[2], gold_info[3], gold_info[3], gold, 'Session Reward', 'Session Reward')
+                    await Event.session_log_player(self, guild_id, session_id, player_info[0], player_info[1], player_info[2], player[3], player[4], player[5], rewarded, trials, gold_info[3], fame, prestige, awarded_flux)
                     cursor.execute(f'SELECT MAX(Transaction_ID) FROM A_Audit_Gold Order By Transaction_ID DESC LIMIT 1')
                     transaction_id = cursor.fetchone()
                     cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -6327,7 +6318,7 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
                     await reward_thread.send(embed=party_reward_embed)
                 else:
                     reward_thread_id = None
-                await EventCommand.session_log(self, guild_id, session_id, gold, 10, easy, medium, hard, deadly, trials, reward_all, party_reward, reward_msg.id, reward_thread_id, fame, prestige)
+                await Event.session_log(self, guild_id, session_id, gold, 10, easy, medium, hard, deadly, trials, reward_all, party_reward, reward_msg.id, reward_thread_id, fame, prestige)
 
                 cursor.close()
                 db.close()
@@ -6357,7 +6348,7 @@ async def endow(interaction: discord.Interaction, session_id: int, player_1: typ
             if session_player_info is not None:
                 cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?""", (session_player_info[0],))
                 character_info = cursor.fetchone()
-                await EventCommand.session_endowment(self, author, guild_id, session_id, player_1.name, player_1_reward, character_info[0])
+                await Event.session_endowment(self, author, guild_id, session_id, player_1.name, player_1_reward, character_info[0])
                 source = f"Personal reward for Session ID: {session_id}"
                 logging_embed = log_embed(session_player_info[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, player_1_reward, None, None, None, None, source)
                 logging_thread = guild.get_thread(character_info[1])
@@ -6373,7 +6364,7 @@ async def endow(interaction: discord.Interaction, session_id: int, player_1: typ
             if session_player_info is not None:
                 cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?""",(session_player_info[0],))
                 character_info = cursor.fetchone()
-                await EventCommand.session_endowment(self, author, guild_id, session_id, player_2.name, player_2_reward, character_info[0])
+                await Event.session_endowment(self, author, guild_id, session_id, player_2.name, player_2_reward, character_info[0])
                 source = f"Personal reward for Session ID: {session_id}"
                 logging_embed = log_embed(session_player_info[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, player_2_reward, None, None, None, None, source)
                 logging_thread = guild.get_thread(character_info[1])
@@ -6389,7 +6380,7 @@ async def endow(interaction: discord.Interaction, session_id: int, player_1: typ
             if session_player_info is not None:
                 cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?""",(session_player_info[0],))
                 character_info = cursor.fetchone()
-                await EventCommand.session_endowment(self, author, guild_id, session_id, player_3.name, player_3_reward, character_info[0])
+                await Event.session_endowment(self, author, guild_id, session_id, player_3.name, player_3_reward, character_info[0])
                 source = f"Personal reward for Session ID: {session_id}"
                 logging_embed = log_embed(session_player_info[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, player_3_reward, None, None, None, None, source)
                 logging_thread = guild.get_thread(character_info[1])
@@ -6405,7 +6396,7 @@ async def endow(interaction: discord.Interaction, session_id: int, player_1: typ
             if session_player_info is not None:
                 cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?""",(session_player_info[0],))
                 character_info = cursor.fetchone()
-                await EventCommand.session_endowment(self, author, guild_id, session_id, player_4.name, player_4_reward, character_info[0])
+                await Event.session_endowment(self, author, guild_id, session_id, player_4.name, player_4_reward, character_info[0])
                 source = f"Personal reward for Session ID: {session_id}"
                 logging_embed = log_embed(session_player_info[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, player_4_reward, None, None, None, None, source)
                 logging_thread = guild.get_thread(character_info[1])
@@ -6421,7 +6412,7 @@ async def endow(interaction: discord.Interaction, session_id: int, player_1: typ
             if session_player_info is not None:
                 cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?""", (session_player_info[0],))
                 character_info = cursor.fetchone()
-                await EventCommand.session_endowment(self, author, guild_id, session_id, player_5.name, player_5_reward, character_info[0])
+                await Event.session_endowment(self, author, guild_id, session_id, player_5.name, player_5_reward, character_info[0])
                 source = f"Personal reward for Session ID: {session_id}"
                 logging_embed = log_embed(session_player_info[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, player_5_reward, None, None, None, None, source)
                 logging_thread = guild.get_thread(character_info[1])
@@ -6437,7 +6428,7 @@ async def endow(interaction: discord.Interaction, session_id: int, player_1: typ
             if session_player_info is not None:
                 cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?""", (session_player_info[0],))
                 character_info = cursor.fetchone()
-                await EventCommand.session_endowment(self, author, guild_id, session_id, player_6.name, player_6_reward, character_info[0])
+                await Event.session_endowment(self, author, guild_id, session_id, player_6.name, player_6_reward, character_info[0])
                 source = f"Personal reward for Session ID: {session_id}"
                 logging_embed = log_embed(session_player_info[0], author, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, player_6_reward, None, None, None, None, source)
                 logging_thread = guild.get_thread(character_info[1])
@@ -6517,30 +6508,30 @@ async def claim(interaction: discord.Interaction, session_id: int, character_nam
                                 embed = discord.Embed(title=f"Reward Change has occurred!", description=f"Rewards Revoked from {previous_recipient[2]} and claimed for {validate_recipient[2]}.",colour=discord.Colour.red())
                                 await msg.clear_reactions()
                                 await msg.edit(embed=embed)
-                                character_name = previous_rewards[1]
+                                character_name = reward_info[1]
                                 cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Character_Name = ? OR  Nickname = ?", (character_name, character_name))
                                 player_info = cursor.fetchone()
                                 cursor.execute(f'SELECT MAX(Transaction_ID) FROM A_Audit_Gold Order By Transaction_ID DESC LIMIT 1')
                                 transaction_id = cursor.fetchone()
                                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
                                 accepted_bio_channel = cursor.fetchone()
-                                milestone_total = player_info[9] - previous_rewards[4]
-                                level_information = level_calculation(guild_id, player_info[9], -abs(previous_rewards[4]), player_info[29])
-                                mythic_information = mythic_calculation(guild_id, player_info[7], player_info[11], -abs(previous_rewards[5]))
-                                await EventCommand.session_rewards(self, author, guild_id, player_info[2], level_information[0], milestone_total, level_information[1], player_info[16] - session_info[6], mythic_information[0], player_info[11] - previous_rewards[5], mythic_information[1], player_info[28] - previous_rewards[8], session_id)
-                                await EventCommand.gold_change(self, guild_id, player_info[0], player_info[1], player_info[2],previous_rewards[6] * -1, previous_rewards[6] * -1, session_info[5] * -1, 'Session removing session_reward', 'removing session_reward')
-                                bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5], player_info[6], level_information[0], mythic_information[0], player_info[9] + -abs(previous_rewards[4]), level_information[1], player_info[11] + -abs(previous_rewards[5]), mythic_information[1], player_info[13] - previous_rewards[6], player_info[14] - previous_rewards[6], player_info[16] - session_info[6], player_info[17], player_info[18], player_info[19], player_info[20], player_info[21], player_info[22], player_info[23], player_info[27], player_info[28], player_info[30], player_info[31])
+                                milestone_total = player_info[9] - reward_info[4]
+                                level_information = level_calculation(guild_id, player_info[9], -abs(reward_info[4]), player_info[29])
+                                mythic_information = mythic_calculation(guild_id, player_info[7], player_info[11], -abs(reward_info[5]))
+                                await Event.session_rewards(self, author, guild_id, player_info[2], level_information[0], milestone_total, level_information[1], player_info[16] - session_info[6], mythic_information[0], player_info[11] - reward_info[5], mythic_information[1], player_info[28] - reward_info[8], session_id)
+                                await Event.gold_change(self, guild_id, player_info[0], player_info[1], player_info[2],reward_info[6] * -1, reward_info[6] * -1, session_info[5] * -1, 'Session removing session_reward', 'removing session_reward')
+                                bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5], player_info[6], level_information[0], mythic_information[0], player_info[9] + -abs(reward_info[4]), level_information[1], player_info[11] + -abs(reward_info[5]), mythic_information[1], player_info[13] - reward_info[6], player_info[14] - reward_info[6], player_info[16] - session_info[6], player_info[17], player_info[18], player_info[19], player_info[20], player_info[21], player_info[22], player_info[23], player_info[27], player_info[28], player_info[30], player_info[31])
                                 bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
                                 bio_message = await bio_channel.fetch_message(player_info[24])
                                 await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
                                 source = f"Session Reward removed with Session ID: {session_id}"
                                 reward_all = None if session_info[7] is None else f"Removed the following: {session_info[7]}"
-                                logging_embed = log_embed(player_info[2], author, level_information[0], -abs(previous_rewards[4]), player_info[9] + -abs(previous_rewards[4]), level_information[1], mythic_information[0], previous_rewards[5], player_info[11] + -abs(previous_rewards[5]), mythic_information[1], player_info[13] - previous_rewards[6], previous_rewards[5], player_info[14] - previous_rewards[6], transaction_id[0], player_info[16] - session_info[6], -abs(session_info[6]), None, None, None, None, reward_all, None, None, None, None, source)
+                                logging_embed = log_embed(player_info[2], author, level_information[0], -abs(reward_info[4]), player_info[9] + -abs(reward_info[4]), level_information[1], mythic_information[0], reward_info[5], player_info[11] + -abs(reward_info[5]), mythic_information[1], player_info[13] - reward_info[6], reward_info[5], player_info[14] - reward_info[6], transaction_id[0], player_info[16] - session_info[6], -abs(session_info[6]), None, None, None, None, reward_all, None, None, None, None, source)
                                 logging_thread = guild.get_thread(player_info[25])
                                 await logging_thread.send(embed=logging_embed)
                                 cursor.close()
                                 db.close()
-                                await EventCommand.remove_player(self, guild_id, session_id, previous_rewards[0], previous_rewards[1], author)
+                                await Event.remove_player(self, guild_id, session_id, reward_info[0], reward_info[1], author)
                                 db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
                                 cursor = db.cursor()
                                 cursor.execute(f"""SELECT Easy, Medium, Hard, Deadly from AA_Milestones WHERE level = {validate_recipient[6]}""")
@@ -6559,15 +6550,15 @@ async def claim(interaction: discord.Interaction, session_id: int, character_nam
                                 gold_information = gold_calculation(level_information[0], validate_recipient[5], validate_recipient[12], validate_recipient[13], validate_recipient[14], session_info[3])
                                 gold_received = 0 if forego == 3 else gold_information[3]
                                 gold_rewarded = 0 if forego == 3 else session_info[3]
-                                await EventCommand.session_rewards(self, validate_recipient[0], guild_id, character_name, level_information[0], new_milestones, level_information[1], validate_recipient[15] + session_info[4], mythic_information[0], validate_recipient[10] + session_info[9], mythic_information[1], validate_recipient[26] + session_info[10],  session_id)
-                                await EventCommand.gold_change(self, guild_id, validate_recipient[0], validate_recipient[1], character_name, gold_received, gold_received, gold_rewarded, 'Session Added new Claim', 'Session Claim')
+                                await Event.session_rewards(self, validate_recipient[0], guild_id, character_name, level_information[0], new_milestones, level_information[1], validate_recipient[15] + session_info[4], mythic_information[0], validate_recipient[10] + session_info[9], mythic_information[1], validate_recipient[26] + session_info[10],  session_id)
+                                await Event.gold_change(self, guild_id, validate_recipient[0], validate_recipient[1], character_name, gold_received, gold_received, gold_rewarded, 'Session Added new Claim', 'Session Claim')
                                 cursor.execute(f"Select MAX(transaction_id) from A_Audit_Gold")
                                 gold_transaction_id = cursor.fetchone()
                                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
                                 accepted_bio_channel = cursor.fetchone()
                                 cursor.close()
                                 db.close()
-                                await EventCommand.session_log_player(self, guild_id, session_id, validate_recipient[0], validate_recipient[1], validate_recipient[2], validate_recipient[6], validate_recipient[7], validate_recipient[13], rewarded, session_info[9], gold_received, session_info[10])
+                                await Event.session_log_player(self, guild_id, session_id, validate_recipient[0], validate_recipient[1], validate_recipient[2], validate_recipient[6], validate_recipient[7], validate_recipient[13], rewarded, session_info[9], gold_received, session_info[10])
                                 bio_embed = character_embed(validate_recipient[0], validate_recipient[1], validate_recipient[2], validate_recipient[3], validate_recipient[4], validate_recipient[5], level_information[0], mythic_information[0], new_milestones, level_information[1], validate_recipient[10] + session_info[9], mythic_information[1], validate_recipient[12] + gold_received, validate_recipient[13] + gold_received, validate_recipient[15] + session_info[4], validate_recipient[16], validate_recipient[17], validate_recipient[18], validate_recipient[19], validate_recipient[20], validate_recipient[21], validate_recipient[22], validate_recipient[26] + session_info[10], validate_recipient[27], )
                                 bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
                                 bio_message = await bio_channel.fetch_message(validate_recipient[23])
@@ -6614,15 +6605,15 @@ async def claim(interaction: discord.Interaction, session_id: int, character_nam
                 else:
                     flux_multiplier = 1
                 awarded_flux = session_info[4] * flux_multiplier
-                await EventCommand.session_rewards(self, validate_recipient[0], guild_id, character_name, level_information[0], new_milestones, level_information[1], validate_recipient[15] + awarded_flux, mythic_information[0], validate_recipient[10] + session_info[9], mythic_information[1], validate_recipient[26] + session_info[10], validate_recipient[29] +prestige, session_id)
-                await EventCommand.gold_change(self, guild_id, validate_recipient[0], validate_recipient[1], character_name, gold_received, gold_received, gold_rewarded, 'Session Added new Claim', 'Session Claim')
+                await Event.session_rewards(self, validate_recipient[0], guild_id, character_name, level_information[0], new_milestones, level_information[1], validate_recipient[15] + awarded_flux, mythic_information[0], validate_recipient[10] + session_info[9], mythic_information[1], validate_recipient[26] + session_info[10], validate_recipient[29] +prestige, session_id)
+                await Event.gold_change(self, guild_id, validate_recipient[0], validate_recipient[1], character_name, gold_received, gold_received, gold_rewarded, 'Session Added new Claim', 'Session Claim')
                 cursor.execute(f"Select MAX(transaction_id) from A_Audit_Gold")
                 gold_transaction_id = cursor.fetchone()
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
                 accepted_bio_channel = cursor.fetchone()
                 cursor.close()
                 db.close()
-                await EventCommand.session_log_player(self, guild_id, session_id, validate_recipient[0], validate_recipient[1], validate_recipient[2], validate_recipient[6], validate_recipient[7], validate_recipient[13], rewarded, session_info[9], gold_received, session_info[10], prestige, awarded_flux)
+                await Event.session_log_player(self, guild_id, session_id, validate_recipient[0], validate_recipient[1], validate_recipient[2], validate_recipient[6], validate_recipient[7], validate_recipient[13], rewarded, session_info[9], gold_received, session_info[10], prestige, awarded_flux)
                 bio_embed = character_embed(validate_recipient[0], validate_recipient[1], validate_recipient[2], validate_recipient[3], validate_recipient[4], validate_recipient[5], level_information[0], mythic_information[0], new_milestones, level_information[1], validate_recipient[10] + session_info[9], mythic_information[1], validate_recipient[12]+gold_received, validate_recipient[13]+gold_received, validate_recipient[15] + awarded_flux, validate_recipient[16], validate_recipient[17], validate_recipient[18], validate_recipient[19], validate_recipient[20], validate_recipient[21], validate_recipient[22], validate_recipient[26] + session_info[10], validate_recipient[27], validate_recipient[29] + prestige, validate_recipient[30])
                 # cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters WHERE Player_Name = ? AND Character_Name = ? OR Nickname =?", (author, character_name, character_name))
                 # (player_name, player_id, character_name, titles, description, oath, level, tier, milestones, milestones_required, trials, trials_required, gold, effective_gold, flux, color, mythweavers, image_link, tradition_name, tradition_link, template_name, template_link, fame, title, prestige):
@@ -6667,7 +6658,6 @@ async def notify(interaction: discord.Interaction, session_id: int, message: str
     db.close()
 
 
-# noinspection PyUnresolvedReferences
 @gamemaster.command()
 @app_commands.describe(summary="Use a google drive link, or write a summary about the occasion.")
 @app_commands.autocomplete(plot=get_plots)
@@ -6686,14 +6676,14 @@ async def plot(interaction: discord.Interaction, plot: str, summary: str):
         type = 1
         plot_length = len(plot)
         plot_id = plot[2:plot_length]
-        await EventCommand.plot(self, guild_id, type, plot_id, summary, author)
+        await Event.plot(self, guild_id, type, plot_id, summary, author)
 
         await interaction.followup.send(f"Plot {plot_id} has been edited")
     elif plot[:2] == '2-':
         type = 2
         plot_length = len(plot)
         plot_name = plot[2:plot_length]
-        await EventCommand.plot(self, guild_id, type, plot_name, summary, author)
+        await Event.plot(self, guild_id, type, plot_name, summary, author)
         await interaction.followup.send(f"Plot {plot_name} has been created.")
     else:
         await interaction.followup.send(f"Please select a choice from the menu.")
@@ -6743,21 +6733,21 @@ async def report(interaction: discord.Interaction, session_id: int, summary: str
             print(f"significance is {significance}")
             significance = 5 if significance > 5 else significance
             print(f"2 significance is {significance}")
-            await EventCommand.report(self, guild_id, event_type, plot, summary, session_id, author, significance)
+            await Event.report(self, guild_id, event_type, plot, summary, session_id, author, significance)
             cursor.execute(f"Select Session_ID, Session_Name, Article_Link, Article_ID, Related_Plot from Sessions where Session_ID = ? and IsActive = 0", (session_id,))
             session_info = cursor.fetchone()
-            wa_update_channel = await bot.fetch_channel(1032422764168106134)
+            wa_update_channel = await bot.fetch_channel('1032422764168106134')
             await wa_update_channel.send(f"Session Report for [{session_info[1]}](<{session_info[2]}>) has been created.")
             await interaction.followup.send(f"Session Report for [{session_info[1]}](<{session_info[2]}>) has been created.")
         else:
             event_type = 1
             significance = 0
-            await EventCommand.report(self, guild_id, event_type, plot, summary, session_id, author, significance)
+            await Event.report(self, guild_id, event_type, plot, summary, session_id, author, significance)
             cursor.execute(f"Select Session_ID, Session_Name, Article_Link, Article_ID, Related_Plot from Sessions where Session_ID = ? and IsActive = 0", (session_id,))
             session_info = cursor.fetchone()
             print(significance)
             await interaction.followup.send(f"Session Report for [{session_info[1]}](<{session_info[2]}>) has been edited.")
-            wa_update_channel = await bot.fetch_channel(1032422764168106134)
+            wa_update_channel = await bot.fetch_channel('1032422764168106134')
             await wa_update_channel.send(f"Session Report for [{session_info[1]}](<{session_info[2]}>) has been edited.")
             await wa_update_channel.send(f"Session Report for [{session_info[1]}](<{session_info[2]}>) has been edited.")
     cursor.close()
@@ -6784,7 +6774,7 @@ async def report(interaction: discord.Interaction, session_id: int, summary: str
     if session_info is None:
         await interaction.response.send_message(f"No completed Session with ID {session_id} could be found!")
     else:
-        await EventCommand.session_report(self, guild_id,  summary, session_id, character_name, author)
+        await Event.session_report(self, guild_id,  summary, session_id, character_name, author)
         cursor.execute(f"Select Session_ID, Session_Name, Article_Link, Article_ID, Related_Plot from Sessions where Session_ID = ? and IsActive = 0", (session_id,))
         session_info = cursor.fetchone()
         await interaction.response.send_message(f"Session Report for [{session_info[1]}](<{session_info[2]}>) has been added to!")
@@ -6828,7 +6818,7 @@ async def join(interaction: discord.Interaction, session_id: int, character_name
                     cursor.execute(f"""Select Character_Name from Sessions_Signups where Player_name = '{author}' AND Session_ID = {session_id}""")
                     signups = cursor.fetchone()
                     if participation is None and signups is None:
-                        await EventCommand.session_join(self, guild_id, session_info[0], session_id, author, author_id, character_info[0], character_info[1], character_info[2], character_info[3])
+                        await Event.session_join(self, guild_id, session_info[0], session_id, author, author_id, character_info[0], character_info[1], character_info[2], character_info[3])
                         sql = f"""Select Character_Name, Nickname, Titles, Description, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Color, Mythweavers, Image_Link, Flux, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Gold_Value, Oath from Player_characters WHERE Character_Name = ? OR Nickname = ?"""
                         val = (character_name, character_name)
                         cursor.execute(sql, val)
@@ -6902,7 +6892,7 @@ async def join(interaction: discord.Interaction, session_id: int, character_name
                         cursor.execute(f"""Select Character_Name from Sessions_Signups where Player_name = '{author}' and Session_ID = {session_id}""")
                         signups = cursor.fetchone()
                         if participation is None and signups is None:
-                            await EventCommand.session_join(self, guild_id, session_info[0], session_id, author, author_id, character_info[0], character_info[1], character_info[2], character_info[3])
+                            await Event.session_join(self, guild_id, session_info[0], session_id, author, author_id, character_info[0], character_info[1], character_info[2], character_info[3])
                             sql = f"""Select True_Character_Name, Nickname, Titles, Description, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Color, Mythweavers, Image_Link, Flux, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Gold_Value, Oath from Player_characters WHERE Character_Name = ? OR Nickname = ?"""
                             val = (character_name, character_name)
                             cursor.execute(sql, val)
@@ -6972,13 +6962,13 @@ async def leave(interaction: discord.Interaction, session_id: int):
                 true_name = character_info[0]
                 cursor.close()
                 db.close()
-                await EventCommand.session_leave(self, guild_id, session_id, author, true_name)
+                await Event.session_leave(self, guild_id, session_id, author, true_name)
                 await interaction.response.send_message(f"{author}'s {true_name} has decided against participating in the session of '{session_info[0]}!'")
         elif character_info is not None:
             true_name = character_info[0]
             cursor.close()
             db.close()
-            await EventCommand.session_leave(self, guild_id, session_id, author, true_name)
+            await Event.session_leave(self, guild_id, session_id, author, true_name)
             await interaction.response.send_message(f"{author}'s {true_name} has decided against participating in the session of '{session_info[0]}!'")
 
 
@@ -7103,7 +7093,7 @@ async def timesheet(ctx: commands.Context, day: discord.app_commands.Choice[int]
         db.close()
         return
     if change > 2:
-        # await EventCommand.clear_timesheet(self, guild_id, change, day, ctx.user.name)
+        await Event.clear_timesheet(self, guild_id, change, day, ctx.user.name)
         if change == 3:
             embed = discord.Embed(title=f"Time Sheet Update", description=f'{ctx.user.name} has cleared availability on {day}!', colour=discord.Colour.green())
             await ctx.response.send_message(embed=embed)
@@ -7117,18 +7107,8 @@ async def timesheet(ctx: commands.Context, day: discord.app_commands.Choice[int]
         db.close()
         return
     if len(start_time) != 5 or len(end_time) != 5:
-        if len(start_time) == 4 or len(end_time) == 4:
-            try:
-                if len(start_time) == 4:
-                    start_time = datetime.strptime(start_time, "%H:%M").strftime("%H:%M")
-                if len(end_time) == 4:
-                    end_time = datetime.strptime(end_time, "%H:%M").strftime("%H:%M")
-            except:
-                embed = discord.Embed(title=f"Time Error", description=f'{start_time} or {end_time} is not a valid time!', colour=discord.Colour.red())
-                await ctx.response.send_message(embed=embed)
-        else:
-            embed = discord.Embed(title=f"Time Error", description=f'{start_time} or {end_time} is not a valid time!', colour=discord.Colour.red())
-            await ctx.response.send_message(embed=embed)
+        embed = discord.Embed(title=f"Time Error", description=f'{start_time} or {end_time} is not a valid time!', colour=discord.Colour.red())
+        await ctx.response.send_message(embed=embed)
         cursor.close()
         db.close()
         return
@@ -7162,35 +7142,25 @@ async def timesheet(ctx: commands.Context, day: discord.app_commands.Choice[int]
         return
     start_day = adjust_day(day_value, start_hours, utc_offset)
     end_day = adjust_day(day_value, end_hours, utc_offset)
-    print(utc_offset)
-    start_hours =int(start_hours) - utc_offset if int(start_hours) + utc_offset >= 0 else 24 + (int(start_hours) - utc_offset)
-    print(f"I AM END HOURS {end_hours}")
-    end_hours = int(end_hours) - utc_offset if int(end_hours) + utc_offset >= 0 else 24 + (int(end_hours) - utc_offset)
-    print(f"I AM END HOURS {end_hours}")
+    start_hours =int(start_hours) + utc_offset if int(start_hours) + utc_offset >= 0 else 24 + (int(start_hours) + utc_offset)
+    end_hours = int(end_hours) + utc_offset if int(end_hours) + utc_offset >= 0 else 24 + (int(end_hours) + utc_offset)
     start_hours = int(start_hours) if int(start_hours) < 24 else int(start_hours) - 24
     end_hours = int(end_hours) if int(end_hours) < 24 else int(end_hours) - 24
-    print(f"I AM END HOURS {end_hours}")
-    cursor.close()
-    db.close()
-    validation = await EventCommand.timesheet(self, guild_id, ctx.user.name, utc_offset, start_day, start_hours, start_minutes, end_day, end_hours, end_minutes, change)
-    print(validation)
-    if validation == 0:
-        embed = discord.Embed(title=f"Time Sheet Error", description=f'This command failed!!', colour=discord.Colour.red())
+    await Event.timesheet(self, guild_id, ctx.user.name, utc_offset, start_day, start_hours, start_minutes, end_day, end_hours, end_minutes, change)
+    if change == 1:
+        embed = discord.Embed(title=f"Time Sheet Update", description=f'{ctx.user.name} has added availability from {start_time} to {end_time} on {day}!', colour=discord.Colour.green())
         await ctx.response.send_message(embed=embed)
     else:
-        if change == 1:
-            embed = discord.Embed(title=f"Time Sheet Update", description=f'{ctx.user.name} has added availability from {start_time} to {end_time} on {day}!', colour=discord.Colour.green())
-            await ctx.response.send_message(embed=embed)
-        else:
-            embed = discord.Embed(title=f"Time Sheet Update", description=f'{ctx.user.name} has removed availability from {start_time} to {end_time} on {day}!', colour=discord.Colour.green())
-            await ctx.response.send_message(embed=embed)
-
+        embed = discord.Embed(title=f"Time Sheet Update", description=f'{ctx.user.name} has removed availability from {start_time} to {end_time} on {day}!', colour=discord.Colour.green())
+        await ctx.response.send_message(embed=embed)
+    cursor.close()
+    db.close()
 
 @player.command()
 @app_commands.autocomplete(character_name=own_character_select_autocompletion)
 @app_commands.describe(choice="Add or remove a session request, you can only host 1 request at a time.")
 @app_commands.choices(choice=[discord.app_commands.Choice(name='Add', value=1), discord.app_commands.Choice(name='Remove', value=2)])
-async def request(ctx: commands.Context, character_name: str, group_name: str, description: str, choice: discord.app_commands.Choice[int] = 1):
+async def request(ctx: commands.Context, session_id: int, character_name: str, group_name: str, choice: discord.app_commands.Choice[int] = 1):
     """Open a session Request"""
     guild_id = ctx.guild.id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -7204,36 +7174,27 @@ async def request(ctx: commands.Context, character_name: str, group_name: str, d
     if player_info is not None and choice == 1:
         cursor.execute(f"select group_id from Sessions_Group where Host = ?", (ctx.user.name,))
         group_info = cursor.fetchone()
-        print(group_info)
-        if group_info is not None:
-            embed = discord.Embed(title=f"Group Request Error",
-                                  description=f'{ctx.user.name} is already hosting a group!',
-                                  colour=discord.Colour.red())
+        if group_info is None:
+            await Event.group_request(self, guild_id, ctx.user.name, character_name, group_name, choice)
+            embed = discord.Embed(title=f"Group Request", description=f'{ctx.user.name} has added a group request!', colour=discord.Colour.green())
         else:
-            cursor.close()
-            db.close()
-            await EventCommand.group_request(self, guild_id, ctx.user.name, character_name, group_name, choice, description)
-            embed = discord.Embed(title=f"Group Request", description=f'{ctx.user.name} has added a group request!',
-                                  colour=discord.Colour.green())
-
+            embed = discord.Embed(title=f"Group Request Error", description=f'{ctx.user.name} is already hosting a group!', colour=discord.Colour.red())
         await ctx.response.send_message(embed=embed)
     else:
         if choice == 2:
             cursor.execute(f"select group_id from Sessions_Group where Host = ?", (ctx.user.name,))
             group_info = cursor.fetchone()
-            print(group_info)
             if group_info is not None:
-                cursor.close()
-                db.close()
-                await EventCommand.group_request(self, guild_id, ctx.user.name, character_name, group_name, choice, description)
+                await Event.group_request(self, guild_id, ctx.user.name, character_name, group_name, choice)
                 embed = discord.Embed(title=f"Group Request", description=f'{ctx.user.name} has removed their group request!', colour=discord.Colour.green())
             else:
                 embed = discord.Embed(title=f"Group Request Error", description=f'{ctx.user.name} could not be found to be hosting a group!', colour=discord.Colour.red())
-            await ctx.response.send_message(embed=embed)
         else:
             embed = discord.Embed(title=f"No characters with that name under this player found.")
-            await ctx.response.send_message(embed=embed)
+        await ctx.response.send_message(embed=embed)
 
+    cursor.close()
+    db.close()
 
 @player.command()
 @app_commands.autocomplete(character_name=own_character_select_autocompletion)
@@ -7260,10 +7221,8 @@ async def groupup(ctx: commands.Context, group_id: int, character_name: str, cho
         else:
             cursor.execute(f"select character_name from player_characters where player_name = ? and character_name = ? OR Nickname = ? and player_name = ?", (ctx.user.name, character_name, character_name, ctx.user.name))
             player_info = cursor.fetchone()
-            cursor.close()
-            db.close()
             if player_info is not None:
-                await EventCommand.group_join(self, guild_id, group_id, ctx.user.name, character_name, choice)
+                await Event.group_join(self, guild_id, group_id, ctx.user.name, character_name, choice)
                 embed = discord.Embed(title=f"Group Request", description=f'{ctx.user.name} has joined group {group_id}!', colour=discord.Colour.green())
                 await ctx.response.send_message(embed=embed)
             else:
@@ -7281,16 +7240,15 @@ async def groupup(ctx: commands.Context, group_id: int, character_name: str, cho
         else:
             cursor.execute(f"select character_name from player_characters where player_name = ? and character_name = ? OR Nickname = ? and player_name = ?", (ctx.user.name, character_name, character_name, ctx.user.name))
             player_info = cursor.fetchone()
-            cursor.close()
-            db.close()
             if player_info is not None:
-                await EventCommand.group_join(self, guild_id, group_id, ctx.user.name, character_name, choice)
+                await Event.group_join(self, guild_id, group_id, ctx.user.name, character_name, choice)
                 embed = discord.Embed(title=f"Group Request", description=f'{ctx.user.name} has left group {group_id}!', colour=discord.Colour.green())
                 await ctx.response.send_message(embed=embed)
             else:
                 embed = discord.Embed(title=f"No characters with that name under this player found.")
                 await ctx.response.send_message(embed=embed)
-
+    cursor.close()
+    db.close()
 
 
 
@@ -7315,11 +7273,10 @@ async def availability(ctx: commands.Context, player: typing.Optional[discord.Me
     else:
         player = ctx.user.name if player is None else player.name
         current_page = day
-        await create_timecard_plot(guild_id, player, day_value)
-        print(f"where am I?")
-        with open('C:\\Pathparser\\plots\\timecard_plot.png', 'rb') as f:
+        create_timecard_plot(player, day_value)
+        with open('timecard_plot.png', 'rb') as f:
             picture = discord.File(f)
-            await ctx.response.send_message(f"Here's the availability chart for {player} on {day.name}:", file=picture)
+            await ctx.send(f"Here's the availability chart for {player} on {day.name}:", file=picture)
     cursor.close()
     db.close()
 
@@ -7343,23 +7300,18 @@ async def requests(ctx: commands.Context, day: discord.app_commands.Choice[int],
     else:
         if group_id == 0:
             buttons = ["⏪", "⬅", "➡", "⏩"]  # skip to start, left, right, skip to end
-            cursor.execute(f"""SELECT COUNT(Player_Name) FROM Sessions_Presign""")
+            cursor.execute(f"""SELECT COUNT(Name) FROM Store_Fame""")
             admin_count = cursor.fetchone()
-            max_page = math.ceil(admin_count[0] / 10)
+            max_page = math.ceil(admin_count[0] / 20)
             current_page = 1
-            low = 1 + ((current_page - 1) * 10)
-            high = 20 + ((current_page - 1) * 10)
-            cursor.execute(f"""SELECT Group_ID, Group_Name, Host, Created_date, Description from Sessions_Group WHERE ROWID BETWEEN {low} and {high}""")
+            low = 1 + ((current_page - 1) * 20)
+            high = 20 + ((current_page - 1) * 20)
+            cursor.execute(
+                f"""SELECT Fame_Required, Prestige_Cost, Name, Effect, Use_Limit from Store_Fame WHERE ROWID BETWEEN {low} and {high}""")
             pull = cursor.fetchall()
-            embed = discord.Embed(title=f"Group Request Settings Page {current_page}", description=f'This a list of groups that have requested a session', colour=discord.Colour.blurple())
+            embed = discord.Embed(title=f"Fame Store Settings Page {current_page}", description=f'This is a list of the administratively defined items', colour=discord.Colour.blurple())
             for result in pull:
-                embed.add_field(name=f'**Group Name**: {result[1]}', value=f'**Host Name**: {result[2]} **Request Date:**: {result[3]}, \r\n **Description**: {result[4]}', inline=False)
-                cursor.execute(f"""SELECT Player_Name, Character_Name from Sessions_Presign WHERE group_id = {result[0]}""")
-                presigns = cursor.fetchall()
-                player_list = "Group Members: \r\n"
-                for presign in presigns:
-                    player_list += f"**{presign[0]}**: {presign[1]} \r\n"
-                embed.add_field(name=f'**Group Members**', value=player_list, inline=False)
+                embed.add_field(name=f'**Name**: {result[2]}', value=f'**Fame Required**: {result[0]} **Prestige Cost**: {result[1]}, **Limit**: {result[4]} \r\n **Effect**: {result[3]}', inline=False)
             await ctx.response.send_message(embed=embed)
             msg = await ctx.original_response()
             for button in buttons:
@@ -7395,27 +7347,14 @@ async def requests(ctx: commands.Context, day: discord.app_commands.Choice[int],
                     for button in buttons:
                         await msg.remove_reaction(button, ctx.user)
                     if current_page != previous_page:
-                        cursor.execute(
-                            f"""SELECT Group_ID, Group_Name, Host, Created_date, Description from Sessions_Group WHERE ROWID BETWEEN {low} and {high}""")
+                        cursor.execute(f"""SELECT Fame_Required, Prestige_Cost, Name, Effect, Use_Limit from Store_Fame WHERE ROWID BETWEEN {low} and {high}""")
                         pull = cursor.fetchall()
-                        embed = discord.Embed(title=f"Group Request Settings Page {current_page}",
-                                              description=f'This a list of groups that have requested a session',
-                                              colour=discord.Colour.blurple())
+                        embed = discord.Embed(title=f"Fame Store Settings Page {current_page}", description=f'This is a list of the administratively defined items', colour=discord.Colour.blurple())
                         for result in pull:
-                            embed.add_field(name=f'**Group Name**: {result[1]}',
-                                            value=f'**Host Name**: {result[2]} **Request Date:**: {result[3]}, \r\n **Description**: {result[4]}',
-                                            inline=False)
-                            cursor.execute(
-                                f"""SELECT Player_Name, Character_Name from Sessions_Presign WHERE group_id = {result[0]}""")
-                            presigns = cursor.fetchall()
-                            player_list = "Group Members: \r\n"
-                            for presign in presigns:
-                                player_list += f"**{presign[0]}**: {presign[1]} \r\n"
-                            embed.add_field(name=f'**Group Members**', value=player_list, inline=False)
+                            embed.add_field(name=f'**Name**: {result[2]}', value=f'**Fame Required**: {result[0]} **Prestige Cost**: {result[1]}, **Limit**: {result[4]} \r\n **Effect**: {result[3]}', inline=False)
                         await msg.edit(embed=embed)
                         cursor.close()
         else:
-            #Specific Group Specified
             cursor.execute(f"Select Group_ID from Sessions_Group where Group_ID = ?", (group_id,))
             group_base = cursor.fetchone()
             if group_base is not None:
@@ -7423,34 +7362,9 @@ async def requests(ctx: commands.Context, day: discord.app_commands.Choice[int],
                 group_info = cursor.fetchall()
                 embed = discord.Embed(title=f"Group Request {group_id}", description=f'This is a list of the players in the group', colour=discord.Colour.blurple())
                 timecard_info = []
-                cursor.execute(f'select "UTC_Offset" from player_timecard where Player_Name = {ctx.user.name}')
+                cursor.execute(f'select "UTC_Offset" from player_timecard where Player_Name = {result[2]}')
                 author_timecard_info = cursor.fetchone()
-                if author_timecard_info is not None:
-                    utc_offset = author_timecard_info[0]
-                else:
-                    utc_offset = 0
                 for result in group_info:
-                    time_columns = [
-                        "00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30",
-                        "04:00", "04:30", "05:00", "05:30", "06:00", "06:30", "07:00", "07:30",
-                        "08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
-                        "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
-                        "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30",
-                        "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
-                    ]
-                    if utc_offset > 0:
-                        columns_to_nullify = []
-                        for col in time_columns:
-                            col_minutes = time_to_minutes(col)
-                            if col_minutes >= start_minutes or col_minutes <= 1440:
-                                columns_to_nullify.append(f'"{col}" = NULL')
-                        # Build the SQL query dynamically
-                        set_clause = ', '.join(columns_to_nullify)
-                        
-                    elif utc_offset < 0:
-                        ...    
-                    else: 
-                        ...
                     cursor.execute(f'select "Player_Name", "UTC_Offset", "Day", "00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30", "04:00", "04:30", "05:00", "05:30", "06:00", "06:30", "07:00", "07:30", "08:00", "08:30", "09:00", "09:30", "10:00", "10:30",  "11:00", "11:30", "12:00", "12:30",  "13:00", "13:30", "14:00", "14:30",  "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30" from player_timecard where Player_Name = {result[2]} and day = {day_value}')
                     player_timecard_info = cursor.fetchone()
                     if player_timecard_info is not None:
@@ -7477,7 +7391,7 @@ async def questify(ctx: commands.Context, group_id: int):
     cursor.execute(f"Select Group_ID from Sessions_Group where Group_ID = ?", (group_id,))
     group_base = cursor.fetchone()
     if group_base is not None:
-        await EventCommand.clear_group(self, guild_id, group_id)
+        await Event.clear_group(self, guild_id, group_id)
         embed = discord.Embed(title=f"Group Request {group_id}", description=f'Group {group_id} has been deleted!', colour=discord.Colour.green())
         await ctx.response.send_message(embed=embed)
     else:
@@ -7574,6 +7488,7 @@ async def display(ctx: commands.Context, session_id: int, group: discord.app_com
 @bot.tree.command(name="test", description="testing")
 async def self(interaction: discord.Interaction):
     name = interaction.user
+
     await interaction.response.send_message(f"Hello {name}! I was made by a fucking idiot")
 
 
@@ -7633,4 +7548,4 @@ async def multiline_command(ctx):
 async def on_disconnect():
     print("Bot is disconnecting.")
 
-bot.run(os.getenv('DISCORD_TOKEN'))
+bot.run(os.getenv('DISCORD_TOKEN_V2'))

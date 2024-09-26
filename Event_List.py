@@ -6,6 +6,7 @@ import os
 from pywaclient.api import BoromirApiClient as WaClient
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+import aiosqlite
 os.chdir("C:\\pathparser")
 
 
@@ -29,7 +30,7 @@ def time_to_minutes(t):
     hours, minutes = map(int, t.split(':'))
     return hours * 60 + minutes
 
-class Event(commands.Cog):
+class Mangaged_events(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
@@ -922,7 +923,7 @@ class Event(commands.Cog):
         val = (new_prestige, rejected_item[0])
         cursor.execute(sql, val)
         sql = "INSERT INTO A_Audit_All(Author, Timestamp, Database_Changed, Modification, Amount, Reason) VALUES(?, ?, ?, ?, ?)"
-        val = (author, time, 'A_Audit_Prestige', source, prestige_cost, reason)
+        val = (author, time, 'A_Audit_Prestige', source, rejected_item[2], reason)
         cursor.execute(sql, val)
         db.commit()
         cursor.close()
@@ -2018,129 +2019,155 @@ class Event(commands.Cog):
         cursor.close()
         db.close()
 
+
     async def timesheet(self, guild_id, author, utc_offset, start_day, start_hours, start_minutes, end_day, end_hours, end_minutes, change):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
-        time_columns = [
-            "00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30",
-            "04:00", "04:30", "05:00", "05:30", "06:00", "06:30", "07:00", "07:30",
-            "08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
-            "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
-            "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30",
-            "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
-        ]
-        columns_to_nullify = []
-        start_minutes = start_hours * 60 + start_minutes + utc_offset * 60
-        end_minutes = end_hours * 60 + end_minutes + utc_offset * 60
-        cursor.execute(f"select count(player_name) from Player_Timecard where player_name = ?", (author,))
-        player_exists = cursor.fetchone()
-        if player_exists[0] != 7:
-            print(player_exists[0])
-            if player_exists[0] > 0:
-                cursor.execute(f"DELETE from Player_Timecard where Player_Name = ?", (author,))
+        try:
+            time_columns = [
+                "00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30",
+                "04:00", "04:30", "05:00", "05:30", "06:00", "06:30", "07:00", "07:30",
+                "08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
+                "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
+                "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30",
+                "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
+            ]
+            columns_to_nullify = []
+            start_minutes = start_hours * 60 + start_minutes
+            end_minutes = end_hours * 60 + end_minutes
+            cursor.execute("SELECT COUNT(player_name) FROM Player_Timecard WHERE player_name = ?", (author,))
+            player_exists = cursor.fetchone()
+            print(player_exists)
+            print(author)
+            validation = 1
+            if player_exists[0] != 7:
+                print(player_exists[0])
+                # Uncomment and adjust the following lines if needed
+                # if player_exists[0] > 0:
+                #     cursor.execute("DELETE FROM Player_Timecard WHERE Player_Name = ?", (author,))
+                #     db.commit()
+                x = 1
+                entries = [] # List to store the entries to insert
+                while x < 8:
+                    entries.append((author, x))
+                    x += 1
+                cursor.executemany("INSERT INTO Player_Timecard(Player_Name, Day) VALUES(?, ?)", entries)
+                print(x)
+                db.commit()
+                validation = 1
+            if validation == 1:
+                if change == 1:
+                    print("adding")
+                    # START DAY IS START DAY IN UTC TIME
+                    if start_day == end_day:
+                        for col in time_columns:
+                            col_minutes = time_to_minutes(col)
+                            if col_minutes >= start_minutes and col_minutes <= end_minutes:
+                                columns_to_nullify.append(f'"{col}" = 1')
+                        # Build the SQL query dynamically
+                        set_clause = ', '.join(columns_to_nullify)
+                        print(set_clause)
+                        query = f"""
+                                        UPDATE Player_Timecard
+                                        SET {set_clause}
+                                        WHERE Player_Name = ? AND Day = ?;
+                                    """
+                        # Execute the query
+                        cursor.execute(query, (author, start_day))
+                        print(f"ran query")
+                        db.commit()
+                        cursor.execute(f"UPDATE Player_Timecard SET utc_offset = ? WHERE Player_Name = ?",(utc_offset, author))
+                    # START DAY IS NOT START DAY IN UTC TIME
+                    else:
+                        for col in time_columns:
+                            col_minutes = time_to_minutes(col)
+                            if start_minutes <= col_minutes <= 1440:
+                                columns_to_nullify.append(f'"{col}" = 1')
+                        # Build the SQL query dynamically
+                        set_clause = ', '.join(columns_to_nullify)
+                        print(set_clause)
+                        print(author, end_day, start_day)
+                        query = f"""
+                                        UPDATE Player_Timecard
+                                        SET {set_clause}
+                                        WHERE Player_Name = ? AND Day = ?;
+                                    """
+                        print(query)
+                        cursor.execute(query, (author, start_day))
+                        print("execution successful")
+                        columns_to_nullify = []
+                        for col in time_columns:
+                            print(end_minutes)
+                            col_minutes = time_to_minutes(col)
+                            if 0 <= col_minutes <= end_minutes:
+                                columns_to_nullify.append(f'"{col}" = 1')
+                        # Build the SQL query dynamically
+                        set_clause = ', '.join(columns_to_nullify)
+                        query = f"""
+                                        UPDATE Player_Timecard
+                                        SET {set_clause}
+                                        WHERE Player_Name = ? AND Day = ?;
+                                    """
+                        print(query)
+                        cursor.execute(query, (author, end_day))
+                # REMOVING TIME
+                else:
+                    # START DAY IS START DAY IN UTC TIME
+                    if start_day == end_day:
+                        for col in time_columns:
+                            col_minutes = time_to_minutes(col)
+                            if col_minutes >= start_minutes or col_minutes <= end_minutes:
+                                columns_to_nullify.append(f'"{col}" = NULL')
+                        # Build the SQL query dynamically
+                        set_clause = ', '.join(columns_to_nullify)
+                        query = f"""
+                                UPDATE Player_Timecard
+                                SET {set_clause}
+                                WHERE Player_Name = ? AND Day = ?;
+                            """
+                        # Execute the query
+                        cursor.execute(query, (author, start_day))
+                    # START DAY IS NOT START DAY IN UTC TIME
+                    else:
+                        print(f"I did else.")
+                        for col in time_columns:
+                            col_minutes = time_to_minutes(col)
+                            if col_minutes >= start_minutes or col_minutes <= 1440:
+                                columns_to_nullify.append(f'"{col}" = NULL')
+                        # Build the SQL query dynamically
+                        set_clause = ', '.join(columns_to_nullify)
+                        query = f"""
+                                UPDATE Player_Timecard
+                                SET {set_clause}
+                                WHERE Player_Name = ? AND Day = ?;
+                            """
+                        cursor.execute(query, (author, start_day))
+                        columns_to_nullify = []
+                        for col in time_columns:
+                            col_minutes = time_to_minutes(col)
+                            if col_minutes >= 0 or col_minutes <= end_minutes:
+                                columns_to_nullify.append(f'"{col}" = NULL')
+                        # Build the SQL query dynamically
+                        set_clause = ', '.join(columns_to_nullify)
+                        query = f"""
+                                UPDATE Player_Timecard
+                                SET {set_clause}
+                                WHERE Player_Name = ? AND Day = ?;
+                            """
+                        cursor.execute(query, (author, end_day))
+                    db.commit()
+                    cursor.close()
+                    db.close()
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            validation = 0
+        finally:
+            cursor.close()
+            db.close()
+            return validation
 
-                db.commit()
-                cursor.close()
-                db.close()
-                db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-                cursor = db.cursor()
-            x = 1
-            while x < 8:
-                cursor.execute(f"INSERT INTO Player_Timecard(Player_Name, Day) VALUES(?, ?)", (author, x))
-                x += 1
-        if change == 1:
-            print("adding")
-            if start_day == end_day:
-                for col in time_columns:
-                    col_minutes = time_to_minutes(col)
-                    if col_minutes >= start_minutes or col_minutes <= end_minutes:
-                        columns_to_nullify.append(f'"{col}" = 1')
-                # Build the SQL query dynamically
-                set_clause = ', '.join(columns_to_nullify)
-                print(set_clause)
-                query = f"""
-                    UPDATE Player_Timecard
-                    SET {set_clause}
-                    WHERE Player_Name = ? AND Day = ?;
-                """
-                # Execute the query
-                cursor.execute(query, (author, start_day))
-                print(f"ran query")
-                db.commit()
-                cursor.execute(f"UPDATE Player_Timecard SET utc_offset = ? WHERE Player_Name = ?", (utc_offset, author))
-            else:
-                for col in time_columns:
-                    col_minutes = time_to_minutes(col)
-                    if col_minutes >= start_minutes or col_minutes <= 1440:
-                        columns_to_nullify.append(f'"{col}" = 1')
-                # Build the SQL query dynamically
-                set_clause = ', '.join(columns_to_nullify)
-                print(set_clause)
-                query = f"""
-                    UPDATE Player_Timecard
-                    SET {set_clause}
-                    WHERE Player_Name = ? AND Day = ?;
-                """
-                cursor.execute(query, (author, start_day))
-                columns_to_nullify = []
-                for col in time_columns:
-                    col_minutes = time_to_minutes(col)
-                    if col_minutes >= 0 or col_minutes <= end_minutes:
-                        columns_to_nullify.append(f'"{col}" = 1')
-                # Build the SQL query dynamically
-                set_clause = ', '.join(columns_to_nullify)
-                query = f"""
-                    UPDATE Player_Timecard
-                    SET {set_clause}
-                    WHERE Player_Name = ? AND Day = ?;
-                """
-                print(set_clause)
-                cursor.execute(query, (author, end_day))
-        else:
-            if start_day == end_day:
-                for col in time_columns:
-                    col_minutes = time_to_minutes(col)
-                    if col_minutes >= start_minutes or col_minutes <= end_minutes:
-                        columns_to_nullify.append(f'"{col}" = NULL')
-                # Build the SQL query dynamically
-                set_clause = ', '.join(columns_to_nullify)
-                query = f"""
-                    UPDATE Player_Timecard
-                    SET {set_clause}
-                    WHERE Player_Name = ? AND Day = ?;
-                """
-                # Execute the query
-                cursor.execute(query, (author, start_day))
-            else:
-                print(f"I did else.")
-                for col in time_columns:
-                    col_minutes = time_to_minutes(col)
-                    if col_minutes >= start_minutes or col_minutes <= 1440:
-                        columns_to_nullify.append(f'"{col}" = NULL')
-                # Build the SQL query dynamically
-                set_clause = ', '.join(columns_to_nullify)
-                query = f"""
-                    UPDATE Player_Timecard
-                    SET {set_clause}
-                    WHERE Player_Name = ? AND Day = ?;
-                """
-                cursor.execute(query, (author, start_day))
-                columns_to_nullify = []
-                for col in time_columns:
-                    col_minutes = time_to_minutes(col)
-                    if col_minutes >= 0 or col_minutes <= end_minutes:
-                        columns_to_nullify.append(f'"{col}" = NULL')
-                # Build the SQL query dynamically
-                set_clause = ', '.join(columns_to_nullify)
-                query = f"""
-                    UPDATE Player_Timecard
-                    SET {set_clause}
-                    WHERE Player_Name = ? AND Day = ?;
-                """
-                cursor.execute(query, (author, end_day))
-        db.commit()
-        cursor.close()
-        db.close()
+
+
 
     async def clear_timesheet(self, guild_id, change, day, author):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -2251,31 +2278,98 @@ class Event(commands.Cog):
         cursor.close()
         db.close()
 
-    async def group_request(self, guild_id, author, character_name, group_name, choice):
+    async def group_request(self, guild_id, author, character_name, group_name, choice, description):
+        # Use async with to ensure the connection is properly closed
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            # Enable foreign key constraints
+            await db.execute("PRAGMA foreign_keys = ON;")
+            async with db.cursor() as cursor:
+                try:
+                    # ADD A NEW REQUEST
+                    if choice == 1:
+                        # Insert into Sessions_Group
+                        await cursor.execute("""
+                            INSERT INTO Sessions_Group (Group_Name, Host, Created_date, description)
+                            VALUES (?, ?, ?, ?)
+                        """, (group_name, author, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), description))
+                        await db.commit()
+
+                        # Retrieve the Group_ID of the newly inserted group
+                        await cursor.execute("""
+                            SELECT Group_ID FROM Sessions_Group
+                            WHERE Host = ?
+                            ORDER BY Created_date DESC
+                            LIMIT 1
+                        """, (author,))
+                        group_info = await cursor.fetchone()
+
+                        if group_info is None:
+                            print(f"No group found for Host = {author} after insertion.")
+                        else:
+                            group_id = group_info[0]
+                            # Insert into Sessions_Presign
+                            await cursor.execute("""
+                                INSERT INTO Sessions_Presign (Group_ID, Player_Name, Character_Name)
+                                VALUES (?, ?, ?)
+                            """, (group_id, author, character_name))
+                            await db.commit()
+                    else:
+                        # REMOVE A REQUEST
+                        await cursor.execute("""
+                            SELECT Group_ID FROM Sessions_Group
+                            WHERE Host = ?
+                        """, (author,))
+                        group_info = await cursor.fetchone()
+
+                        if group_info is None:
+                            print(f"No group found for Host = {author}")
+                            # Optionally, handle this case (e.g., return or raise an exception)
+                        else:
+                            group_id = group_info[0]
+                            # Begin a transaction
+                            await db.execute("BEGIN;")
+                            print("got here 1")
+                            # Delete from Sessions_Presign where Group_ID = group_id
+                            await cursor.execute("""
+                                DELETE FROM Sessions_Presign
+                                WHERE Group_ID = ?
+                            """, (group_id,))
+                            print("got here 2")
+                            # Delete from Sessions_Group where Host = author
+                            await cursor.execute("""
+                                DELETE FROM Sessions_Group
+                                WHERE Host = ?
+                            """, (author,))
+                            print("got here 3")
+                            # Commit the transaction
+                            await db.commit()
+                except Exception as e:
+                    print(f"An error occurred: {e}")
+
+    '''async def group_request(self, guild_id, author, character_name, group_name, choice, description):
+        print(guild_id)
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         if choice == 1:
-            cursor.execute(f"INSERT INTO Sessions_Group(Group_Name, Player_Name, Created_date) VALUES (?, ?, ?)", (group_name, author, datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
+            cursor.execute(f"INSERT INTO Sessions_Group(Group_Name, Host, Created_date, description) VALUES (?, ?, ?, ?)", (group_name, author, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), description))
             db.commit()
             cursor.execute(f"SELECT Group_ID from Sessions_Group where Player_Name = ?", (author,))
             group_info = cursor.fetchone()
-            cursor.execute(f"INSERT INTO Sessions_Presign(Group_ID, Player_name, Character_Name) VALUES (?, ?)", (group_info[0], author, character_name))
+            cursor.execute(f"INSERT INTO Sessions_Presign(Group_ID, Player_name, Character_Name) VALUES (?, ?, ?)", (group_info[0], author, character_name))
         else:
             cursor.execute(f"SELECT Group_ID from sessions_group where host = ?", (author,))
             group_info = cursor.fetchone()
-            cursor.execute(f"DELETE FROM Sessions_Group WHERE host = ?", (author))
+            cursor.execute(f"DELETE FROM Sessions_Group WHERE host = ?", (author,))
+            #cursor.execute(f"Delete from Sessions_Presign where group_id = ?", (group_info[0],))
             db.commit()
-            cursor.execute(f"Delete from Sessions_Presign where group_id = ?", (group_info[0],))
-            db.commit()
-        db.commit()
         cursor.close()
-        db.close()
+        db.close()'''
 
     async def group_join(self, guild_id, group_id, author, character_name, choice):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
         if choice == 1:
-            cursor.execute(f"INSERT INTO Sessions_Presign(Group_ID, player_name, Character_Name) VALUES (?, ?)", (group_id, author, character_name))
+            cursor.execute(f"INSERT INTO Sessions_Presign(Group_ID, player_name, Character_Name) VALUES (?, ?, ?)", (group_id, author, character_name))
         else:
             cursor.execute(f"Delete from Sessions_Presign where group_id = ? and character_name = ?", (group_id, character_name))
         db.commit()
