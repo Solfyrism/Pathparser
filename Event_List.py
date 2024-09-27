@@ -30,11 +30,10 @@ def time_to_minutes(t):
     hours, minutes = map(int, t.split(':'))
     return hours * 60 + minutes
 
-class Mangaged_events(commands.Cog):
+class Managed_events(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.Cog.listener()
     async def create_kingdom(self, kingdom, password, government, alignment, economy, loyalty, stability, guild_id, author):
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()

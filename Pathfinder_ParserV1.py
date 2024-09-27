@@ -8,7 +8,7 @@ import sqlite3
 import os
 from discord import app_commands
 from discord.ext import commands
-from Event_List import Mangaged_events as EventCommand
+from Event_List import Managed_events as EventCommand
 from unbelievaboat import Client
 import unbelievaboat
 import asyncio
@@ -7439,23 +7439,74 @@ async def requests(ctx: commands.Context, day: discord.app_commands.Choice[int],
                         "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
                     ]
                     if utc_offset > 0:
-                        columns_to_nullify = []
+                        day_1_columns_to_select = []
+                        day_2_columns_to_select = []
+                        minmax_time = utc_offset * 60
+                        day_1_instance = 0
+                        day_2_instance = 0
                         for col in time_columns:
                             col_minutes = time_to_minutes(col)
-                            if col_minutes >= start_minutes or col_minutes <= 1440:
-                                columns_to_nullify.append(f'"{col}" = NULL')
+                            if minmax_time <= col_minutes <= 1440:
+                                day_1_columns_to_select.append(f'"{col}"')
+                                day_1_instance += 1
+                            if minmax_time >= col_minutes >= 0:
+                                day_2_instance += 1
+                                day_2_columns_to_select.append(f'"{col}"')
                         # Build the SQL query dynamically
-                        set_clause = ', '.join(columns_to_nullify)
-                        
+                        day_1_set_clause = ', '.join(day_1_columns_to_select)
+                        day_2_set_clause = ', '.join(day_2_columns_to_select)
+                        cursor.execute(f'SELECT {day_1_set_clause} from player_timecard where Player_Name = {result[2]} and day = {day_value}')
+                        player_timecard_info_1 = cursor.fetchone()
+                        cursor.execute(f'SELECT {day_2_set_clause} from player_timecard where Player_Name = {result[2]} and day = {day_value + 1}')
+                        player_timecard_info_2 = cursor.fetchone()
+                        if player_timecard_info_1 is not None and player_timecard_info_2 is not None:
+                            timecard_info.append(player_timecard_info_1)
+                            timecard_info.append(player_timecard_info_2)
+                        elif player_timecard_info_1 is not None and player_timecard_info_2 is None:
+                            timecard_info.append(player_timecard_info_1)
+                            timecard_info.append(time_columns[day_1_instance:])
+                        elif player_timecard_info_2 is not None and player_timecard_info_1 is None:
+                            timecard_info.append(time_columns[:day_2_instance])
+                            timecard_info.append(player_timecard_info_2)
                     elif utc_offset < 0:
-                        ...    
-                    else: 
-                        ...
-                    cursor.execute(f'select "Player_Name", "UTC_Offset", "Day", "00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30", "04:00", "04:30", "05:00", "05:30", "06:00", "06:30", "07:00", "07:30", "08:00", "08:30", "09:00", "09:30", "10:00", "10:30",  "11:00", "11:30", "12:00", "12:30",  "13:00", "13:30", "14:00", "14:30",  "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30" from player_timecard where Player_Name = {result[2]} and day = {day_value}')
-                    player_timecard_info = cursor.fetchone()
-                    if player_timecard_info is not None:
-                        timecard_info.append(player_timecard_info)
-                    embed.add_field(name=f'**Player**: {result[2]}', value=f'**Character**: {result[3]}', inline=False)
+                        day_1_columns_to_select = []
+                        day_2_columns_to_select = []
+                        minmax_time = 1440 - utc_offset * 60
+                        day_1_instance = 0
+                        day_2_instance = 0
+                        for col in time_columns:
+                            col_minutes = time_to_minutes(col)
+                            if minmax_time <= col_minutes <= 1440:
+                                day_1_columns_to_select.append(f'"{col}"')
+                                day_1_instance += 1
+                            if minmax_time >= col_minutes >= 0:
+                                day_2_instance += 1
+                                day_2_columns_to_select.append(f'"{col}"')
+                        # Build the SQL query dynamically
+                        day_1_set_clause = ', '.join(day_1_columns_to_select)
+                        day_2_set_clause = ', '.join(day_2_columns_to_select)
+                        cursor.execute(
+                            f'SELECT {day_1_set_clause} from player_timecard where Player_Name = {result[2]} and day = {day_value - 1}')
+                        player_timecard_info_1 = cursor.fetchone()
+                        cursor.execute(f'SELECT {day_2_set_clause} from player_timecard where Player_Name = {result[2]} and day = {day_value}')
+                        player_timecard_info_2 = cursor.fetchone()
+                        if player_timecard_info_1 is not None and player_timecard_info_2 is not None:
+                            timecard_info.append(player_timecard_info_1)
+                            timecard_info.append(player_timecard_info_2)
+                        elif player_timecard_info_1 is not None and player_timecard_info_2 is None:
+                            timecard_info.append(player_timecard_info_1)
+                            timecard_info.append(time_columns[day_1_instance:])
+                        elif player_timecard_info_2 is not None and player_timecard_info_1 is None:
+                            timecard_info.append(time_columns[:day_2_instance])
+                            timecard_info.append(player_timecard_info_2)    
+                    else:
+                        day_1_columns_to_select = []
+                        # Build the SQL query dynamically
+                        day_1_set_clause = ', '.join(time_columns)
+                        cursor.execute(f'SELECT {day_1_set_clause} from player_timecard where Player_Name = {result[2]} and day = {day_value - 1}')
+                        player_timecard_info_1 = cursor.fetchone()
+                        if player_timecard_info_1 is not None:
+                            timecard_info.append(player_timecard_info_1)
                 await ctx.response.send_message(embed=embed)
             else:
                 embed = discord.Embed(title=f"Group Request Error", description=f'Group {group_id} could not be found!', colour=discord.Colour.red())
