@@ -20,6 +20,7 @@ from unidecode import unidecode
 from pywaclient.api import BoromirApiClient as WaClient
 import numpy as np
 import matplotlib.pyplot as plt
+from zoneinfo import ZoneInfo
 intents = discord.Intents.default()
 intents.typing = True
 intents.message_content = True
@@ -332,9 +333,15 @@ def time_to_minutes(t):
 
 
 
-def fetch_timecard_data_from_db(guild_id, player_name, day):
+def fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset):
     conn = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = conn.cursor()
+    if utc_offset > 0:
+        cursor.execute(f"SELECT '00:00', '00:30', '01:00', '01:30', '02:00', '02:30', '03:00', '03:30', '04:00', '04:30', '05:00', '05:30', '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30' FROM Player_Timecard WHERE Player_Name = ? AND Day = ?", (player_name, day))
+        first_day_query = cursor.fetchone()
+        second_day = adjust_day(day, 24, utc_offset)
+        cursor.execute(f"SELECT '00:00', '00:30', '01:00', '01:30', '02:00', '02:30', '03:00', '03:30', '04:00', '04:30', '05:00', '05:30', '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00', '23:30' FROM Player_Timecard WHERE Player_Name = ? AND Day = ?", (player_name, second_day))
+        second_day_query = cursor.fetchone()
 
     # Fetch time slots for the specific player and day
     cursor.execute(f"SELECT * FROM Player_Timecard WHERE Player_Name = ? AND Day = ?", (player_name, day))
@@ -356,30 +363,87 @@ async def create_timecard_plot(guild_id, player_name, day):
         "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30",
         "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
     ]
+    daysdict =  { 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday', 7: 'Sunday'}
     # Get timecard data for the player and day
-    row = fetch_timecard_data_from_db(guild_id, player_name, day)
-    player_availability = [] # Initialize an empty list to store player availability
-    if row:
-        player_availability = row[3:]  # Skip the first 3 columns (Player_Name, UTC_Offset, Day)
-    else:
-        player_availability = [0] * len(time_labels)  # Default to 0 if no data found
-    player_availability = [int(x) if str(x).isdigit() else 0 for x in player_availability]
+    if type(player_name) == str:
+        row = fetch_timecard_data_from_db(guild_id, player_name, day)
+        player_availability = []  # Initialize an empty list to store player availability
+        if row:
+            player_availability = row[3:]  # Skip the first 3 columns (Player_Name, UTC_Offset, Day)
+        else:
+            player_availability = [0] * len(time_labels)  # Default to 0 if no data found
+        player_availability = [int(x) if str(x).isdigit() else 0 for x in player_availability]
 
-    # Create a plot
-    plt.figure(figsize=(10, 6))
-    plt.plot(time_labels, player_availability, marker='o', linestyle='-', color='b', label=f'{player_name} Availability')
-    plt.fill_between(time_labels, player_availability, color='lightblue', alpha=0.5)
+        # Reshape the 1D array to a 2D array with 1 row and 48 columns
+        player_availability = np.array(player_availability).reshape(1, -1)
 
-    # Labeling the graph
-    plt.title(f"Availability for {player_name} on {day}")
-    plt.xlabel("Time of Day")
-    plt.ylabel("Availability (1=Available, 0=Not Available)")
-    plt.xticks(rotation=90)
-    plt.grid(True)
+        # Use the updated colormap call to avoid deprecation warning
+        cmap = plt.colormaps.get_cmap('RdYlGn')
+
+        # Create a plot with larger size to fit everything
+        plt.figure(figsize=(14, 3))  # Widen the figure
+
+        # Plot the data
+        plt.imshow(player_availability, cmap=cmap, aspect='auto')
+
+        # Rotate the x-axis labels and align them properly
+        plt.xticks(np.arange(len(time_labels)), time_labels, rotation=90, ha="center",
+                   fontsize=8)  # Adjust rotation and font size
+        plt.yticks(np.arange(1), [player_name])
+
+        # Labeling the graph
+        cbar = plt.colorbar()
+        cbar.set_label('Red = Unavailable, Green = Available', fontsize=10)
+
+        # Add a title with an increased font size
+        plt.title(f"{player_name} availability on {daysdict[day]}", fontsize=14)
+
+        # Adjust the layout to fit the x-axis labels and title
+        plt.subplots_adjust(bottom=0.3,
+                            top=0.85)  # Adjust bottom and top margins to give room for the x-labels and title
+
+        plt.tight_layout()
+    elif type(player_name == list):
+        x = 0
+        player_list = []
+        player_availability = []
+        for player in player_name:
+            row = fetch_timecard_data_from_db(guild_id, player[0], day)
+            player_availability = []
+            if row:
+                x += 1
+                if x == 1:
+                    player_list = player[0]
+                    player_availability = np.array(row[3:])  # Skip the first 3 columns (Player_Name, UTC_Offset, Day)
+                elif x > 1:
+                    player_list.append(player[0])
+                    player_availability = np.vstack(player_availability, row[3:])
+                else:
+                    player_availability = []
+                    player_list = []
+            else:
+                player_availability = [0] * len(time_labels)  # Default to 0 if no data found
+            player_availability = [int(x) if str(x).isdigit() else 0 for x in player_availability]
+
 
     # Save the plot as an image file
     plt.savefig('C:\\Pathparser\\plots\\timecard_plot.png')  # Ensure the path is correct for your system
     plt.close()
+
+
+async def search_timezones(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
+    # Get all available timezones
+    print(current)
+    all_timezones = sorted(ZoneInfo.available_timezones())
+    # Filter timezones based on current input
+    print("nuts")
+    filtered_timezones = [tz for tz in all_timezones if current.lower() in tz.lower()]
+    print(filtered_timezones)
+    # Return list of app_commands.Choice objects (maximum 25 choices for Discord autocomplete)
+    return [
+        app_commands.Choice(name=tz, value=tz)
+        for tz in filtered_timezones[:20]  # Limit to 25 results to comply with Discord's limit
+    ]
 
 async def character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
@@ -7072,9 +7136,10 @@ async def display(ctx: commands.Context, session_id: int, group: discord.app_com
 @app_commands.describe(utc_offset="UTC offset for your time zone")
 @app_commands.describe(start_time="the start window, please use ##:## in MILITARY time, leave as 0 when clearing.")
 @app_commands.describe(end_time="the close window, please use ##:## in MILITARY time, leave as 0 when clearing.")
+@app_commands.autocomplete(timezone=search_timezones)
 @app_commands.choices(change=[discord.app_commands.Choice(name='Add', value=1), discord.app_commands.Choice(name='Remove', value=2), discord.app_commands.Choice(name='Clear', value=3), discord.app_commands.Choice(name='Clear All', value=4)])
 @app_commands.choices(day=[discord.app_commands.Choice(name='Monday', value=1), discord.app_commands.Choice(name='Tuesday', value=2), discord.app_commands.Choice(name='Wednesday', value=3), discord.app_commands.Choice(name='Thursday', value=4), discord.app_commands.Choice(name='Friday', value=5), discord.app_commands.Choice(name='Saturday', value=6), discord.app_commands.Choice(name='Sunday', value=7)])
-async def timesheet(ctx: commands.Context, day: discord.app_commands.Choice[int], utc_offset: int, start_time: str, end_time: str, change: discord.app_commands.Choice[int] = 1):
+async def timesheet(ctx: commands.Context, day: discord.app_commands.Choice[int], utc_offset: int, start_time: str, end_time: str, timezone: str, change: discord.app_commands.Choice[int] = 1):
     """Update and Adjust your predicted Weekly Availability"""
     guild_id = ctx.guild.id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -7429,84 +7494,6 @@ async def requests(ctx: commands.Context, day: discord.app_commands.Choice[int],
                     utc_offset = author_timecard_info[0]
                 else:
                     utc_offset = 0
-                for result in group_info:
-                    time_columns = [
-                        "00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30",
-                        "04:00", "04:30", "05:00", "05:30", "06:00", "06:30", "07:00", "07:30",
-                        "08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
-                        "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
-                        "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30",
-                        "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
-                    ]
-                    if utc_offset > 0:
-                        day_1_columns_to_select = []
-                        day_2_columns_to_select = []
-                        minmax_time = utc_offset * 60
-                        day_1_instance = 0
-                        day_2_instance = 0
-                        for col in time_columns:
-                            col_minutes = time_to_minutes(col)
-                            if minmax_time <= col_minutes <= 1440:
-                                day_1_columns_to_select.append(f'"{col}"')
-                                day_1_instance += 1
-                            if minmax_time >= col_minutes >= 0:
-                                day_2_instance += 1
-                                day_2_columns_to_select.append(f'"{col}"')
-                        # Build the SQL query dynamically
-                        day_1_set_clause = ', '.join(day_1_columns_to_select)
-                        day_2_set_clause = ', '.join(day_2_columns_to_select)
-                        cursor.execute(f'SELECT {day_1_set_clause} from player_timecard where Player_Name = {result[2]} and day = {day_value}')
-                        player_timecard_info_1 = cursor.fetchone()
-                        cursor.execute(f'SELECT {day_2_set_clause} from player_timecard where Player_Name = {result[2]} and day = {day_value + 1}')
-                        player_timecard_info_2 = cursor.fetchone()
-                        if player_timecard_info_1 is not None and player_timecard_info_2 is not None:
-                            timecard_info.append(player_timecard_info_1)
-                            timecard_info.append(player_timecard_info_2)
-                        elif player_timecard_info_1 is not None and player_timecard_info_2 is None:
-                            timecard_info.append(player_timecard_info_1)
-                            timecard_info.append(time_columns[day_1_instance:])
-                        elif player_timecard_info_2 is not None and player_timecard_info_1 is None:
-                            timecard_info.append(time_columns[:day_2_instance])
-                            timecard_info.append(player_timecard_info_2)
-                    elif utc_offset < 0:
-                        day_1_columns_to_select = []
-                        day_2_columns_to_select = []
-                        minmax_time = 1440 - utc_offset * 60
-                        day_1_instance = 0
-                        day_2_instance = 0
-                        for col in time_columns:
-                            col_minutes = time_to_minutes(col)
-                            if minmax_time <= col_minutes <= 1440:
-                                day_1_columns_to_select.append(f'"{col}"')
-                                day_1_instance += 1
-                            if minmax_time >= col_minutes >= 0:
-                                day_2_instance += 1
-                                day_2_columns_to_select.append(f'"{col}"')
-                        # Build the SQL query dynamically
-                        day_1_set_clause = ', '.join(day_1_columns_to_select)
-                        day_2_set_clause = ', '.join(day_2_columns_to_select)
-                        cursor.execute(
-                            f'SELECT {day_1_set_clause} from player_timecard where Player_Name = {result[2]} and day = {day_value - 1}')
-                        player_timecard_info_1 = cursor.fetchone()
-                        cursor.execute(f'SELECT {day_2_set_clause} from player_timecard where Player_Name = {result[2]} and day = {day_value}')
-                        player_timecard_info_2 = cursor.fetchone()
-                        if player_timecard_info_1 is not None and player_timecard_info_2 is not None:
-                            timecard_info.append(player_timecard_info_1)
-                            timecard_info.append(player_timecard_info_2)
-                        elif player_timecard_info_1 is not None and player_timecard_info_2 is None:
-                            timecard_info.append(player_timecard_info_1)
-                            timecard_info.append(time_columns[day_1_instance:])
-                        elif player_timecard_info_2 is not None and player_timecard_info_1 is None:
-                            timecard_info.append(time_columns[:day_2_instance])
-                            timecard_info.append(player_timecard_info_2)    
-                    else:
-                        day_1_columns_to_select = []
-                        # Build the SQL query dynamically
-                        day_1_set_clause = ', '.join(time_columns)
-                        cursor.execute(f'SELECT {day_1_set_clause} from player_timecard where Player_Name = {result[2]} and day = {day_value - 1}')
-                        player_timecard_info_1 = cursor.fetchone()
-                        if player_timecard_info_1 is not None:
-                            timecard_info.append(player_timecard_info_1)
                 await ctx.response.send_message(embed=embed)
             else:
                 embed = discord.Embed(title=f"Group Request Error", description=f'Group {group_id} could not be found!', colour=discord.Colour.red())
