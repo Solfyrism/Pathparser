@@ -73,7 +73,7 @@ def get_utc_offset(tz):
 
 
 
-class Managed_Events(commands.Cog):
+class Managed_events(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
