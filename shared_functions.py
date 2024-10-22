@@ -6,19 +6,25 @@ from discord import app_commands
 import pytz
 from math import floor
 from dotenv import load_dotenv;
-
-load_dotenv()
 from unidecode import unidecode
 from pywaclient.api import BoromirApiClient as WaClient
 import numpy as np
+from typing import List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 from zoneinfo import available_timezones, ZoneInfo
 import os
 from datetime import datetime
+from decimal import Decimal
+import aiosqlite
+import logging
+from dataclasses import dataclass
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
+load_dotenv()
 
 
 # *** AUTOCOMPLETION COMMANDS *** #
-
 async def character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
     app_commands.Choice[str]]:
     data = []
@@ -216,94 +222,233 @@ async def title_lookup(interaction: discord.Interaction, current: str) -> typing
 
 # *** DISPLAY FUNCTIONS *** #
 
-def character_embed(player_name, player_id, character_name, titles, description, oath, level, tier, milestones,
-                    milestones_required, trials, trials_required, gold, effective_gold, flux, color, mythweavers,
-                    image_link, tradition_name, tradition_link, template_name, template_link, fame, title, prestige,
-                    backstory):
-    int_color = int(color[1:], 16)
-    print(titles)
-    description_field = f" "
-    if titles is not None:
-        description_field += f"**Other Names**: {titles} \r\n"
-    if backstory is not None:
-        description_field += f"[**Backstory**](<{backstory}>)"
-    character_name = character_name if title is None else f"{title} {character_name}"
-    embed = discord.Embed(title=f"{character_name}", url=f'{mythweavers}', description=f"{description_field}",
-                          color=int_color)
-    embed.set_author(name=f'{player_name}')
-    embed.set_thumbnail(url=f'{image_link}')
-    embed.add_field(name="Information",
-                    value=f'**Level**: {level}, **Mythic Tier**: {tier}, **Fame**: {fame}, **Prestige**: {prestige}',
-                    inline=False)
-    embed.add_field(name="Experience", value=f'**Milestones**: {milestones}, **Remaining**: {milestones_required}')
-    embed.add_field(name="Mythic", value=f'**Trials**: {trials}, **Remaining**: {trials_required}', inline=True)
-    embed.add_field(name="Current Wealth",
-                    value=f'**GP**: {round(gold, 2)}, **Effective** {round(effective_gold, 2)} GP', inline=False)
-    embed.add_field(name="Current Flux", value=f'**Flux**: {flux}')
-    linkage = f""
-    if tradition_name is not None:
-        linkage += f"**Tradition**: [{tradition_name}]({tradition_link})"
-    if template_name is not None:
-        if tradition_name is not None:
-            linkage += " "
-        linkage += f"**Template**: [{template_name}]({template_link})"
-    if tradition_name is not None or template_name is not None:
-        embed.add_field(name=f'Additional Info', value=linkage, inline=False)
-    print(oath)
-    if oath == 'Offerings':
-        embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
-    elif oath == 'Poverty':
-        embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
-    elif oath == 'Absolute':
-        embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
-    else:
-        embed.set_footer(text=f'{description}')
-    message = f"<@{player_id}>"
-    return embed, message
+async def character_embed(cursor, character_name) -> (Union[Tuple[discord.Embed, str, int], str]):
+    return_value = None
+    try:
+        await cursor.execute("SELECT Search from Admin where Identifier = 'Accepted_Bio_Channel'")
+        channel_id = await cursor.fetchone()
+        # 8 7 7 5
+        await cursor.execute(
+            "SELECT player_name, player_id, True_Character_Name, Title, Titles, Description, Oath, Level, "
+            "Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, "
+            "Flux, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name, "
+            "Tradition_Link, Template_Name, Template_Link, Article_Link"
+            " FROM Player_Characters WHERE Character_Name = ?", (character_name,))
+        character_info = await cursor.fetchone()
+        color = character_info[17]
+        int_color = int(color[1:], 16)
+        description_field = f" "
+        if character_info[4] is not None:
+            description_field += f"**Other Names**: {character_info[4]} \r\n"  # Titles
+        if character_info[25] is not None:  # Backstory
+            description_field += f"[**Backstory**](<{character_info[25]}>)"
+        titled_character_name = character_info[2] if character_info[3] is None else \
+            f"{character_info[3]} {character_info[2]}"  # Store bought Title, Character Name, Store bought Title, Character Name
+        embed = discord.Embed(title=f"{titled_character_name}", url=f'{character_info[18]}',
+                              description=f"{description_field}",  # Character Name, Mythweavers, Description
+                              color=int_color)
+        embed.set_author(name=f'{character_info[0]}')  # Player Name
+        embed.set_thumbnail(url=f'{character_info[20]}')  # Image Link
+        embed.add_field(name="Information",
+                        value=f'**Level**: {character_info[7]}, '
+                              f'**Mythic Tier**: {character_info[8]}, '
+                              f'**Fame**: {character_info[16]}, '
+                              f'**Prestige**: {character_info[17]}',
+                        # Level, Tier, Fame, Prestige
+                        inline=False)
+        embed.add_field(name="Experience",
+                        value=f'**Milestones**: {character_info[9]}, '
+                              f'**Remaining**: {character_info[10]}')  # Milestones, Remaining Milestones
+        embed.add_field(name="Mythic",
+                        value=f'**Trials**: {character_info[11]}, '
+                              f'**Remaining**: {character_info[12]}')  # Trials, Remaining Trials
+        embed.add_field(name="Current Wealth",
+                        value=f'**GP**: {Decimal(character_info[13])}, '
+                              f'**Effective** {Decimal(character_info[14])} GP',
+                        inline=False)  # Gold, Effective Gold
+        embed.add_field(name="Current Flux", value=f'**Flux**: {character_info[15]}')
+        linkage = f""
+        if character_info[21] is not None:  # Tradition Name
+            linkage += f"**Tradition**: [{character_info[21]}]({character_info[22]})"
+        if character_info[23] is not None:  # Template Name
+            if character_info[21] is not None:  # check if there's a tradition to link to.
+                linkage += " "
+            linkage += f"**Template**: [{character_info[23]}]({character_info[24]})"
+        if character_info[21] is not None or character_info[
+            23] is not None:  # check if there's a tradition or template worth adding to the embed.
+            embed.add_field(name=f'Additional Info', value=linkage, inline=False)
+        # Handling Oaths below.
+        description = character_info[5]
+        if character_info[6] == 'Offerings':
+            embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
+        elif character_info[6] == 'Poverty':
+            embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
+        elif character_info[6] == 'Absolute':
+            embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
+        else:
+            embed.set_footer(text=f'{description}')
+        message = f"<@{character_info[1]}>"
+        return_value = embed, message, channel_id[0]
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"An error occurred whilst building character embed for '{character_name}': {e}")
+        return_value = f"An error occurred whilst building character embed for '{character_name}'."
+    return return_value
 
 
-def log_embed(character_name, author, level, milestone_change, milestones_total, milestones_remaining, tier,
-              trial_change, trials, trials_remaining, gold, gold_change, effective_gold, transaction_id, flux,
-              flux_change, tradition_name, tradition_link, template_name, template_link, alternate_reward, total_fame,
-              fame, total_prestige, prestige, source):
-    embed = discord.Embed(title=f"{character_name}", description=f"Character Change", color=discord.Colour.blurple())
-    embed.set_author(name=f'{author}')
-    if milestone_change is not None:
-        embed.add_field(name="Milestone Change",
-                        value=f'**Level**: {level}, **Milestone Change**: {milestone_change}, **Total Milestones**: {milestones_total}, **Milestones Remaining**: {milestones_remaining}',
-                        inline=False)
-    if trial_change is not None:
-        embed.add_field(name="Trial Change",
-                        value=f'**Mythic Tier**: {tier}, **Trial Change**: {trial_change}, **Total Trials**: {trials}, **Trials Remaining**: {trials_remaining}',
-                        inline=False)
-    if gold_change is not None:
-        round(gold, 2)
-        round(gold_change, 2)
-        round(effective_gold, 2)
-        embed.add_field(name="Wealth Changes",
-                        value=f'**Gold**: {gold}, **Gold Change**: {gold_change}, **Effective Gold**: {effective_gold} GP **Transaction_ID**: {transaction_id}',
-                        inline=False)
-    if flux_change is not None:
-        embed.add_field(name="Flux Change", value=f'**Flux**: {flux}, **Flux Change**: {flux_change}', inline=False)
-    if tradition_name is not None:
-        embed.add_field(name="Tradition Change", value=f'**Tradition**: [{tradition_name}]({tradition_link})',
-                        inline=False)
-    if template_name is not None:
-        embed.add_field(name="Template Change", value=f'**Template**: [{template_name}]({template_link})', inline=False)
-    if alternate_reward is not None:
-        embed.add_field(name="other rewards", value=f'{alternate_reward}', inline=False)
-    if fame or prestige is not None:
-        total_fame = total_fame if total_fame is not None else "Not Changed"
-        total_prestige = total_prestige if total_prestige is not None else "Not Changed"
-        fame = fame if fame is not None else "Not Changed"
-        prestige = prestige if prestige is not None else "Not Changed"
-        embed.add_field(name="Fame and Prestige",
-                        value=f' **Total Fame**: {total_fame}, **Received Fame**: {fame} **Total Prestige**: {total_prestige}, **Received Prestige**: {prestige}',
-                        inline=False)
-    embed.set_footer(text=f"{source}")
+def name_fix(name) -> Optional[Tuple[str, str]]:
+    return_value = [None, None]
+    try:
+        coded_name = str.replace(
+            str.replace(
+                str.replace(str.replace(str.replace(str.title(name), ";", ""), "(", ""), ")", ""),
+                "[", ""), "]", "")
+        unidecoded_name = unidecode(coded_name)
+        return_value = coded_name, unidecoded_name
+    except (TypeError, ValueError) as e:
+        logging.exception(f"An error occurred whilst fixing character name '{name}': {e}")
+    return return_value
+
+
+@dataclass
+class CharacterChange:
+    character_name: str
+    author: str
+    level: Optional[int] = None
+    milestone_change: Optional[int] = None
+    milestones_total: Optional[int] = None
+    milestones_remaining: Optional[int] = None
+    tier: Optional[int] = None
+    trial_change: Optional[int] = None
+    trials: Optional[int] = None
+    trials_remaining: Optional[int] = None
+    gold: Optional[float] = None
+    gold_change: Optional[float] = None
+    effective_gold: Optional[float] = None
+    transaction_id: Optional[str] = None
+    flux: Optional[int] = None
+    flux_change: Optional[int] = None
+    tradition_name: Optional[str] = None
+    tradition_link: Optional[str] = None
+    template_name: Optional[str] = None
+    template_link: Optional[str] = None
+    alternate_reward: Optional[str] = None
+    total_fame: Optional[int] = None
+    fame: Optional[int] = None
+    total_prestige: Optional[int] = None
+    prestige: Optional[int] = None
+    source: Optional[str] = None
+
+
+# Function to create the embed
+async def log_embed(change: CharacterChange) -> discord.Embed:
+    embed = discord.Embed(
+        title=change.character_name,
+        description="Character Change",
+        color=discord.Color.blurple()
+    )
+    embed.set_author(name=change.author)
+
+    # Milestone Change
+    if change.milestone_change is not None:
+        embed.add_field(
+            name="Milestone Change",
+            value=(
+                f"**Level**: {change.level}\n"
+                f"**Milestone Change**: {change.milestone_change}\n"
+                f"**Total Milestones**: {change.milestones_total}\n"
+                f"**Milestones Remaining**: {change.milestones_remaining}"
+            ),
+            inline=False
+        )
+
+    # Trial Change
+    if change.trial_change is not None:
+        embed.add_field(
+            name="Trial Change",
+            value=(
+                f"**Mythic Tier**: {change.tier}\n"
+                f"**Trial Change**: {change.trial_change}\n"
+                f"**Total Trials**: {change.trials}\n"
+                f"**Trials Remaining**: {change.trials_remaining}"
+            ),
+            inline=False
+        )
+
+    # Wealth Changes
+    if change.gold_change is not None:
+        gold = round(change.gold, 2) if change.gold is not None else "N/A"
+        gold_change = round(change.gold_change, 2)
+        effective_gold = round(change.effective_gold, 2) if change.effective_gold is not None else "N/A"
+        embed.add_field(
+            name="Wealth Changes",
+            value=(
+                f"**Gold**: {gold}\n"
+                f"**Gold Change**: {gold_change}\n"
+                f"**Effective Gold**: {effective_gold} GP\n"
+                f"**Transaction ID**: {change.transaction_id}"
+            ),
+            inline=False
+        )
+
+    # Flux Change
+    if change.flux_change is not None:
+        embed.add_field(
+            name="Flux Change",
+            value=(
+                f"**Flux**: {change.flux}\n"
+                f"**Flux Change**: {change.flux_change}"
+            ),
+            inline=False
+        )
+
+    # Tradition Change
+    if change.tradition_name and change.tradition_link:
+        embed.add_field(
+            name="Tradition Change",
+            value=f"**Tradition**: [{change.tradition_name}]({change.tradition_link})",
+            inline=False
+        )
+
+    # Template Change
+    if change.template_name and change.template_link:
+        embed.add_field(
+            name="Template Change",
+            value=f"**Template**: [{change.template_name}]({change.template_link})",
+            inline=False
+        )
+
+    # Alternate Reward
+    if change.alternate_reward is not None:
+        embed.add_field(
+            name="Other Rewards",
+            value=change.alternate_reward,
+            inline=False
+        )
+
+    # Fame and Prestige
+    if change.fame is not None or change.prestige is not None:
+        total_fame = change.total_fame if change.total_fame is not None else "Not Changed"
+        total_prestige = change.total_prestige if change.total_prestige is not None else "Not Changed"
+        fame = change.fame if change.fame is not None else "Not Changed"
+        prestige = change.prestige if change.prestige is not None else "Not Changed"
+        embed.add_field(
+            name="Fame and Prestige",
+            value=(
+                f"**Total Fame**: {total_fame}\n"
+                f"**Received Fame**: {fame}\n"
+                f"**Total Prestige**: {total_prestige}\n"
+                f"**Received Prestige**: {prestige}"
+            ),
+            inline=False
+        )
+
+    # Set Footer
+    if change.source is not None:
+        embed.set_footer(text=change.source)
+
+    thread = await guild.get_thread(thread)
+    await thread.send_message(embed=embed)
     return embed
-
-
 
 
 # *** TIME MANAGEMENT FUNCTIONS *** #
@@ -599,3 +744,156 @@ def ordinal(n):
     else:
         suffix = ["th", "st", "nd", "rd"][n % 10] if n % 10 < 4 else "th"
     return str(n) + suffix
+
+
+def put_wa_article(guild_id, template, category, title, overview, author) -> Optional[dict]:
+    if guild_id in [883009758179762208, 280061170231017472]:
+        try:
+            client = WaClient(
+                'pathparser',
+                'https://github.com/Solfyrism/Pathparser',
+                'V1.1',
+                os.getenv('WORLD_ANVIL_API'),
+                os.getenv('WORLD_ANVIL_USER')
+            )
+            world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
+            evaluated_overview = drive_word_document(overview)
+            new_page = client.article.put({
+                'title': title,
+                'content': evaluated_overview,
+                'category': {'id': category},
+                'templateType': template,  # generic article template
+                'state': 'public',
+                'isDraft': False,
+                'entityClass': {str.title(template)},
+                'tags': {author},
+                'world': {'id': world_id}
+            })
+            return new_page
+        except Exception as e:
+            logging.exception(f"Error in article creation for title '{title}': {e}")
+            return None
+
+
+async def put_wa_report(cursor, guild_id, session_id, overview, author) -> Optional[dict]:
+    if guild_id in [883009758179762208, 280061170231017472]:
+        evaluated_overview = await drive_word_document(overview)
+        try:
+            client = WaClient(
+                'pathparser',
+                'https://github.com/Solfyrism/Pathparser',
+                'V1.1',
+                os.getenv('WORLD_ANVIL_API'),
+                os.getenv('WORLD_ANVIL_USER')
+            )
+            world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
+            await cursor.execute(
+                f"SELECT Session_Name, Completed_Time, Alt_Reward_Party, Alt_Reward_All, Overview from Sessions where Session_ID = ?",
+                (session_id,))
+            session_info = await cursor.fetchone()
+            await cursor.execute(
+                f"SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Archive as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
+                (session_id, author))
+            characters = await cursor.fetchall()
+            if len(characters) == 0:
+                cursor.execute(
+                    f"SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Participants as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
+                    (session_id, author))
+                characters = cursor.fetchall()
+            else:
+                characters = characters
+            relatedpersonsblock = []
+            counter = 0
+            completed_str = session_info[1] if session_info[1] is not None else datetime.datetime.now().strftime(
+                "%Y-%m-%d %H:%M")
+            completed_time = datetime.datetime.strptime(completed_str, '%Y-%m-%d %H:%M')
+            day_test = datetime.datetime.strftime(completed_time, '%d')
+            month_test = datetime.datetime.strftime(completed_time, '%m')
+            new_report_page = client.article.put({
+                'title': f'{str(session_id).rjust(3, "0")}: {session_info[0]}',
+                'content': f'{overview}',
+                'category': {'id': 'b71f939a-f72d-413b-b4d7-4ebff1e162ca'},
+                'templateType': 'report',  # generic article template
+                'state': 'public',
+                'isDraft': False,
+                'entityClass': 'Report',
+                'tags': f'{author}',
+                'world': {'id': world_id},
+                #                  'reportDate': report_date,  # Convert the date to a string
+                'plots': [{'id': plot}]
+            })
+            for character in characters:
+                print(f" This is a character {character[0]} Do they have an article: {character[2]}?")
+                if character[2] is not None:
+                    person = {'id': character[2]}
+                    relatedpersonsblock.append(person)
+                    counter += 1
+            if counter == 0:
+                new_timeline_page = client.history.put({
+                    'title': f'{session_info[0]}',
+                    'content': f'{session_info[4]}',
+                    'fullcontent': f'{overview}',
+                    'timelines': [{'id': '906c8c14-2283-47e0-96e2-0fcd9f71d0d0'}],
+                    'significance': significance,
+                    'parsedContent': session_info[4],
+                    'report': {'id': new_report_page['id']},
+                    'year': 22083,
+                    'month': int(month_test),
+                    'day': int(day_test),
+                    'endingYear': int(22083),
+                    'endingMonth': int(month_test),
+                    'endingDay': int(day_test),
+                    'world': {'id': world_id}
+                })
+            else:
+                relatedpersonsblock = relatedpersonsblock
+                new_timeline_page = client.history.put({
+                    'title': f'{session_info[0]}',
+                    'content': f'{session_info[4]}',
+                    'fullcontent': f'{overview}',
+                    'timelines': [{'id': '906c8c14-2283-47e0-96e2-0fcd9f71d0d0'}],
+                    'significance': significance,
+                    'characters': relatedpersonsblock,
+                    'parsedContent': session_info[4],
+                    'report': {'id': new_report_page['id']},
+                    'year': 22083,
+                    'month': int(month_test),
+                    'day': int(day_test),
+                    'endingYear': int(22083),
+                    'endingMonth': int(month_test),
+                    'endingDay': int(day_test),
+                    'world': {'id': world_id}
+                })
+
+def drive_word_document(overview) -> Optional[str]:
+    try:
+        if overview[:4] == "http":
+            parts = overview.split('/')
+            if len(parts) == 5:
+                link = parts[3]
+            elif len(parts) == 7:
+                link = parts[5]
+            else:
+                link = None
+        else:
+            link = None
+        if link is not None:
+            SERVICE_ACCOUNT_FILE = os.getenv('SERVICE_ACCOUNT_FILE')
+            SCOPES = ['https://www.googleapis.com/auth/documents.readonly']
+            credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+            service = build('docs', 'v1', credentials=credentials)
+            DOCUMENT_ID = link
+            document = service.documents().get(documentId=DOCUMENT_ID).execute()
+            word_blob = ""
+            for element in document.get('body').get('content'):
+                if 'paragraph' in element:
+                    for text_run in element.get('paragraph').get('elements'):
+                        word_blob += (text_run.get('textRun').get('content'))
+            print(word_blob)
+            return word_blob
+        else:
+            overview = overview
+            return overview
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error in retrieving overview: {e}")
+        return None

@@ -5454,6 +5454,8 @@ async def claim(ctx: commands.Context, character_name: str, amount: float, reaso
             bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5], player_info[6], player_info[7], player_info[8], player_info[9], player_info[10], player_info[11], player_info[12], player_info[13] + gold_info[3], player_info[14] + gold_info[3], player_info[16], player_info[17], player_info[18], player_info[19], player_info[20], player_info[21], player_info[22], player_info[23], player_info[27], player_info[28], player_info[30], player_info[31])
             bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
             bio_message = await bio_channel.fetch_message(player_info[24])
+            for thingie in bio_embed:
+                print(type(thingie))
             await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
             source = f"Character has increased their wealth by {gold_info[3]} GP using a gold pouch from the shop, transaction_id: {transaction_id[0]}!"
             logging_embed = log_embed(player_info[2], author, None, None, None, None, None, None, None, None, player_info[13] + gold_info[3], gold_info[3], player_info[14] + gold_info[3], transaction_id[0], None, None, None, None, None, None, None, None, None, None, None, source)
@@ -8093,10 +8095,6 @@ async def self(interaction: discord.Interaction):
 async def drink(interaction: discord.Interaction, item: str):
     await interaction.response.send_message(f"drinks /{item}")
 
-
-@bot.tree.command(name="test_task")
-async def test_task(ctx):
-    await daily_task_at_750pm()
 
 
 @drink.autocomplete("item")

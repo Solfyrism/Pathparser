@@ -1410,8 +1410,7 @@ class Managed_Events(commands.Cog):
                     'tags': f'{author}',
                     'world': {'id': world_id}
                 })
-                print(2)
-            print(new_page)
+
 
 
     async def report(self, guild_id, request_type, plot, overview, session_id, author, significance):
