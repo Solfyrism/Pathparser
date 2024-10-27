@@ -1,11 +1,13 @@
 import typing
+import urllib.error
+
 import discord
 import sqlite3
 from dateutil import parser
 from discord import app_commands
 import pytz
 from math import floor
-from dotenv import load_dotenv;
+from dotenv import load_dotenv
 from unidecode import unidecode
 from pywaclient.api import BoromirApiClient as WaClient
 import numpy as np
@@ -18,15 +20,19 @@ from decimal import Decimal
 import aiosqlite
 import logging
 from dataclasses import dataclass
+import re
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from urllib.parse import urlparse, parse_qs
 
 load_dotenv()
+# CALL ME MR MONEYBAGS BECAUSE HERE IS MY CASH
+timezone_cache = sorted(available_timezones())
 
 
 # *** AUTOCOMPLETION COMMANDS *** #
 async def character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+        app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -45,7 +51,7 @@ async def character_select_autocompletion(interaction: discord.Interaction, curr
 
 
 async def stg_character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+        app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -64,7 +70,7 @@ async def stg_character_select_autocompletion(interaction: discord.Interaction, 
 
 
 async def own_character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+        app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -132,7 +138,6 @@ async def session_lookup(interaction: discord.Interaction, current: str) -> typi
         (interaction.user.name, f"%{current}%", interaction.user.name, f"%{current}%"))
     session_list = cursor.fetchall()
     for test_text in session_list:
-        evaluation = True if current in test_text[1] else False
         if current in str(test_text[0]) or str.lower(current) in str.lower(test_text[1]):
             name_result = f"{test_text[0]}: {test_text[1]}"
             data.append(app_commands.Choice(name=name_result, value=test_text[0]))
@@ -142,7 +147,7 @@ async def session_lookup(interaction: discord.Interaction, current: str) -> typi
 
 
 async def group_id_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+        app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -161,7 +166,7 @@ async def group_id_autocompletion(interaction: discord.Interaction, current: str
 
 
 async def player_session_lookup(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+        app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -223,7 +228,6 @@ async def title_lookup(interaction: discord.Interaction, current: str) -> typing
 # *** DISPLAY FUNCTIONS *** #
 
 async def character_embed(cursor, character_name) -> (Union[Tuple[discord.Embed, str, int], str]):
-    return_value = None
     try:
         await cursor.execute("SELECT Search from Admin where Identifier = 'Accepted_Bio_Channel'")
         channel_id = await cursor.fetchone()
@@ -274,8 +278,8 @@ async def character_embed(cursor, character_name) -> (Union[Tuple[discord.Embed,
             if character_info[21] is not None:  # check if there's a tradition to link to.
                 linkage += " "
             linkage += f"**Template**: [{character_info[23]}]({character_info[24]})"
-        if character_info[21] is not None or character_info[
-            23] is not None:  # check if there's a tradition or template worth adding to the embed.
+        if character_info[21] is not None or character_info[23] is not None:
+            # check if there's a tradition or template worth adding to the embed.
             embed.add_field(name=f'Additional Info', value=linkage, inline=False)
         # Handling Oaths below.
         description = character_info[5]
@@ -313,7 +317,12 @@ def name_fix(name) -> Optional[Tuple[str, str]]:
 class CharacterChange:
     character_name: str
     author: str
+    titles: Optional[str] = None
+    image: Optional[str] = None
+    mythweavers: Optional[str] = None
     level: Optional[int] = None
+    oath: Optional[str] = None
+    description: Optional[str] = None
     milestone_change: Optional[int] = None
     milestones_total: Optional[int] = None
     milestones_remaining: Optional[int] = None
@@ -347,7 +356,35 @@ async def log_embed(change: CharacterChange) -> discord.Embed:
         color=discord.Color.blurple()
     )
     embed.set_author(name=change.author)
+    if change.titles is not None:
+        embed.add_field(
+            name="titles",
+            value=f"new titles: {change.titles}"
+        )
 
+    if change.image is not None:
+        embed.set_thumbnail(url=change.image)
+    if change.mythweavers is not None:
+        embed.add_field(
+            name="Mythweavers",
+            value=f"[Character Sheet]({change.mythweavers})"
+        )
+
+    if change.titles is not None:
+        embed.add_field(
+            name="titles",
+            value=f"new titles: {change.titles}"
+            )
+    if change.oath is not None:
+        embed.add_field(
+            name="Oath",
+            value=change.oath
+        )
+    if change.description is not None:
+        embed.add_field(
+            name="Description",
+            value=change.description
+        )
     # Milestone Change
     if change.milestone_change is not None:
         embed.add_field(
@@ -357,8 +394,7 @@ async def log_embed(change: CharacterChange) -> discord.Embed:
                 f"**Milestone Change**: {change.milestone_change}\n"
                 f"**Total Milestones**: {change.milestones_total}\n"
                 f"**Milestones Remaining**: {change.milestones_remaining}"
-            ),
-            inline=False
+            )
         )
 
     # Trial Change
@@ -370,8 +406,7 @@ async def log_embed(change: CharacterChange) -> discord.Embed:
                 f"**Trial Change**: {change.trial_change}\n"
                 f"**Total Trials**: {change.trials}\n"
                 f"**Trials Remaining**: {change.trials_remaining}"
-            ),
-            inline=False
+            )
         )
 
     # Wealth Changes
@@ -386,8 +421,7 @@ async def log_embed(change: CharacterChange) -> discord.Embed:
                 f"**Gold Change**: {gold_change}\n"
                 f"**Effective Gold**: {effective_gold} GP\n"
                 f"**Transaction ID**: {change.transaction_id}"
-            ),
-            inline=False
+            )
         )
 
     # Flux Change
@@ -397,32 +431,28 @@ async def log_embed(change: CharacterChange) -> discord.Embed:
             value=(
                 f"**Flux**: {change.flux}\n"
                 f"**Flux Change**: {change.flux_change}"
-            ),
-            inline=False
+            )
         )
 
     # Tradition Change
     if change.tradition_name and change.tradition_link:
         embed.add_field(
             name="Tradition Change",
-            value=f"**Tradition**: [{change.tradition_name}]({change.tradition_link})",
-            inline=False
+            value=f"**Tradition**: [{change.tradition_name}]({change.tradition_link})"
         )
 
     # Template Change
     if change.template_name and change.template_link:
         embed.add_field(
             name="Template Change",
-            value=f"**Template**: [{change.template_name}]({change.template_link})",
-            inline=False
+            value=f"**Template**: [{change.template_name}]({change.template_link})"
         )
 
     # Alternate Reward
     if change.alternate_reward is not None:
         embed.add_field(
             name="Other Rewards",
-            value=change.alternate_reward,
-            inline=False
+            value=change.alternate_reward
         )
 
     # Fame and Prestige
@@ -438,16 +468,13 @@ async def log_embed(change: CharacterChange) -> discord.Embed:
                 f"**Received Fame**: {fame}\n"
                 f"**Total Prestige**: {total_prestige}\n"
                 f"**Received Prestige**: {prestige}"
-            ),
-            inline=False
+            )
         )
 
     # Set Footer
     if change.source is not None:
         embed.set_footer(text=change.source)
 
-    thread = await guild.get_thread(thread)
-    await thread.send_message(embed=embed)
     return embed
 
 
@@ -501,6 +528,7 @@ def get_utc_offset(tz):
         # Format the offset as "+HH:MM" or "-HH:MM"
         return f"{offset_hours:+03}:{offset_minutes:02}"
     except Exception as e:
+        logging.exception(f"An error occurred whilst getting UTC offset for timezone '{tz}': {e}")
         return "+00:00"  # Return UTC if the timezone is invalid or there's an error
 
 
@@ -594,7 +622,7 @@ async def create_timecard_plot(guild_id, player_name, day, utc_offset):
     test = ['nuts', 'berries', 'bananas']
     if type(player_name) is str:
         row = fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset_minutes)
-        player_availability = []  # Initialize an empty list to store player availability
+
         if row:
             player_availability = row  # Skip the first 3 columns (Player_Name, UTC_Offset, Day)
         else:
@@ -654,7 +682,7 @@ async def create_timecard_plot(guild_id, player_name, day, utc_offset):
         cmap = plt.colormaps.get_cmap('RdYlGn')
 
         # Create a plot with larger size to fit everything
-        min_height = max(3, len(player_name) * 0.5)  # Minimum height of 3 inches
+        min_height = max(3, int(len(player_name) * 0.5))  # Minimum height of 3 inches
         fig, ax1 = plt.subplots(figsize=(14, min_height))  # ax1 will be used for the player availability heatmap
 
         # Plot the player availability heatmap
@@ -736,6 +764,38 @@ def adjust_day(day, hours, utc_offset):
 
 
 # *** MISC FUNCTIONS *** #
+def extract_document_id(url: str) -> Optional[str]:
+    try:
+        pattern = r'/document/d/([a-zA-Z0-9-_]+)'
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+        else:
+            return None
+    except Exception as e:
+        logging.error(f"Failed to extract document ID from URL '{url}': {e}")
+        return None
+
+
+def validate_mythweavers(url: str) -> Tuple[bool, str]:
+    try:
+        parsed_url = urlparse(url)
+        if parsed_url.scheme != 'https':
+            return False, "URL must start with 'https://'"
+        if parsed_url.netloc != 'www.myth-weavers.com':
+            return False, "URL must be from 'www.myth-weavers.com'"
+        if parsed_url.path != '/sheet.html':
+            return False, "URL path must be '/sheet.html'"
+        query_params = parse_qs(parsed_url.query)
+        fragment_params = parse_qs(parsed_url.fragment)
+        id_param = query_params.get('id') or fragment_params.get('id')
+        if not id_param or not id_param[0].isdigit():
+            return False, "URL must contain a valid 'id' parameter"
+        return True, ""
+    except Exception as e:
+        logging.error(f"Error validating Myth-Weavers link '{url}': {e}")
+        return False, "An error occurred during validation"
+
 
 
 def ordinal(n):
@@ -746,38 +806,60 @@ def ordinal(n):
     return str(n) + suffix
 
 
-def put_wa_article(guild_id, template, category, title, overview, author) -> Optional[dict]:
-    if guild_id in [883009758179762208, 280061170231017472]:
-        try:
-            client = WaClient(
-                'pathparser',
-                'https://github.com/Solfyrism/Pathparser',
-                'V1.1',
-                os.getenv('WORLD_ANVIL_API'),
-                os.getenv('WORLD_ANVIL_USER')
-            )
-            world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
-            evaluated_overview = drive_word_document(overview)
-            new_page = client.article.put({
-                'title': title,
-                'content': evaluated_overview,
-                'category': {'id': category},
-                'templateType': template,  # generic article template
-                'state': 'public',
-                'isDraft': False,
-                'entityClass': {str.title(template)},
-                'tags': {author},
-                'world': {'id': world_id}
-            })
-            return new_page
-        except Exception as e:
-            logging.exception(f"Error in article creation for title '{title}': {e}")
+async def put_wa_article(guild_id: int, template: str, category: str, title: str, overview: str, author: str) -> (
+        Optional)[dict]:
+    allowed_guilds = [883009758179762208, 280061170231017472]
+    if guild_id not in allowed_guilds:
+        logging.warning(f"Guild ID {guild_id} is not authorized to create articles.")
+        return None
+
+    try:
+        api_key = os.getenv('WORLD_ANVIL_API')
+        user_id = os.getenv('WORLD_ANVIL_USER')
+        if not api_key or not user_id:
+            logging.error("World Anvil API credentials are not set.")
             return None
 
+        client = WaClient(
+            'pathparser',
+            'https://github.com/Solfyrism/Pathparser',
+            'V1.1',
+            api_key,
+            user_id
+        )
+        world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
 
-async def put_wa_report(cursor, guild_id, session_id, overview, author) -> Optional[dict]:
+        evaluated_overview = drive_word_document(overview)
+
+        # Map templates to entity classes
+        template_to_entity_class = {
+            'generic': 'Generic',
+            'character': 'Person',
+            'location': 'Location',
+            # Add other mappings as needed
+        }
+        entity_class = template_to_entity_class.get(template.lower(), template)
+
+        new_page = client.article.put({
+            'title': title,
+            'content': evaluated_overview,
+            'category': {'id': category},
+            'templateType': template,
+            'state': 'public',
+            'isDraft': False,
+            'entityClass': entity_class,
+            'tags': author,
+            'world': {'id': world_id}
+        })
+        return new_page
+    except Exception as e:
+        logging.exception(f"Error in article creation for title '{title}': {e}")
+        return None
+
+
+async def put_wa_report(cursor, guild_id, session_id, overview, author, plot, significance) -> Optional[dict]:
     if guild_id in [883009758179762208, 280061170231017472]:
-        evaluated_overview = await drive_word_document(overview)
+        evaluated_overview = drive_word_document(overview)
         try:
             client = WaClient(
                 'pathparser',
@@ -802,16 +884,16 @@ async def put_wa_report(cursor, guild_id, session_id, overview, author) -> Optio
                 characters = cursor.fetchall()
             else:
                 characters = characters
-            relatedpersonsblock = []
+            related_persons_block = []
             counter = 0
-            completed_str = session_info[1] if session_info[1] is not None else datetime.datetime.now().strftime(
+            completed_str = session_info[1] if session_info[1] is not None else datetime.now().strftime(
                 "%Y-%m-%d %H:%M")
-            completed_time = datetime.datetime.strptime(completed_str, '%Y-%m-%d %H:%M')
-            day_test = datetime.datetime.strftime(completed_time, '%d')
-            month_test = datetime.datetime.strftime(completed_time, '%m')
+            completed_time = datetime.strptime(completed_str, '%Y-%m-%d %H:%M')
+            day_test = datetime.strftime(completed_time, '%d')
+            month_test = datetime.strftime(completed_time, '%m')
             new_report_page = client.article.put({
                 'title': f'{str(session_id).rjust(3, "0")}: {session_info[0]}',
-                'content': f'{overview}',
+                'content': f'{evaluated_overview}',
                 'category': {'id': 'b71f939a-f72d-413b-b4d7-4ebff1e162ca'},
                 'templateType': 'report',  # generic article template
                 'state': 'public',
@@ -826,13 +908,13 @@ async def put_wa_report(cursor, guild_id, session_id, overview, author) -> Optio
                 print(f" This is a character {character[0]} Do they have an article: {character[2]}?")
                 if character[2] is not None:
                     person = {'id': character[2]}
-                    relatedpersonsblock.append(person)
+                    related_persons_block.append(person)
                     counter += 1
             if counter == 0:
                 new_timeline_page = client.history.put({
                     'title': f'{session_info[0]}',
                     'content': f'{session_info[4]}',
-                    'fullcontent': f'{overview}',
+                    'fullcontent': f'{evaluated_overview}',
                     'timelines': [{'id': '906c8c14-2283-47e0-96e2-0fcd9f71d0d0'}],
                     'significance': significance,
                     'parsedContent': session_info[4],
@@ -846,14 +928,14 @@ async def put_wa_report(cursor, guild_id, session_id, overview, author) -> Optio
                     'world': {'id': world_id}
                 })
             else:
-                relatedpersonsblock = relatedpersonsblock
+                related_persons_block = related_persons_block
                 new_timeline_page = client.history.put({
                     'title': f'{session_info[0]}',
                     'content': f'{session_info[4]}',
-                    'fullcontent': f'{overview}',
+                    'fullcontent': f'{evaluated_overview}',
                     'timelines': [{'id': '906c8c14-2283-47e0-96e2-0fcd9f71d0d0'}],
                     'significance': significance,
-                    'characters': relatedpersonsblock,
+                    'characters': related_persons_block,
                     'parsedContent': session_info[4],
                     'report': {'id': new_report_page['id']},
                     'year': 22083,
@@ -864,36 +946,52 @@ async def put_wa_report(cursor, guild_id, session_id, overview, author) -> Optio
                     'endingDay': int(day_test),
                     'world': {'id': world_id}
                 })
+            await cursor.execute(
+                'update Sessions set Article_link = ?, Article_ID = ?, History_ID = ? where Session_ID = ?',
+                (new_report_page['url'], new_report_page['id'], new_timeline_page['id'], session_id))
+            await cursor.connection.commit()
+        except Exception as e:
+            logging.exception(f"Error in article creation for session '{session_id}': {e}")
+            return None
 
-def drive_word_document(overview) -> Optional[str]:
+
+def drive_word_document(overview: str) -> Optional[str]:
     try:
-        if overview[:4] == "http":
-            parts = overview.split('/')
-            if len(parts) == 5:
-                link = parts[3]
-            elif len(parts) == 7:
-                link = parts[5]
-            else:
-                link = None
+        if overview.startswith("http"):
+            document_id = extract_document_id(overview)
+            if document_id is None:
+                logging.error(f"Could not extract document ID from URL '{overview}'.")
+                return None
         else:
-            link = None
-        if link is not None:
-            SERVICE_ACCOUNT_FILE = os.getenv('SERVICE_ACCOUNT_FILE')
-            SCOPES = ['https://www.googleapis.com/auth/documents.readonly']
-            credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-            service = build('docs', 'v1', credentials=credentials)
-            DOCUMENT_ID = link
-            document = service.documents().get(documentId=DOCUMENT_ID).execute()
-            word_blob = ""
-            for element in document.get('body').get('content'):
-                if 'paragraph' in element:
-                    for text_run in element.get('paragraph').get('elements'):
-                        word_blob += (text_run.get('textRun').get('content'))
-            print(word_blob)
-            return word_blob
-        else:
-            overview = overview
+            # If overview is not a URL, return it as is
             return overview
-    except (aiosqlite.Error, TypeError, ValueError) as e:
+
+        # Authenticate with Google Docs API
+        service_account_file = os.getenv('SERVICE_ACCOUNT_FILE')
+        if not service_account_file:
+            logging.error("Service account file is not set.")
+            return None
+
+        scopes = ['https://www.googleapis.com/auth/documents.readonly']
+        credentials = service_account.Credentials.from_service_account_file(service_account_file, scopes=scopes)
+        service = build('docs', 'v1', credentials=credentials)
+
+        # Fetch the document content
+        document = service.documents().get(documentId=document_id).execute()
+
+        word_blob = ""
+        for element in document.get('body', {}).get('content', []):
+            paragraph = element.get('paragraph')
+            if paragraph:
+                for text_run in paragraph.get('elements', []):
+                    text_content = text_run.get('textRun', {}).get('content')
+                    if text_content:
+                        word_blob += text_content
+
+        return word_blob.strip()
+    except urllib.error.HTTPError as e:
+        logging.exception(f"HTTP error while retrieving document: {e}")
+        return None
+    except Exception as e:
         logging.exception(f"Error in retrieving overview: {e}")
         return None

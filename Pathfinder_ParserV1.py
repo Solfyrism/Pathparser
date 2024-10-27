@@ -1622,6 +1622,19 @@ async def character_milestones(ctx: commands.Context, character_name: str, amoun
                     source = f"admin adjusted milestones by {adjust_milestones} for {character_name}"
                     logging_embed = log_embed(player_info[2], author, character_level, adjust_milestones, milestone_total, remaining, None, None, None, None, None, None, None, None, None, None, None, None,None, None, None, None, None, None, None, source)
                     logging_thread = guild.get_thread(player_info[25])
+                    if logging_thread is None:
+                        logging_thread = await bot.fetch_channel(player_info[25])
+                        if logging_thread.archived:
+                            try:
+                                # Unarchive the thread
+                                await logging_thread.edit(archived=False, locked=False)
+                            except discord.Forbidden:
+                                print(f"Bot lacks permissions to unarchive thread {logging_thread.id}")
+                                await ctx.response.send_message(
+                                    f"Cannot send message to archived thread <#{logging_thread.id}>. Please unarchive it or grant the bot permissions.",
+                                    ephemeral=True)
+                            except Exception as e:
+                                print(f"An error occurred while unarchiving thread {logging_thread.id}: {e}")
                     await logging_thread.send(embed=logging_embed)
                     if level_range_characters is None:
                         cursor.execute(f"SELECT Level, Role_name, Role_ID FROM Level_Range WHERE level = {character_level}")

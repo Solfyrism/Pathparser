@@ -234,11 +234,7 @@ async def gold_calculation(
         source: str,
         reason: str
 ) -> Union[Tuple[int, int, int, int], int, str]:
-    gold_total = 0
-    gold_value_total = 0
-    gold_value_max_total = 0
     return_value = -1
-    difference = 0
     time = datetime.datetime.now()
     try:
         if gold_change > 0:
@@ -282,13 +278,17 @@ async def gold_calculation(
             )
             await cursor.connection.commit()
             sql = "INSERT INTO A_Audit_Gold(Author_Name, Author_ID, Character_Name, Gold_Value, Effective_Gold_Value, Effective_Gold_Value_Max, Reason, Source_Command, Time) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            val = (interaction.user.name, interaction.user.id, character_name, Decimal(gold_total), Decimal(gold_value_total), Decimal(gold_value_max_total), reason, source, time)
+            val = (
+                interaction.user.name, interaction.user.id, character_name, Decimal(gold_total),
+                Decimal(gold_value_total),
+                Decimal(gold_value_max_total), reason, source, time)
             await cursor.execute(sql, val)
             await cursor.connection.commit()
             await cursor.execute("SELECT Max(transaction_id) FROM A_Audit_Gold")
             transaction_id = await cursor.fetchone()
             logging.info(f"Gold updated for character '{character_name}', transaction_id: {transaction_id[0]}.")
-            return_value = (Decimal(gold_total), Decimal(gold_value_total), Decimal(gold_value_max_total), transaction_id[0])
+            return_value = (
+                Decimal(gold_total), Decimal(gold_value_total), Decimal(gold_value_max_total), transaction_id[0])
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error in gold calculation for character '{character_name}': {e}")
     return return_value
@@ -302,14 +302,13 @@ async def flux_calculation(cursor, character_name, flux, flux_change):
             (flux_total, character_name))
         await cursor.commit()
         return_value = flux_total
-    except  (aiosqlite.Error, TypeError, ValueError) as e:
+    except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error in flux calculation for {character_name} with error: {e}")
         return_value = -1
     return return_value
 
 
 async def stg_character_embed(cursor, character_name) -> (Union[Tuple[discord.Embed, str], str]):
-    return_value = None
     try:
         # 7 7 1
         await cursor.execute(
@@ -342,7 +341,6 @@ async def stg_character_embed(cursor, character_name) -> (Union[Tuple[discord.Em
         embed.add_field(name="Mythic",
                         value=f'**Trials**: {character_info[10]}, '
                               f'**Remaining**: {character_info[11]}')  # Trials, Remaining Trials
-        linkage = f""
         description = character_info[4]
         if character_info[5] == 'Offerings':
             embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
@@ -357,8 +355,8 @@ async def stg_character_embed(cursor, character_name) -> (Union[Tuple[discord.Em
 
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"An error occurred whilst building character embed for '{character_name}': {e}")
-        return_value = f"An error occurred whilst building character embed for '{character_name}'."
-    return return_value
+        return_message = f"An error occurred whilst building character embed for '{character_name}'."
+    return return_message
 
 
 # noinspection PyUnresolvedReferences
@@ -421,18 +419,14 @@ class CharacterCommands(commands.GroupCog, name='Character'):
             cursor = await conn.cursor()
             try:
                 if character_name is not None:
-                    true_character_name = str.replace(
-                        str.replace(
-                            str.replace(str.replace(str.replace(str.title(character_name), ";", ""), "(", ""), ")", ""),
-                            "[", ""), "]", "")
-                    character_name = unidecode(true_character_name)
+                    true_character_name, character_name = name_fixer(character_name)
                 else:
                     await interaction.response.send_message(f"Character Name is required")
                     return
                 if nickname is not None:
-                    nickname = str.replace(str.replace(str.title(nickname), ";", ""), ")", "")
+                    _ , nickname = name_fixer(nickname)
                 if titles is not None:
-                    titles = str.replace(titles, ";", "")
+                    titles, _ = name_fixer(titles)
                 if description is not None:
                     description = str.replace(description, ";", "")
                 if mythweavers is not None:
@@ -505,13 +499,13 @@ class CharacterCommands(commands.GroupCog, name='Character'):
                                 discord.app_commands.Choice(name='Oath of Absolute Poverty', value=4),
                                 discord.app_commands.Choice(name='No Change', value=5)])
     @app_commands.describe(new_nickname='a shorthand way to look for your character in displays')
-    async def edit(self, interaction: commands.Context, name: str, new_character_name: str = None, mythweavers: str = None,
+    async def edit(self, interaction: discord.Interaction, name: str, new_character_name: str = None,
+                   mythweavers: str = None,
                    image_link: str = None, new_nickname: str = None, titles: str = None, description: str = None,
                    oath: discord.app_commands.Choice[int] = 5, color: str = None):
         guild_id = interaction.guild_id
         guild = interaction.guild
         author = interaction.user.name
-        author_id = interaction.user.id
         interaction.response.defer(thinking=True)
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
             cursor = await conn.cursor()
@@ -522,16 +516,16 @@ class CharacterCommands(commands.GroupCog, name='Character'):
                        "Personal_Cap, Prestige, Article_Link FROM Player_Characters "
                        "where Player_Name = ? AND Character_Name = ? OR Player_Name = ? AND  Nickname = ?")
                 val = (author, name, author, name)
-                cursor.execute(sql, val)
-                results = cursor.fetchone()
+                await cursor.execute(sql, val)
+                results = await cursor.fetchone()
                 await interaction.response.defer(thinking=True, ephemeral=True)
                 if results is None:
                     sql = f"Select True_Character_Name, Nickname, Titles, Description, Mythweavers, Image_Link, Oath, Color, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Gold_Value, Gold_Value_Max, Flux, Character_Name from A_STG_Player_Characters where Player_Name = ? AND Character_Name = ? OR  Player_Name = ? AND Nickname = ?"
                     val = (author, name, author, name)
-                    cursor.execute(sql, val)
+                    await cursor.execute(sql, val)
                     results = cursor.fetchone()
                     if results is None:
-                        await interaction.response.send_message(
+                        await interaction.followup.send(
                             f"Cannot find any {name} owned by {author} with the supplied name or nickname.")
                     else:
                         if new_character_name is not None:
@@ -540,7 +534,7 @@ class CharacterCommands(commands.GroupCog, name='Character'):
                             true_character_name = results[0]
                             new_character_name = results[18]
                         if new_nickname is not None:
-                            new_nickname , _ = name_fixer(new_nickname)
+                            new_nickname, _ = name_fixer(new_nickname)
                         else:
                             new_nickname = results[1]
                         if titles is not None:
@@ -586,31 +580,43 @@ class CharacterCommands(commands.GroupCog, name='Character'):
                                                  "True_Character_Name = ?, Character_Name = ?, Nickname = ?, Titles = ?,"
                                                  " Description = ?, Mythweavers = ?, Image_Link = ?, Oath = ?, "
                                                  "Color = ? "
-                                                 "where True_Character_Name = ?", (true_character_name, new_character_name, new_nickname, titles, description, mythweavers, image_link, oath_name, color, true_name))
+                                                 "where True_Character_Name = ?", (
+                                                     true_character_name, new_character_name, new_nickname, titles,
+                                                     description, mythweavers, image_link, oath_name, color, true_name))
                             embed = await stg_character_embed(cursor, new_character_name)
                             await interaction.response.send_message(embed=embed)
                         else:
                             await interaction.response.send_message(f"Invalid Hex Color Code!")
                 else:
+
                     if new_character_name is not None:
                         new_character_name, true_character_name = name_fixer(new_character_name)
+                        character_changes = shared_functions.CharacterChange(character_name=new_character_name,
+                                                                             author=author,
+                                                                             source='Character Edit')
                     else:
                         new_character_name, true_character_name = name_fixer(results[0])
+                        character_changes = shared_functions.CharacterChange(character_name=new_character_name,
+                                                                             author=author,
+                                                                             source='Character Edit')
                     if new_nickname is not None:
                         new_nickname, _ = name_fixer(new_nickname)
                     else:
                         new_nickname = results[1]
                     if titles is not None:
                         titles = str.replace(str.replace(titles, ";", ""), ")", "")
+                        character_changes.titles = titles
                     else:
                         titles = results[2]
                     if description is not None:
                         description = str.replace(str.replace(description, ";", ""), ")", "")
+                        character_changes.description = description
                     else:
                         description = results[3]
                     if mythweavers is not None:
                         mythweavers = str.replace(str.replace(mythweavers, ";", ""), ")", "")
                         mythweavers_valid = str.lower(mythweavers[0:5])
+                        character_changes.mythweavers = mythweavers
                         if mythweavers_valid != 'https':
                             await interaction.followup.send(f"Mythweavers link is missing HTTPS:")
                             return
@@ -619,6 +625,7 @@ class CharacterCommands(commands.GroupCog, name='Character'):
                     if image_link is not None:
                         image_link = str.replace(str.replace(image_link, ";", ""), ")", "")
                         image_link_valid = str.lower(image_link[0:5])
+                        character_changes.image_link = image_link
                         if image_link_valid != 'https':
                             await interaction.followup.send(f"Image link is missing HTTPS:")
                             return
@@ -629,6 +636,7 @@ class CharacterCommands(commands.GroupCog, name='Character'):
                         oath_name = results[6]
                     else:
                         oath_name = oath
+                        character_changes.oath = oath_name
                     if color is not None:
                         regex = r'^#(?:[0-9a-fA-F]{3}){1,2}$'
                         match = re.search(regex, color)
@@ -639,7 +647,6 @@ class CharacterCommands(commands.GroupCog, name='Character'):
                     if len(color) == 7 and match:
                         if results is not None:
                             int_color = int(color[1:], 16)
-                            true_name = results[0]
                             if oath_name != results[6] and results[8] < 7:
                                 if oath == 'Offerings':
                                     # Only half the gold change is applied
@@ -670,16 +677,23 @@ class CharacterCommands(commands.GroupCog, name='Character'):
                                 await conn.commit()
                                 sql = "INSERT INTO A_Audit_Gold(Author_Name, Author_ID, Character_Name, Gold_Value, Effective_Gold_Value, Effective_Gold_Value_Max, Reason, Source_Command, Time) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
                                 val = (interaction.user.name, interaction.user.id, character_name, Decimal(gold_total),
-                                       Decimal(gold_value_total), Decimal(gold_value_max_total), 'Oaths were Changed', 'Character Edit', datetime.datetime.now())
+                                       Decimal(gold_value_total), Decimal(gold_value_max_total), 'Oaths were Changed',
+                                       'Character Edit', datetime.datetime.now())
                                 await cursor.execute(sql, val)
                                 await cursor.connection.commit()
                                 await cursor.execute("SELECT Max(transaction_id) FROM A_Audit_Gold")
                                 transaction_id = await cursor.fetchone()
-                                logging.info(f"Gold updated for character '{character_name}' Transaction ID: {transaction_id[0]}.")
+                                logging.info(
+                                    f"Gold updated for character '{character_name}' Transaction ID: {transaction_id[0]}.")
                             if results[23] is not None:
                                 pass
                                 # await EventCommand.edit_bio(self, guild_id, new_character_name, None, results[22])
-                            await cursor.execute("update Player_Characters set True_Character_Name = ?, Character_Name = ?, Nickname = ?, Titles = ?, Description = ?, Mythweavers = ?, Image_Link = ?, Oath = ?, Color = ? where Character_Name = ?", (true_character_name, new_character_name, new_nickname, titles, description, mythweavers, image_link, oath_name, color, name))
+                            await cursor.execute(
+                                "update Player_Characters set True_Character_Name = ?, Character_Name = ?, Nickname = ?, Titles = ?, Description = ?, Mythweavers = ?, Image_Link = ?, Oath = ?, Color = ? where Character_Name = ?",
+                                (
+                                    true_character_name, new_character_name, new_nickname, titles, description,
+                                    mythweavers,
+                                    image_link, oath_name, color, name))
                             await conn.commit()
                             await cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
                             character_log_channel_id = await cursor.fetchone()
@@ -689,13 +703,17 @@ class CharacterCommands(commands.GroupCog, name='Character'):
                             await bio_message.edit(content=char_embed[1], embed=char_embed[0])
                             embed = char_embed[0]
                             if oath_name == 'Offerings':
-                                embed.set_footer(text=f'Character Successfully Updated! \r\n {description}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
+                                embed.set_footer(text=f'Character Successfully Updated! \r\n {description}',
+                                                 icon_url=f'https://i.imgur.com/dSuLyJd.png')
                             elif oath_name[6] == 'Poverty':
-                                embed.set_footer(text=f'Character Successfully Updated! \r\n {description}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
+                                embed.set_footer(text=f'Character Successfully Updated! \r\n {description}',
+                                                 icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
                             elif oath_name[6] == 'Absolute':
-                                embed.set_footer(text=f'Character Successfully Updated! \r\n {description}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
+                                embed.set_footer(text=f'Character Successfully Updated! \r\n {description}',
+                                                 icon_url=f'https://i.imgur.com/ibE5vSY.png')
                             else:
                                 embed.set_footer(text=f'Character Successfully Updated! \r\n {description}')
+                            character_logging_embed = shared_functions.log_embed(character_changes)
                             logging_thread = guild.get_thread(player_info[25])
                             await logging_thread.send(embed=embed)
                             await logging_thread.edit(name=f"{new_character_name}")
@@ -710,6 +728,68 @@ class CharacterCommands(commands.GroupCog, name='Character'):
                             await interaction.followup.send(embed=embed)
                     else:
                         await interaction.followup.send(f"Invalid Hex Color Code!")
+            except (aiosqlite.Error, TypeError, ValueError) as e:
+                logging.exception(f"An error occurred whilst building character embed for '{character_name}': {e}")
+                interaction.response.send_message = f"An error occurred whilst building character embed for '{character_name}' Error: {e}."
+
+    @character.command(name='retire', description='retire a character')
+    @app_commands.autocomplete(character_name=own_character_select_autocompletion)
+    async def retire(self, interaction: discord.Interaction, character_name: str):
+        character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
+        guild_id = interaction.guild_id
+        guild = interaction.guild
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        author = interaction.user.name
+        sql = f"SELECT True_Character_Name, Thread_ID from Player_Characters where  Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND  Nickname = ?"
+        val = (author, character_name, author, character_name)
+        cursor.execute(sql, val)
+        results = cursor.fetchone()
+        cursor.close()
+        db.close()
+        if results is None:
+            await interaction.response.send_message(
+                f"there is no character registered by character name or nickname as {character_name} owned by {interaction.user.name} to unregister.",
+                ephemeral=True)
+        if results is not None:
+            true_character_name = results[0]
+            buttons = ["✅", "❌"]  # checkmark X symbol
+            embed = discord.Embed(title=f"Are you sure you want to retire {true_character_name}?",
+                                  description=f"hit the checkmark to confirm", colour=discord.Colour.blurple())
+            await interaction.response.send_message(embed=embed)
+            msg = await interaction.original_response()
+            for button in buttons:
+                await msg.add_reaction(button)
+            while True:
+                try:
+                    reaction, user = await bot.wait_for('reaction_add', check=lambda reaction,
+                                                                                     user: user.id == interaction.user.id and reaction.emoji in buttons,
+                                                        timeout=60.0)
+                except asyncio.TimeoutError:
+                    embed.set_footer(text="Request has timed out.")
+                    await msg.edit(embed=embed)
+                    await msg.clear_reactions()
+                    return print("timed out")
+                else:
+                    if reaction.emoji == u"\u274C":
+                        embed = discord.Embed(title=f"You have thought better of retirement",
+                                              description=f"Carpe Diem my lad!", colour=discord.Colour.blurple())
+                        await msg.edit(embed=embed)
+                        await msg.clear_reactions()
+                    if reaction.emoji == u"\u2705":
+                        embed = discord.Embed(title=f"{true_character_name} has retired",
+                                              description=f"Have a pleasant retirement.", colour=discord.Colour.red())
+                        await msg.edit(embed=embed)
+                        await msg.clear_reactions()
+                        await EventCommand.retire_character(self, guild_id, true_character_name, author)
+                        source = f"Character has retired!"
+                        logging_embed = log_embed(results[0], author, None, None, None, None, None, None, None, None,
+                                                  None,
+                                                  None, None, None, None, None, None, None, None, None, None, None,
+                                                  None,
+                                                  None, None, source)
+                        logging_thread = guild.get_thread(results[1])
+                        await logging_thread.send(embed=logging_embed)
 
 
 """ I AM DUMMY TEMPLATE CODE     
@@ -727,64 +807,6 @@ class CharacterCommands(commands.GroupCog, name='Character'):
 
 """
 
-
-@character.command()
-@app_commands.autocomplete(character_name=own_character_select_autocompletion)
-async def retire(interaction: commands.Context, character_name: str):
-    "Retires your character"
-    character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
-    guild_id = interaction.guild_id
-    guild = interaction.guild
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    author = interaction.user.name
-    sql = f"SELECT True_Character_Name, Thread_ID from Player_Characters where  Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND  Nickname = ?"
-    val = (author, character_name, author, character_name)
-    cursor.execute(sql, val)
-    results = cursor.fetchone()
-    cursor.close()
-    db.close()
-    if results is None:
-        await interaction.response.send_message(
-            f"there is no character registered by character name or nickname as {character_name} owned by {interaction.user.name} to unregister.",
-            ephemeral=True)
-    if results is not None:
-        true_character_name = results[0]
-        buttons = ["✅", "❌"]  # checkmark X symbol
-        embed = discord.Embed(title=f"Are you sure you want to retire {true_character_name}?",
-                              description=f"hit the checkmark to confirm", colour=discord.Colour.blurple())
-        await interaction.response.send_message(embed=embed)
-        msg = await interaction.original_response()
-        for button in buttons:
-            await msg.add_reaction(button)
-        while True:
-            try:
-                reaction, user = await bot.wait_for('reaction_add', check=lambda reaction,
-                                                                                 user: user.id == interaction.user.id and reaction.emoji in buttons,
-                                                    timeout=60.0)
-            except asyncio.TimeoutError:
-                embed.set_footer(text="Request has timed out.")
-                await msg.edit(embed=embed)
-                await msg.clear_reactions()
-                return print("timed out")
-            else:
-                if reaction.emoji == u"\u274C":
-                    embed = discord.Embed(title=f"You have thought better of retirement",
-                                          description=f"Carpe Diem my lad!", colour=discord.Colour.blurple())
-                    await msg.edit(embed=embed)
-                    await msg.clear_reactions()
-                if reaction.emoji == u"\u2705":
-                    embed = discord.Embed(title=f"{true_character_name} has retired",
-                                          description=f"Have a pleasant retirement.", colour=discord.Colour.red())
-                    await msg.edit(embed=embed)
-                    await msg.clear_reactions()
-                    await EventCommand.retire_character(self, guild_id, true_character_name, author)
-                    source = f"Character has retired!"
-                    logging_embed = log_embed(results[0], author, None, None, None, None, None, None, None, None, None,
-                                              None, None, None, None, None, None, None, None, None, None, None, None,
-                                              None, None, source)
-                    logging_thread = guild.get_thread(results[1])
-                    await logging_thread.send(embed=logging_embed)
 
 
 @character.command()
@@ -887,7 +909,7 @@ async def levelup(interaction: discord.Interaction, character_name: str, amount:
                                         if level_range_characters is None:
                                             cursor.execute(
                                                 f"SELECT Level, Role_name, Role_ID FROM Level_Range WHERE level = {character_level}")
-                                            new_level_range = cursor.fetdchone()
+                                            new_level_range = cursor.fetchone()
                                             role1 = guild.get_role(level_range[2])
                                             role2 = guild.get_role(new_level_range[2])
                                             await member.remove_roles(role1)
@@ -1134,7 +1156,7 @@ async def pouch(interaction: discord.Interaction, character_name: str):
                              discord.app_commands.Choice(name='Apply Masculine Title', value=2),
                              discord.app_commands.Choice(name='Apply Feminine Title', value=3),
                              discord.app_commands.Choice(name='Change Gender', value=4)])
-async def entitle(interaction: commands.Context, character_name: str, title: str, usage: discord.app_commands.Choice[int]):
+async def entitle(interaction: discord.Interaction, character_name: str, title: str, usage: discord.app_commands.Choice[int]):
     "Apply a title to yourself! This defaults to display the available titles."
     character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
     guild_id = interaction.guild_id
@@ -1315,7 +1337,7 @@ async def entitle(interaction: commands.Context, character_name: str, title: str
 @app_commands.autocomplete(name=fame_lookup)
 @app_commands.choices(
     modify=[discord.app_commands.Choice(name='Display', value=1), discord.app_commands.Choice(name='use', value=2)])
-async def proposition(interaction: commands.Context, character_name: typing.Optional[str], name: typing.Optional[str],
+async def proposition(interaction: discord.Interaction, character_name: typing.Optional[str], name: typing.Optional[str],
                       approver: typing.Optional[discord.Member], modify: discord.app_commands.Choice[int] = 1):
     "Proposition NPCs for Favors using your prestige!."
     character_name = None if character_name is None else str.replace(
@@ -1456,7 +1478,7 @@ async def proposition(interaction: commands.Context, character_name: typing.Opti
 
 @character.command()
 @app_commands.autocomplete(character_name=own_character_select_autocompletion)
-async def cap(interaction: commands.Context, character_name: str, level_cap: int):
+async def cap(interaction: discord.Interaction, character_name: str, level_cap: int):
     "THIS COMMAND DISPLAYS CHARACTER INFORMATION"
     character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
     author = interaction.user.name
@@ -1503,7 +1525,7 @@ async def cap(interaction: commands.Context, character_name: str, level_cap: int
 
 @character.command()
 @app_commands.autocomplete(character_name=character_select_autocompletion)
-async def display(interaction: commands.Context, player_name: typing.Optional[discord.Member], character_name: str = 'All',
+async def display(interaction: discord.Interaction, player_name: typing.Optional[discord.Member], character_name: str = 'All',
                   current_page: int = 1):
     "THIS COMMAND DISPLAYS CHARACTER INFORMATION"
     character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
@@ -1671,7 +1693,7 @@ async def display(interaction: commands.Context, player_name: typing.Optional[di
 @character.command()
 @app_commands.describe(
     level_range="the level range of the characters you are looking for. Keep in mind, this applies only to the preset low/med/high/max ranges your admin has set")
-async def list(interaction: commands.Context, level_range: discord.Role, current_page: int = 1):
+async def list(interaction: discord.Interaction, level_range: discord.Role, current_page: int = 1):
     "THIS COMMAND DISPLAYS CHARACTER INFORMATION"
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -1787,7 +1809,7 @@ async def list(interaction: commands.Context, level_range: discord.Role, current
 @app_commands.choices(
     modify=[discord.app_commands.Choice(name='Create', value=1), discord.app_commands.Choice(name='Edit', value=2)])
 @app_commands.autocomplete(character_name=own_character_select_autocompletion)
-async def backstory(interaction: commands.Context, character_name: str, backstory: str,
+async def backstory(interaction: discord.Interaction, character_name: str, backstory: str,
                     modify: discord.app_commands.Choice[int] = 1):
     "THIS COMMAND CREATES OR CHANGES THE BACKSTORY ASSOCIATED WITH YOUR CHARACTER"
     character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
