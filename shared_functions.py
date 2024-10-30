@@ -1,6 +1,5 @@
 import typing
 import urllib.error
-
 import discord
 import sqlite3
 from dateutil import parser
@@ -32,7 +31,7 @@ timezone_cache = sorted(available_timezones())
 
 # *** AUTOCOMPLETION COMMANDS *** #
 async def character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-        app_commands.Choice[str]]:
+    app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -51,7 +50,7 @@ async def character_select_autocompletion(interaction: discord.Interaction, curr
 
 
 async def stg_character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-        app_commands.Choice[str]]:
+    app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -70,7 +69,7 @@ async def stg_character_select_autocompletion(interaction: discord.Interaction, 
 
 
 async def own_character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-        app_commands.Choice[str]]:
+    app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -147,7 +146,7 @@ async def session_lookup(interaction: discord.Interaction, current: str) -> typi
 
 
 async def group_id_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-        app_commands.Choice[str]]:
+    app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -166,7 +165,7 @@ async def group_id_autocompletion(interaction: discord.Interaction, current: str
 
 
 async def player_session_lookup(interaction: discord.Interaction, current: str) -> typing.List[
-        app_commands.Choice[str]]:
+    app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -227,16 +226,16 @@ async def title_lookup(interaction: discord.Interaction, current: str) -> typing
 
 # *** DISPLAY FUNCTIONS *** #
 
-async def character_embed(cursor, character_name) -> (Union[Tuple[discord.Embed, str, int], str]):
+async def character_embed(cursor, character_name, guild) -> (Union[Tuple[discord.Embed, str, int], str]):
     try:
         await cursor.execute("SELECT Search from Admin where Identifier = 'Accepted_Bio_Channel'")
         channel_id = await cursor.fetchone()
-        # 8 7 7 5
+        # 8 7 7 6
         await cursor.execute(
             "SELECT player_name, player_id, True_Character_Name, Title, Titles, Description, Oath, Level, "
             "Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, "
             "Flux, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name, "
-            "Tradition_Link, Template_Name, Template_Link, Article_Link"
+            "Tradition_Link, Template_Name, Template_Link, Article_Link, Message_ID"
             " FROM Player_Characters WHERE Character_Name = ?", (character_name,))
         character_info = await cursor.fetchone()
         color = character_info[17]
@@ -292,6 +291,9 @@ async def character_embed(cursor, character_name) -> (Union[Tuple[discord.Embed,
         else:
             embed.set_footer(text=f'{description}')
         message = f"<@{character_info[1]}>"
+        bio_channel = guild.get_channel(channel_id[0])
+        bio_message = await bio_channel.fetch_message(character_info[26])
+        await bio_message.edit(content=message, embed=embed)
         return_value = embed, message, channel_id[0]
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"An error occurred whilst building character embed for '{character_name}': {e}")
@@ -349,133 +351,147 @@ class CharacterChange:
 
 
 # Function to create the embed
-async def log_embed(change: CharacterChange) -> discord.Embed:
-    embed = discord.Embed(
-        title=change.character_name,
-        description="Character Change",
-        color=discord.Color.blurple()
-    )
-    embed.set_author(name=change.author)
-    if change.titles is not None:
-        embed.add_field(
-            name="titles",
-            value=f"new titles: {change.titles}"
+async def log_embed(change: CharacterChange, guild, thread, bot) -> discord.Embed:
+    try:
+        embed = discord.Embed(
+            title=change.character_name,
+            description="Character Change",
+            color=discord.Color.blurple()
         )
-
-    if change.image is not None:
-        embed.set_thumbnail(url=change.image)
-    if change.mythweavers is not None:
-        embed.add_field(
-            name="Mythweavers",
-            value=f"[Character Sheet]({change.mythweavers})"
-        )
-
-    if change.titles is not None:
-        embed.add_field(
-            name="titles",
-            value=f"new titles: {change.titles}"
+        embed.set_author(name=change.author)
+        if change.titles is not None:
+            embed.add_field(
+                name="titles",
+                value=f"new titles: {change.titles}"
             )
-    if change.oath is not None:
-        embed.add_field(
-            name="Oath",
-            value=change.oath
-        )
-    if change.description is not None:
-        embed.add_field(
-            name="Description",
-            value=change.description
-        )
-    # Milestone Change
-    if change.milestone_change is not None:
-        embed.add_field(
-            name="Milestone Change",
-            value=(
-                f"**Level**: {change.level}\n"
-                f"**Milestone Change**: {change.milestone_change}\n"
-                f"**Total Milestones**: {change.milestones_total}\n"
-                f"**Milestones Remaining**: {change.milestones_remaining}"
+
+        if change.image is not None:
+            embed.set_thumbnail(url=change.image)
+        if change.mythweavers is not None:
+            embed.add_field(
+                name="Mythweavers",
+                value=f"[Character Sheet]({change.mythweavers})"
             )
-        )
 
-    # Trial Change
-    if change.trial_change is not None:
-        embed.add_field(
-            name="Trial Change",
-            value=(
-                f"**Mythic Tier**: {change.tier}\n"
-                f"**Trial Change**: {change.trial_change}\n"
-                f"**Total Trials**: {change.trials}\n"
-                f"**Trials Remaining**: {change.trials_remaining}"
+        if change.titles is not None:
+            embed.add_field(
+                name="titles",
+                value=f"new titles: {change.titles}"
             )
-        )
 
-    # Wealth Changes
-    if change.gold_change is not None:
-        gold = round(change.gold, 2) if change.gold is not None else "N/A"
-        gold_change = round(change.gold_change, 2)
-        effective_gold = round(change.effective_gold, 2) if change.effective_gold is not None else "N/A"
-        embed.add_field(
-            name="Wealth Changes",
-            value=(
-                f"**Gold**: {gold}\n"
-                f"**Gold Change**: {gold_change}\n"
-                f"**Effective Gold**: {effective_gold} GP\n"
-                f"**Transaction ID**: {change.transaction_id}"
+        if change.oath is not None:
+            embed.add_field(
+                name="Oath",
+                value=change.oath
             )
-        )
 
-    # Flux Change
-    if change.flux_change is not None:
-        embed.add_field(
-            name="Flux Change",
-            value=(
-                f"**Flux**: {change.flux}\n"
-                f"**Flux Change**: {change.flux_change}"
+        if change.description is not None:
+            embed.add_field(
+                name="Description",
+                value=change.description
             )
-        )
-
-    # Tradition Change
-    if change.tradition_name and change.tradition_link:
-        embed.add_field(
-            name="Tradition Change",
-            value=f"**Tradition**: [{change.tradition_name}]({change.tradition_link})"
-        )
-
-    # Template Change
-    if change.template_name and change.template_link:
-        embed.add_field(
-            name="Template Change",
-            value=f"**Template**: [{change.template_name}]({change.template_link})"
-        )
-
-    # Alternate Reward
-    if change.alternate_reward is not None:
-        embed.add_field(
-            name="Other Rewards",
-            value=change.alternate_reward
-        )
-
-    # Fame and Prestige
-    if change.fame is not None or change.prestige is not None:
-        total_fame = change.total_fame if change.total_fame is not None else "Not Changed"
-        total_prestige = change.total_prestige if change.total_prestige is not None else "Not Changed"
-        fame = change.fame if change.fame is not None else "Not Changed"
-        prestige = change.prestige if change.prestige is not None else "Not Changed"
-        embed.add_field(
-            name="Fame and Prestige",
-            value=(
-                f"**Total Fame**: {total_fame}\n"
-                f"**Received Fame**: {fame}\n"
-                f"**Total Prestige**: {total_prestige}\n"
-                f"**Received Prestige**: {prestige}"
+        # Milestone Change
+        if change.milestone_change is not None:
+            embed.add_field(
+                name="Milestone Change",
+                value=(
+                    f"**Level**: {change.level}\n"
+                    f"**Milestone Change**: {change.milestone_change}\n"
+                    f"**Total Milestones**: {change.milestones_total}\n"
+                    f"**Milestones Remaining**: {change.milestones_remaining}"
+                )
             )
-        )
 
-    # Set Footer
-    if change.source is not None:
-        embed.set_footer(text=change.source)
+        # Trial Change
+        if change.trial_change is not None:
+            embed.add_field(
+                name="Trial Change",
+                value=(
+                    f"**Mythic Tier**: {change.tier}\n"
+                    f"**Trial Change**: {change.trial_change}\n"
+                    f"**Total Trials**: {change.trials}\n"
+                    f"**Trials Remaining**: {change.trials_remaining}"
+                )
+            )
 
-    return embed
+        # Wealth Changes
+        if change.gold_change is not None:
+            gold = round(change.gold, 2) if change.gold is not None else "N/A"
+            gold_change = round(change.gold_change, 2)
+            effective_gold = round(change.effective_gold, 2) if change.effective_gold is not None else "N/A"
+            embed.add_field(
+                name="Wealth Changes",
+                value=(
+                    f"**Gold**: {gold}\n"
+                    f"**Gold Change**: {gold_change}\n"
+                    f"**Effective Gold**: {effective_gold} GP\n"
+                    f"**Transaction ID**: {change.transaction_id}"
+                )
+            )
+
+        # Flux Change
+        if change.flux_change is not None:
+            embed.add_field(
+                name="Flux Change",
+                value=(
+                    f"**Flux**: {change.flux}\n"
+                    f"**Flux Change**: {change.flux_change}"
+                )
+            )
+
+        # Tradition Change
+        if change.tradition_name and change.tradition_link:
+            embed.add_field(
+                name="Tradition Change",
+                value=f"**Tradition**: [{change.tradition_name}]({change.tradition_link})"
+            )
+
+        # Template Change
+        if change.template_name and change.template_link:
+            embed.add_field(
+                name="Template Change",
+                value=f"**Template**: [{change.template_name}]({change.template_link})"
+            )
+
+        # Alternate Reward
+        if change.alternate_reward is not None:
+            embed.add_field(
+                name="Other Rewards",
+                value=change.alternate_reward
+            )
+
+        # Fame and Prestige
+        if change.fame is not None or change.prestige is not None:
+            total_fame = change.total_fame if change.total_fame is not None else "Not Changed"
+            total_prestige = change.total_prestige if change.total_prestige is not None else "Not Changed"
+            fame = change.fame if change.fame is not None else "Not Changed"
+            prestige = change.prestige if change.prestige is not None else "Not Changed"
+            embed.add_field(
+                name="Fame and Prestige",
+                value=(
+                    f"**Total Fame**: {total_fame}\n"
+                    f"**Received Fame**: {fame}\n"
+                    f"**Total Prestige**: {total_prestige}\n"
+                    f"**Received Prestige**: {prestige}"
+                )
+            )
+
+        # Set Footer
+        if change.source is not None:
+            embed.set_footer(text=change.source)
+        logging_thread = guild.get_thread(thread)
+        if logging_thread is None:
+            logging_thread = await bot.fetch_channel(thread)
+            if logging_thread.archived:
+                try:
+                    # Unarchive the thread
+                    await logging_thread.edit(archived=False, locked=False)
+                except discord.Forbidden:
+                    logging.exception(f"Bot lacks permissions to unarchive thread {logging_thread.id}")
+        await logging_thread.send(embed=embed)
+        return embed
+    except (TypeError, ValueError) as e:
+        logging.exception(f"An error occurred whilst building character embed for '{change.character_name}': {e}")
 
 
 # *** TIME MANAGEMENT FUNCTIONS *** #
@@ -797,7 +813,6 @@ def validate_mythweavers(url: str) -> Tuple[bool, str]:
         return False, "An error occurred during validation"
 
 
-
 def ordinal(n):
     if 11 <= (n % 100) <= 13:
         suffix = "th"
@@ -812,7 +827,6 @@ async def put_wa_article(guild_id: int, template: str, category: str, title: str
     if guild_id not in allowed_guilds:
         logging.warning(f"Guild ID {guild_id} is not authorized to create articles.")
         return None
-
     try:
         api_key = os.getenv('WORLD_ANVIL_API')
         user_id = os.getenv('WORLD_ANVIL_USER')
@@ -853,11 +867,48 @@ async def put_wa_article(guild_id: int, template: str, category: str, title: str
         })
         return new_page
     except Exception as e:
+        # I haven't ever gotten a proper exception from the World Anvil API, so this is a catch-all until I can specify it down. https://pypi.org/project/pywaclient/#exceptions has them, but I'm not sure how to catch them yet.
         logging.exception(f"Error in article creation for title '{title}': {e}")
         return None
 
 
-async def put_wa_report(cursor, guild_id, session_id, overview, author, plot, significance) -> Optional[dict]:
+async def patch_wa_article(cursor, guild_id: int, article_id: str, title: str, overview: str) -> Optional[dict]:
+    allowed_guilds = [883009758179762208, 280061170231017472]
+    if guild_id not in allowed_guilds:
+        logging.warning(f"Guild ID {guild_id} is not authorized to create articles.")
+        return None
+    try:
+        api_key = os.getenv('WORLD_ANVIL_API')
+        user_id = os.getenv('WORLD_ANVIL_USER')
+        if not api_key or not user_id:
+            logging.error("World Anvil API credentials are not set.")
+            return None
+
+        client = WaClient(
+            'pathparser',
+            'https://github.com/Solfyrism/Pathparser',
+            'V1.1',
+            api_key,
+            user_id
+        )
+        world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
+
+        evaluated_overview = drive_word_document(overview)
+
+        updated_page = client.article.patch(article_id, {
+            'title': title,
+            'content': f'{evaluated_overview}',
+            'world': {'id': world_id}
+        })
+        return updated_page
+    except Exception as e:
+        # I haven't ever gotten a proper exception from the World Anvil API, so this is a catch-all until I can specify it down. https://pypi.org/project/pywaclient/#exceptions has them, but I'm not sure how to catch them yet.
+        logging.exception(f"Error in article creation for title '{title}': {e}")
+        return None
+
+
+async def put_wa_report(cursor, guild_id: int, session_id: int, overview: str, author: str, plot: str,
+                        significance: int) -> Optional[dict]:
     if guild_id in [883009758179762208, 280061170231017472]:
         evaluated_overview = drive_word_document(overview)
         try:
@@ -951,6 +1002,35 @@ async def put_wa_report(cursor, guild_id, session_id, overview, author, plot, si
                 (new_report_page['url'], new_report_page['id'], new_timeline_page['id'], session_id))
             await cursor.connection.commit()
         except Exception as e:
+            # I haven't ever gotten a proper exception from the World Anvil API, so this is a catch-all until I can specify it down. https://pypi.org/project/pywaclient/#exceptions has them, but I'm not sure how to catch them yet.
+            logging.exception(f"Error in article creation for session '{session_id}': {e}")
+            return None
+
+
+async def patch_wa_report(cursor, guild_id: int, session_id: int, overview: str, author: str, plot: str,
+                          significance: int) -> Optional[dict]:
+    if guild_id in [883009758179762208, 280061170231017472]:
+        evaluated_overview = drive_word_document(overview)
+        try:
+            client = WaClient(
+                'pathparser',
+                'https://github.com/Solfyrism/Pathparser',
+                'V1.1',
+                os.getenv('WORLD_ANVIL_API'),
+                os.getenv('WORLD_ANVIL_USER')
+            )
+            world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
+            session_info = cursor.fetchone()
+            new_page = client.article.patch(session_info[0], {
+                'content': f'{overview}',
+                'world': {'id': world_id}
+            })
+            new_history = client.history.patch(session_info[0], {
+                'content': f'{overview}',
+                'world': {'id': world_id}
+            })
+        except Exception as e:
+            # I haven't ever gotten a proper exception from the World Anvil API, so this is a catch-all until I can specify it down. https://pypi.org/project/pywaclient/#exceptions has them, but I'm not sure how to catch them yet.
             logging.exception(f"Error in article creation for session '{session_id}': {e}")
             return None
 
