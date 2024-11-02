@@ -1,6 +1,7 @@
 import typing
 import urllib.error
 import discord
+import math
 import sqlite3
 from dateutil import parser
 from discord import app_commands
@@ -38,7 +39,7 @@ async def character_select_autocompletion(interaction: discord.Interaction, curr
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
-        f"Select True_Character_Name, Character_Name from Player_Characters where Character_Name LIKE ? OR Nickname LIKE ? LIMIT 5",
+        "SELECT True_Character_Name, Character_Name from Player_Characters where Character_Name LIKE ? OR Nickname LIKE ? LIMIT 5",
         (f"%{current}%", f"%{current}%"))
     character_list = cursor.fetchall()
     for characters in character_list:
@@ -57,7 +58,7 @@ async def stg_character_select_autocompletion(interaction: discord.Interaction, 
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
-        f"Select True_Character_Name, Character_Name from A_STG_Player_Characters where Character_Name LIKE ? OR Nickname LIKE ? LIMIT 5",
+        "SELECT True_Character_Name, Character_Name from A_STG_Player_Characters where Character_Name LIKE ? OR Nickname LIKE ? LIMIT 5",
         (f"%{current}%", f"%{current}%"))
     character_list = cursor.fetchall()
     for characters in character_list:
@@ -76,7 +77,7 @@ async def own_character_select_autocompletion(interaction: discord.Interaction, 
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
-        f"Select True_Character_Name, Character_Name from Player_Characters where Player_Name = ? AND Character_Name LIKE ? OR Player_Name = ? AND Nickname LIKE ?",
+        "SELECT True_Character_Name, Character_Name from Player_Characters where Player_Name = ? AND Character_Name LIKE ? OR Player_Name = ? AND Nickname LIKE ?",
         (interaction.user.name, f"%{current}%", interaction.user.name, f"%{current}%"))
     character_list = cursor.fetchall()
     for characters in character_list:
@@ -133,7 +134,7 @@ async def session_lookup(interaction: discord.Interaction, current: str) -> typi
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
-        f"Select Session_ID, Session_Name FROM Sessions WHERE GM_Name = ? AND Session_ID LIKE ?  and Completed_Time is not Null OR GM_Name = ? AND Session_Name like ? and Completed_Time is not Null Limit 15",
+        "SELECT Session_ID, Session_Name FROM Sessions WHERE GM_Name = ? AND Session_ID LIKE ?  and Completed_Time is not Null OR GM_Name = ? AND Session_Name like ? and Completed_Time is not Null Limit 15",
         (interaction.user.name, f"%{current}%", interaction.user.name, f"%{current}%"))
     session_list = cursor.fetchall()
     for test_text in session_list:
@@ -152,7 +153,7 @@ async def group_id_autocompletion(interaction: discord.Interaction, current: str
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
     current = unidecode(str.title(current))
-    cursor.execute(f"Select Group_ID, Group_Name  FROM Sessions_Group WHERE Group_Name LIKE ? Limit 15",
+    cursor.execute("SELECT Group_ID, Group_Name  FROM Sessions_Group WHERE Group_Name LIKE ? Limit 15",
                    (f"%{current}%",))
     session_list = cursor.fetchall()
     for test_text in session_list:
@@ -172,7 +173,7 @@ async def player_session_lookup(interaction: discord.Interaction, current: str) 
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
-        f"Select Session_ID, Session_Name Sessions_Archive WHERE Player_Name = ? AND Session_ID LIKE ? OR Player_Name = ? AND Session_Name like ? Limit 20",
+        "SELECT Session_ID, Session_Name Sessions_Archive WHERE Player_Name = ? AND Session_ID LIKE ? OR Player_Name = ? AND Session_Name like ? Limit 20",
         (interaction.user.name, f"%{current}%", interaction.user.name, f"%{current}%"))
     character_list = cursor.fetchall()
     for test_text in character_list:
@@ -193,7 +194,7 @@ async def fame_lookup(interaction: discord.Interaction, current: str) -> typing.
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
-        f"Select Fame_Required, Prestige_Cost, Effect, Name, Use_Limit from Store_Fame WHERE Effect LIKE ? Limit 20",
+        "SELECT Fame_Required, Prestige_Cost, Effect, Name, Use_Limit from Store_Fame WHERE Effect LIKE ? Limit 20",
         (f"%{current}%",))
     character_list = cursor.fetchall()
     for characters in character_list:
@@ -213,7 +214,7 @@ async def title_lookup(interaction: discord.Interaction, current: str) -> typing
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
-        f"Select ID, Masculine_Name, Feminine_Name, Fame, Effect from Store_Title WHERE Masculine_Name LIKE ? OR Feminine_Name LIKE ? Limit 20",
+        "SELECT ID, Masculine_Name, Feminine_Name, Fame, Effect from Store_Title WHERE Masculine_Name LIKE ? OR Feminine_Name LIKE ? LEFT JOIN  Limit 20",
         (f"%{current}%", f"%{current}%"))
     character_list = cursor.fetchall()
     for characters in character_list:
@@ -226,7 +227,7 @@ async def title_lookup(interaction: discord.Interaction, current: str) -> typing
 
 # *** DISPLAY FUNCTIONS *** #
 
-async def character_embed(cursor, character_name, guild) -> (Union[Tuple[discord.Embed, str, int], str]):
+async def character_embed(cursor, character_name: str, guild) -> (Union[Tuple[discord.Embed, str, int], str]):
     try:
         await cursor.execute("SELECT Search from Admin where Identifier = 'Accepted_Bio_Channel'")
         channel_id = await cursor.fetchone()
@@ -324,6 +325,7 @@ class CharacterChange:
     mythweavers: Optional[str] = None
     level: Optional[int] = None
     oath: Optional[str] = None
+    backstory: Optional[str] = None
     description: Optional[str] = None
     milestone_change: Optional[int] = None
     milestones_total: Optional[int] = None
@@ -383,6 +385,12 @@ async def log_embed(change: CharacterChange, guild, thread, bot) -> discord.Embe
             embed.add_field(
                 name="Oath",
                 value=change.oath
+            )
+
+        if change.backstory is not None:
+            embed.add_field(
+                name="Backstory",
+                value=change.backstory
             )
 
         if change.description is not None:
@@ -588,7 +596,7 @@ def fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset):
         select_clause = ', '.join(select_columns)
         day_two = adjust_day(day, 2, 4)
         cursor.execute(
-            f"SELECT {select_clause} FROM Player_Timecard PT1 Left Join Player_Timecard PT2 on PT1.Player_Name = PT2.Player_Name where PT1.Player_Name = ? and PT1.Day = ? AND PT2.Day = ?",
+            "SELECT {select_clause} FROM Player_Timecard PT1 Left Join Player_Timecard PT2 on PT1.Player_Name = PT2.Player_Name where PT1.Player_Name = ? and PT1.Day = ? AND PT2.Day = ?",
             (player_name, day_two, day))
         row = cursor.fetchone()
     elif utc_offset < 0:
@@ -606,12 +614,12 @@ def fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset):
         print(f" DAY ONE IS {day} DAY TWO IS {day_two}")
         print(f"The select clause is {select_clause}", f"the day is day {day_two}")
         cursor.execute(
-            f"SELECT {select_clause} FROM Player_Timecard PT1 Left Join Player_Timecard PT2 on PT1.Player_Name = PT2.Player_Name where PT1.Player_Name = ? and PT1.Day = ? AND PT2.Day = ?",
+            "SELECT {select_clause} FROM Player_Timecard PT1 Left Join Player_Timecard PT2 on PT1.Player_Name = PT2.Player_Name where PT1.Player_Name = ? and PT1.Day = ? AND PT2.Day = ?",
             (player_name, day, day_two))
         row = cursor.fetchone()
     # Fetch time slots for the specific player and day
     else:
-        cursor.execute(f"SELECT * FROM Player_Timecard WHERE Player_Name = ? AND Day = ?", (player_name, day))
+        cursor.execute("SELECT * FROM Player_Timecard WHERE Player_Name = ? AND Day = ?", (player_name, day))
         row = cursor.fetchone()
         row = row[3:] if row else None  # Skip the first 3 columns (Player_Name, UTC_Offset, Day)
     conn.close()
@@ -848,7 +856,7 @@ async def put_wa_article(guild_id: int, template: str, category: str, title: str
         # Map templates to entity classes
         template_to_entity_class = {
             'generic': 'Generic',
-            'character': 'Person',
+            'person': 'Person',
             'location': 'Location',
             # Add other mappings as needed
         }
@@ -921,16 +929,16 @@ async def put_wa_report(cursor, guild_id: int, session_id: int, overview: str, a
             )
             world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
             await cursor.execute(
-                f"SELECT Session_Name, Completed_Time, Alt_Reward_Party, Alt_Reward_All, Overview from Sessions where Session_ID = ?",
+                "SELECT Session_Name, Completed_Time, Alt_Reward_Party, Alt_Reward_All, Overview from Sessions where Session_ID = ?",
                 (session_id,))
             session_info = await cursor.fetchone()
             await cursor.execute(
-                f"SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Archive as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
+                "SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Archive as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
                 (session_id, author))
             characters = await cursor.fetchall()
             if len(characters) == 0:
                 cursor.execute(
-                    f"SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Participants as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
+                    "SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Participants as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
                     (session_id, author))
                 characters = cursor.fetchall()
             else:
@@ -1075,3 +1083,325 @@ def drive_word_document(overview: str) -> Optional[str]:
     except Exception as e:
         logging.exception(f"Error in retrieving overview: {e}")
         return None
+
+
+class ShopView(discord.ui.View):
+    """Base class for shop views with pagination."""
+
+    def __init__(self, user_id, guild_id, offset, limit):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.offset = offset
+        self.limit = limit
+        self.results = []
+        self.embed = None
+
+        # Initialize buttons
+        self.first_page_button = discord.ui.Button(label='First Page', style=discord.ButtonStyle.primary)
+        self.previous_page_button = discord.ui.Button(label='Previous Page', style=discord.ButtonStyle.primary)
+        self.next_page_button = discord.ui.Button(label='Next Page', style=discord.ButtonStyle.primary)
+        self.last_page_button = discord.ui.Button(label='Last Page', style=discord.ButtonStyle.primary)
+
+        self.first_page_button.callback = self.first_page
+        self.previous_page_button.callback = self.previous_page
+        self.next_page_button.callback = self.next_page
+        self.last_page_button.callback = self.last_page
+
+        self.add_item(self.first_page_button)
+        self.add_item(self.previous_page_button)
+        self.add_item(self.next_page_button)
+        self.add_item(self.last_page_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Ensure that only the user who initiated the view can interact with the buttons."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "You cannot interact with this button.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    async def first_page(self, interaction: discord.Interaction):
+        """Handle moving to the first page."""
+        if self.offset == 1:
+            await interaction.response.send_message("You are already on the first page.", ephemeral=True)
+            return
+        self.offset = 1
+        await self.update_results()
+        await self.create_embed()
+        await self.update_buttons()
+        await interaction.response.edit_message(
+            embed=self.embed,
+            view=self
+        )
+
+    async def previous_page(self, interaction: discord.Interaction):
+        """Handle moving to the previous page."""
+        if self.offset > 1:
+            self.offset -= self.limit
+            if self.offset < 1:
+                self.offset = 1
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.response.edit_message(
+                embed=self.embed,
+                view=self
+            )
+        else:
+            await interaction.response.send_message("You are on the first page.", ephemeral=True)
+
+    async def next_page(self, interaction: discord.Interaction):
+        """Handle moving to the next page."""
+        max_items = await self.get_max_items()
+        if self.offset + self.limit - 1 < max_items:
+            self.offset += self.limit
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.response.edit_message(
+                embed=self.embed,
+                view=self
+            )
+        else:
+            await interaction.response.send_message("You are on the last page.", ephemeral=True)
+
+    async def last_page(self, interaction: discord.Interaction):
+        """Handle moving to the last page."""
+        max_items = await self.get_max_items()
+        last_page_offset = ((max_items - 1) // self.limit) * self.limit + 1
+        if self.offset != last_page_offset:
+            self.offset = last_page_offset
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.response.edit_message(
+                embed=self.embed,
+                view=self
+            )
+        else:
+            await interaction.response.send_message("You are on the last page.", ephemeral=True)
+
+    async def update_buttons(self):
+        """Update the enabled/disabled state of buttons based on the current page."""
+        max_items = await self.get_max_items()
+        first_page = self.offset == 1
+        last_page = self.offset + self.limit - 1 >= max_items
+
+        self.first_page_button.disabled = first_page
+        self.previous_page_button.disabled = first_page
+        self.next_page_button.disabled = last_page
+        self.last_page_button.disabled = last_page
+
+    async def update_results(self):
+        """Fetch the results for the current page. To be implemented in subclasses."""
+        raise NotImplementedError
+
+    async def create_embed(self):
+        """Create the embed for the current page. To be implemented in subclasses."""
+        raise NotImplementedError
+
+    async def get_max_items(self):
+        """Get the total number of items. To be implemented in subclasses."""
+        raise NotImplementedError
+
+
+class AcknowledgementView(discord.ui.View):
+    """Base class for views requiring acknowledgment."""
+
+    def __init__(self, allowed_user_id: int):
+        super().__init__(timeout=180)
+        self.allowed_user_id = allowed_user_id
+        self.embed = None
+
+        # Initialize buttons
+        self.accept_button = discord.ui.Button(label='Accept', style=discord.ButtonStyle.primary)
+        self.reject_button = discord.ui.Button(label='Reject', style=discord.ButtonStyle.danger)
+
+        self.accept_button.callback = self.accept
+        self.reject_button.callback = self.reject
+
+        self.add_item(self.accept_button)
+        self.add_item(self.reject_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Ensure that only the allowed user can interact with the buttons."""
+        if interaction.user.id != self.allowed_user_id:
+            await interaction.response.send_message(
+                "You cannot interact with this button.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    async def accept(self, interaction: discord.Interaction):
+        """Handle the accept action."""
+        await self.accepted(interaction)
+        await interaction.response.edit_message(
+            embed=self.embed,
+            view=None
+        )
+
+    async def reject(self, interaction: discord.Interaction):
+        """Handle the reject action."""
+        await self.rejected(interaction)
+        await interaction.response.edit_message(
+            embed=self.embed,
+            view=None
+        )
+
+    async def accepted(self, interaction: discord.Interaction):
+        """To be implemented in subclasses."""
+        raise NotImplementedError
+
+    async def rejected(self, interaction: discord.Interaction):
+        """To be implemented in subclasses."""
+        raise NotImplementedError
+
+    async def create_embed(self):
+        """To be implemented in subclasses."""
+        raise NotImplementedError
+
+
+class DualView(discord.ui.View):
+    """Base class for shop views with pagination."""
+
+    def __init__(self, user_id, guild_id, offset, limit, view_type):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.offset = offset
+        self.limit = limit
+        self.results = []
+        self.embed = None
+        self.view_type = view_type
+
+        # Initialize buttons
+        self.first_page_button = discord.ui.Button(label='First Page', style=discord.ButtonStyle.primary)
+        self.previous_page_button = discord.ui.Button(label='Previous Page', style=discord.ButtonStyle.primary)
+        self.change_view_button = discord.ui.Button(label='Change View', style=discord.ButtonStyle.primary)
+        self.next_page_button = discord.ui.Button(label='Next Page', style=discord.ButtonStyle.primary)
+        self.last_page_button = discord.ui.Button(label='Last Page', style=discord.ButtonStyle.primary)
+
+        self.first_page_button.callback = self.first_page
+        self.previous_page_button.callback = self.previous_page
+        self.change_view_button.callback = self.change_view
+        self.next_page_button.callback = self.next_page
+        self.last_page_button.callback = self.last_page
+
+        self.add_item(self.first_page_button)
+        self.add_item(self.previous_page_button)
+        self.add_item(self.change_view_button)
+        self.add_item(self.next_page_button)
+        self.add_item(self.last_page_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Ensure that only the user who initiated the view can interact with the buttons."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "You cannot interact with this button.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    async def first_page(self, interaction: discord.Interaction):
+        """Handle moving to the first page."""
+        if self.offset == 1:
+            await interaction.response.send_message("You are already on the first page.", ephemeral=True)
+            return
+        self.offset = 1
+        await self.update_results()
+        await self.create_embed()
+        await self.update_buttons()
+        await interaction.response.edit_message(
+            embed=self.embed,
+            view=self
+        )
+
+    async def previous_page(self, interaction: discord.Interaction):
+        """Handle moving to the previous page."""
+        if self.offset > 1:
+            self.offset -= self.limit
+            if self.offset < 1:
+                self.offset = 1
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.response.edit_message(
+                embed=self.embed,
+                view=self
+            )
+        else:
+            await interaction.response.send_message("You are on the first page.", ephemeral=True)
+
+    async def change_view(self, interaction: discord.Interaction):
+        """Change the viewtype."""
+        await self.on_view_change()
+        await self.update_results()
+        await self.create_embed()
+        await self.update_buttons()
+        await interaction.response.edit_message(
+            embed=self.embed,
+            view=self
+        )
+
+    async def next_page(self, interaction: discord.Interaction):
+        """Handle moving to the next page."""
+        max_items = await self.get_max_items()
+        if self.offset + self.limit - 1 < max_items:
+            self.offset += self.limit
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.response.edit_message(
+                embed=self.embed,
+                view=self
+            )
+        else:
+            await interaction.response.send_message("You are on the last page.", ephemeral=True)
+
+    async def last_page(self, interaction: discord.Interaction):
+        """Handle moving to the last page."""
+        max_items = await self.get_max_items()
+        last_page_offset = ((max_items - 1) // self.limit) * self.limit + 1
+        if self.offset != last_page_offset:
+            self.offset = last_page_offset
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.response.edit_message(
+                embed=self.embed,
+                view=self
+            )
+        else:
+            await interaction.response.send_message("You are on the last page.", ephemeral=True)
+
+    async def update_buttons(self):
+        """Update the enabled/disabled state of buttons based on the current page."""
+        max_items = await self.get_max_items()
+        first_page = self.offset == 1
+        last_page = self.offset + self.limit - 1 >= max_items
+
+        self.first_page_button.disabled = first_page
+        self.previous_page_button.disabled = first_page
+        self.next_page_button.disabled = last_page
+        self.last_page_button.disabled = last_page
+
+    async def on_view_change(self):
+        """Change the view type."""
+        raise NotImplementedError
+
+    async def update_results(self):
+        """Fetch the results for the current page. To be implemented in subclasses."""
+        raise NotImplementedError
+
+    async def create_embed(self):
+        """Create the embed for the current page. To be implemented in subclasses."""
+        raise NotImplementedError
+
+    async def get_max_items(self):
+        """Get the total number of items. To be implemented in subclasses."""
+        raise NotImplementedError

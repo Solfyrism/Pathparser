@@ -1,4 +1,5 @@
 import logging
+import typing
 from math import floor
 from typing import List, Optional, Tuple, Union
 import discord
@@ -220,6 +221,8 @@ async def get_new_tier_info(
 
 async def mythic_calculation(cursor, character_name, level, trials, trial_change) -> (Union[Tuple[int, int, int], int]):
     try:
+        logging.info(
+            f"Calculating mythic for character '{character_name}', level {level}, trials {trials}, trial_change {trial_change}")
         # Call limiters and restrictions.
         await cursor.execute("SELECT Search from Admin WHERE Identifier = 'Mythic_Cap'")
         max_mythic = await cursor.fetchone()
@@ -235,7 +238,7 @@ async def mythic_calculation(cursor, character_name, level, trials, trial_change
             0] else max_mythic[0]
         # Call the mythic tier information.
         await cursor.execute(
-            f"SELECT Tier, Trials, Trials_Required from AA_Mythic  WHERE Trials <= ? AND Tier <= ? ORDER BY Trials DESC  LIMIT 1",
+            "SELECT Tier, Trials, Trials_Required from AA_Mythic  WHERE Trials <= ? AND Tier <= ? ORDER BY Trials DESC  LIMIT 1",
             (trials + trial_change, tier_max))
         new_mythic_information = await cursor.fetchone()
         # Update Mythic tier if you changed the trial amount.
@@ -243,7 +246,7 @@ async def mythic_calculation(cursor, character_name, level, trials, trial_change
             f"UPDATE Player_Characters SET Tier = ?, Trials = ?, Trials_Required = ? WHERE Character_Name = ?",
             (new_mythic_information[0], trials + trial_change,
              new_mythic_information[1] + new_mythic_information[2] - trials + trial_change, character_name))
-        await cursor.commit()
+        await (cursor.connection.commit())
         # return mythic tier, trials, and mythic trials remaining.
         return_value = (new_mythic_information[0], trials + trial_change,
                         new_mythic_information[1] + new_mythic_information[2] - trial_change - trials)
@@ -329,6 +332,7 @@ async def gold_calculation(
 async def ubb_inventory_check(guild_id: int, author_id: int, item_id: int, amount: int) -> int:
     client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
     try:
+        logging.info(f"Retrieving inventory item {item_id} for user {author_id}")
         inventory = await client.get_inventory_item(guild_id, author_id, item_id[0])
         inventory_remaining = inventory.quantity
         amount = min(amount, inventory_remaining)
@@ -340,6 +344,7 @@ async def ubb_inventory_check(guild_id: int, author_id: int, item_id: int, amoun
 
 async def flux_calculation(cursor, character_name, flux, flux_change):
     try:
+        logging.info(f"Calculating flux for character '{character_name}'")
         flux_total = flux + flux_change
         await cursor.execute(
             f"UPDATE Player_Characters SET Flux = ? WHERE Character_Name = ?",
@@ -404,11 +409,16 @@ async def stg_character_embed(cursor, character_name) -> (Union[Tuple[discord.Em
 
 
 # noinspection PyUnresolvedReferences
-class CharacterCommands(commands.GroupCog, name='character'):
+class CharacterCommands(commands.Cog, name='character'):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name='help', description='Help commands for the character tree')
+    character_group = discord.app_commands.Group(
+        name='character',
+        description='Commands related to characters'
+    )
+
+    @character_group.command(name='help', description='Help commands for the character tree')
     async def help(self, interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
         embed = discord.Embed(title=f"Character Help", description=f'This is a list of Character commands',
@@ -442,7 +452,7 @@ class CharacterCommands(commands.GroupCog, name='character'):
         finally:
             return
 
-    @app_commands.command(name='register', description='register a character')
+    @character_group.command(name='register', description='register a character')
     @app_commands.describe(oath="Determining future gold gain from sessions and gold claims.")
     @app_commands.choices(oath=[discord.app_commands.Choice(name='No Oath', value=1),
                                 discord.app_commands.Choice(name='Oath of Offerings', value=2),
@@ -534,7 +544,7 @@ class CharacterCommands(commands.GroupCog, name='character'):
                 logging.exception(f"An error occurred whilst building character embed for '{character_name}': {e}")
                 interaction.response.send_message = f"An error occurred whilst building character embed for '{character_name}' Error: {e}."
 
-    @app_commands.command(name='edit', description='edit your character')
+    @character_group.command(name='edit', description='edit your character')
     @app_commands.autocomplete(name=shared_functions.own_character_select_autocompletion)
     @app_commands.describe(oath="Determining future gold gain from sessions and gold claims.")
     @app_commands.choices(oath=[discord.app_commands.Choice(name='No Oath', value=1),
@@ -564,7 +574,7 @@ class CharacterCommands(commands.GroupCog, name='character'):
                 results = await cursor.fetchone()
                 await interaction.response.defer(thinking=True, ephemeral=True)
                 if results is None:
-                    sql = f"Select True_Character_Name, Nickname, Titles, Description, Mythweavers, Image_Link, Oath, Color, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Gold_Value, Gold_Value_Max, Flux, Character_Name from A_STG_Player_Characters where Player_Name = ? AND Character_Name = ? OR  Player_Name = ? AND Nickname = ?"
+                    sql = "SELECT True_Character_Name, Nickname, Titles, Description, Mythweavers, Image_Link, Oath, Color, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Gold_Value, Gold_Value_Max, Flux, Character_Name from A_STG_Player_Characters where Player_Name = ? AND Character_Name = ? OR  Player_Name = ? AND Nickname = ?"
                     val = (author, name, author, name)
                     await cursor.execute(sql, val)
                     results = cursor.fetchone()
@@ -776,7 +786,7 @@ class CharacterCommands(commands.GroupCog, name='character'):
                 logging.exception(f"An error occurred whilst building character embed for '{character_name}': {e}")
                 interaction.response.send_message = f"An error occurred whilst building character embed for '{character_name}' Error: {e}."
 
-    @app_commands.command(name='retire', description='retire a character')
+    @character_group.command(name='retire', description='retire a character')
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def retire(self, interaction: discord.Interaction, character_name: str):
         guild_id = interaction.guild_id
@@ -811,7 +821,7 @@ class CharacterCommands(commands.GroupCog, name='character'):
                     ephemeral=True
                 )
 
-    @app_commands.command(name='levelup', description='level up your character')
+    @character_group.command(name='levelup', description='level up your character')
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def levelup(self, interaction: discord.Interaction, character_name: str, amount: int):
         guild_id = interaction.guild_id
@@ -893,7 +903,7 @@ class CharacterCommands(commands.GroupCog, name='character'):
             await interaction.followup.send("You must use at least one job.")
             return
 
-    @app_commands.command(name='trialup', description='Apply mythic tiers to your character')
+    @character_group.command(name='trialup', description='Apply mythic tiers to your character')
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def Trialup(self, interaction: discord.Interaction, character_name: str, amount: int):
         guild_id = interaction.guild_id
@@ -964,7 +974,7 @@ class CharacterCommands(commands.GroupCog, name='character'):
         else:
             await interaction.followup.send("You must use at least one mythic trial.")
 
-    @app_commands.command(name='pouch', description='Use a gold pouch to enrich your character')
+    @character_group.command(name='pouch', description='Use a gold pouch to enrich your character')
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def pouch(self, interaction: discord.Interaction, character_name: str):
         guild_id = interaction.guild_id
@@ -1042,15 +1052,15 @@ class CharacterCommands(commands.GroupCog, name='character'):
                     ephemeral=True
                 )
 
-    @app_commands.command(name='entitle', description='give a special title to a character')
-    @app_commands.autocomplete(title=shared_functions.title_lookup)
-    @app_commands.choices(usage=[discord.app_commands.Choice(name='Display', value=1),
-                                 discord.app_commands.Choice(name='Apply Masculine Title', value=2),
-                                 discord.app_commands.Choice(name='Apply Feminine Title', value=3),
-                                 discord.app_commands.Choice(name='Change Gender', value=4)])
-    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
-    async def entitle(self, interaction: discord.Interaction, character_name: str, title: str,
-                      usage: discord.app_commands.Choice[int]):
+    # Nested group
+    entitle_group = discord.app_commands.Group(
+        name='entitle',
+        description='Event settings commands',
+        parent=character_group
+    )
+
+    @entitle_group.command(name='display', description='Display titles from the store!')
+    async def display_titles(self, interaction: discord.Interaction):
         guild_id = interaction.guild_id
         guild = interaction.guild
         author = interaction.user.name
@@ -1058,16 +1068,13 @@ class CharacterCommands(commands.GroupCog, name='character'):
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
             cursor = await conn.cursor()
             try:
-                await cursor.execute("SELECT COUNT(masculine_name) FROM Store_Title")
-                admin_count = await cursor.fetchone()
-                max_page = math.ceil(admin_count[0] / 20)
-                current_page = max_page if current_page > max_page else current_page
-                low = 1 + ((current_page - 1) * 20)
-                high = 20 + ((current_page - 1) * 20)
-                statement = "SELECT ID, Effect, Fame, Masculine_Name, Feminine_Name FROM Store_Title WHERE ROWID BETWEEN ? and ?"
-                view = ShopView(cursor, character_name, interaction.user.id, guild_id, low, high, statement,
-                                display_type)
-                await interaction.followup.send(content='Counting!: 0!', view=view)
+                offset = 1
+                limit = 20
+                view = TitleShopView(interaction.user.id, guild_id, offset, limit)
+                await view.update_results()
+                await view.create_embed()
+                await view.update_buttons()
+                await interaction.followup.send(embed=view.embed, view=view)
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(f"An error occurred in the retire command whilst looking for '{character_name}': {e}")
                 await interaction.followup.send(
@@ -1075,762 +1082,716 @@ class CharacterCommands(commands.GroupCog, name='character'):
                     ephemeral=True
                 )
 
+    @entitle_group.command(name='use', description='Use a title from the store!')
+    @app_commands.autocomplete(title=shared_functions.title_lookup)
+    @app_commands.choices(gender=[discord.app_commands.Choice(name='Masculine', value=1),
+                                  discord.app_commands.Choice(name='Feminine', value=2)])
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def use(self, interaction: discord.Interaction, character_name: str, title: str,
+                  gender: discord.app_commands.Choice[int]):
+        guild_id = interaction.guild_id
+        guild = interaction.guild
+        author = interaction.user.name
+        await interaction.response.defer(thinking=True)
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            try:
+                await cursor.execute(
+                    "select True_character_name, title, fame, Logging_ID from Player_Characters where Player_Name = ? and (Character_Name = ? or Nickname = ?)",
+                    (author, character_name, character_name))
+                #               player validation to confirm if player is the owner of the character and they exist.
+                player_info = await cursor.fetchone()
+                if player_info is None:
+                    await interaction.followup.send(
+                        f"Character {character_name} not found.",
+                        ephemeral=True
+                    )
+                else:  # Player found
+                    (true_character_name, player_title, player_fame, logging_id) = player_info
+                    await cursor.execute(
+                        "SELECT ID, Fame, Masculine_Name, Feminine_Name from Store_Title where Masculine_name = ? or Feminine_name = ?",
+                        (title, title))
+                    title_information = await cursor.fetchone()  # Title validation
+                    if title_information is None:
+                        await interaction.followup.send(
+                            f"Title {title} not found.",
+                            ephemeral=True
+                        )
+                    else:  # Title Found
+                        title_name = title_information[1] if gender.value == 1 else title_information[2]
+                        title_fame = 0 if title_information is None else title_information[0]
+                        if player_title is not None:
+                            logging.info(
+                                f"Player has a title {player_title}, validating if it is superior to the new title.")
+                            await cursor.execute(
+                                "SELECT ID, Fame, Masculine_Name, Feminine_Name from Store_Title where Masculine_name = ? or Feminine_name = ?",
+                                (player_title, player_title))
+                            previous_title_information = await cursor.fetchone()
+                            if previous_title_information[1] >= title_fame:
+                                await interaction.followup.send(
+                                    f"{author} already has the superior title {previous_title_information[2]}",
+                                    ephemeral=True
+                                )
+                                return
+                            else:  # New Title is superior, remove fame from the older title.
+                                title_fame -= previous_title_information[1]
+                        ubb_validation = await ubb_inventory_check(guild_id,
+                                                                   interaction.user.id,
+                                                                   title_information[0],
+                                                                   1)
+                        if ubb_validation == 0:  # UBB Validation to ensure they have the title in their inventory.
+                            await interaction.followup.send(
+                                f"Insufficient titles to apply to {character_name}.",
+                                ephemeral=True
+                            )
+                        else:  # Title is in inventory
+                            await cursor.execute(
+                                "UPDATE Player_Characters SET Title = ?, Fame = ? WHERE Character_Name = ?",
+                                (title_name, player_fame + title_fame, character_name))
+                            await conn.commit()
+                            client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
+                            await client.delete_inventory_item(guild_id, author_id, item_id[0])
+                            character_bio = await shared_functions.character_embed(cursor, character_name, guild)
+                            character_changes = shared_functions.CharacterChange(character_name=character_name,
+                                                                                 author=author,
+                                                                                 source=f'Entitle applying the title of {title_name}',
+                                                                                 fame=title_fame,
+                                                                                 total_fame=player_fame + title_fame)
+                            character_log = await shared_functions.log_embed(character_changes, guild,
+                                                                             logging_thread_id, self.bot)
+                            await interaction.followup.send(embed=character_log, ephemeral=True)
+            except (aiosqlite.Error, TypeError, ValueError) as e:
+                logging.exception(f"An error occurred in the retire command whilst looking for '{character_name}': {e}")
+                await interaction.followup.send(
+                    f"An error occurred whilst looking for '{character_name}'. Error: {e}.",
+                    ephemeral=True
+                )
 
-"""
+    @entitle_group.command(name='swap', description='change the gender for your title!')
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def swap(self, interaction: discord.Interaction, character_name: str):
+        guild_id = interaction.guild_id
+        guild = interaction.guild
+        author = interaction.user.name
+        await interaction.response.defer(thinking=True)
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            try:
+                await cursor.execute(
+                    'SELECT True_Character_Name, Title, Fame, Logging_ID FROM Player_Characters WHERE Player_Name = ? AND (Character_Name = ? OR Nickname = ?)',
+                    (author, character_name, character_name))
+                player_info = await cursor.fetchone()
+                if player_info is None:
+                    await interaction.followup.send(
+                        f"Character {character_name} not found.",
+                        ephemeral=True
+                    )
+                else:  # Character Found
+                    (true_character_name, player_title, player_fame, logging_id) = player_info
+                    if player_title is None:
+                        await interaction.followup.send(
+                            f"{author} does not have a title to swap.",
+                            ephemeral=True
+                        )
+                    else:  # Character has title to swap
+                        await cursor.execute(
+                            "SELECT ID, Fame, Masculine_Name, Feminine_Name from Store_Title where Masculine_name = ? or Feminine_name = ?",
+                            (player_title, player_title))
+                        title_information = await cursor.fetchone()
+                        if title_information is None:
+                            logging.info(f'Title of {player_title} not found despite being assigned!')
+                            await interaction.followup.send(
+                                f"Title {player_title} not found.",
+                                ephemeral=True
+                            )
+                        else:  # Title Found
+                            title_name = title_information[2] if player_title == title_information[3] else \
+                                title_information[3]
+                            await cursor.execute(
+                                "UPDATE Player_Characters SET Title = ?, Fame = ? WHERE Character_Name = ?",
+                                (title_name, player_fame - title_fame, character_name))
+                            await conn.commit()
+                            character_bio = await shared_functions.character_embed(cursor, character_name, guild)
+                            character_changes = shared_functions.CharacterChange(character_name=character_name,
+                                                                                 author=author,
+                                                                                 source=f'Entitle swapping the gender of {player_title}',
+                                                                                 total_fame=player_fame)
+                            character_log = await shared_functions.log_embed(character_changes, guild,
+                                                                             logging_thread_id, self.bot)
+                            await interaction.followup.send(embed=character_log, ephemeral=True)
+            except (aiosqlite.Error, TypeError, ValueError) as e:
+                logging.exception(
+                    f"An error occurred in the retire command whilst looking for '{character_name}': {e}")
+                await interaction.followup.send(
+                    f"An error occurred whilst looking for '{character_name}'. Error: {e}.",
+                    ephemeral=True
+                )
 
-@character.command()
-@app_commands.autocomplete(character_name=own_character_select_autocompletion)
-@app_commands.autocomplete(title=title_lookup)
-@app_commands.choices(usage=[discord.app_commands.Choice(name='Display', value=1),
-                             discord.app_commands.Choice(name='Apply Masculine Title', value=2),
-                             discord.app_commands.Choice(name='Apply Feminine Title', value=3),
-                             discord.app_commands.Choice(name='Change Gender', value=4)])
-async def entitle(interaction: discord.Interaction, character_name: str, title: str, usage: discord.app_commands.Choice[int]):
-    "Apply a title to yourself! This defaults to display the available titles."
-    character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
-    guild_id = interaction.guild_id
-    author = interaction.user.name
-    guild = interaction.guild
-    usage = 1 if usage == 1 else usage.value
-    client = Client(os.getenv('UBB_TOKEN'))
-    author_id = interaction.user.id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    print(type(title), title)
-    cursor.execute(
-        f"SELECT ID, Fame, Masculine_Name, Feminine_Name from Store_Title Where Masculine_name = ? or Feminine_name = ?",
-        (title, title))
-    item_id = cursor.fetchone()
-    if usage != 1 and usage != 4 and item_id is not None:
+                # Nested group
+
+    prestige_group = discord.app_commands.Group(
+        name='prestige',
+        description='Event settings commands',
+        parent=character_group
+    )
+
+    @prestige_group.command(name='display',
+                            description='Display available options from the store.')
+    async def display_prestige(self, interaction: discord.Interaction):
+        guild_id = interaction.guild_id
+        guild = interaction.guild
+        author = interaction.user.name
+        await interaction.response.defer(thinking=True)
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            try:
+                offset = 1
+                limit = 20
+                view = FameShopView(interaction.user.id, guild_id, offset, limit)
+                await view.update_results()
+                await view.create_embed()
+                await view.update_buttons()
+                await interaction.followup.send(embed=view.embed, view=view)
+            except (aiosqlite.Error, TypeError, ValueError) as e:
+                logging.exception(f"Couldn't display the store options: {e}")
+                await interaction.followup.send(
+                    f"An error occurred whilst displaying the store options. Error: {e}.")
+
+    @prestige_group.command(
+        name='request',
+        description='Request something of a GM using your prestige as a resource.'
+    )
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    @app_commands.autocomplete(name=shared_functions.fame_lookup)
+    async def request(
+            self,
+            interaction: discord.Interaction,
+            character_name: str,
+            name: str,
+            approver: discord.Member
+    ):
+        guild_id = interaction.guild_id
+        author_id = interaction.user.id
+        author_name = interaction.user.name
+
+        await interaction.response.defer(thinking=True)
         try:
-            title_name = item_id[2] if usage == 2 else item_id[3]
-            inventory = await client.get_inventory_item(guild_id, author_id, item_id[0])
-            if inventory is not None:
-                cursor.execute(
-                    f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND  Nickname = ?",
-                    (author, character_name, author, character_name))
-                player_info = cursor.fetchone()
-                if player_info is not None:
-                    true_character_name = player_info[3]
-                    cursor.execute(
-                        f"SELECT Fame, Masculine_Name, Feminine_Name from Store_Title where Masculine_Name = ? or Feminine_Name = ?",
-                        (player_info[27], player_info[27]))
-                    title_information = cursor.fetchone()
-                    title_fame = 0 if title_information is None else title_information[0]
-                    if item_id[1] <= title_fame:
-                        await interaction.response.send_message(
-                            f'Unlike a repo-man, you do not need to collect titles. You already have the title {title_information[1]}')
-                    else:
-                        title_fame = item_id[1] - title_fame
-                        await EventCommand.title_change(self, guild_id, author, author_id, true_character_name,
-                                                        title_name, player_info[27] + title_fame,
-                                                        player_info[30] + title_fame,
-                                                        f'Became the title of {title_name}', 'Used entitle!')
-                        cursor.execute("Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-                        accepted_bio_channel = cursor.fetchone()
-                        bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4],
-                                                    player_info[5], player_info[6], player_info[7], player_info[8],
-                                                    player_info[9], player_info[10], player_info[11], player_info[12],
-                                                    player_info[13], player_info[14], player_info[16], player_info[17],
-                                                    player_info[18], player_info[19], player_info[20], player_info[21],
-                                                    player_info[22], player_info[23], player_info[27], title_name,
-                                                    player_info[30], player_info[31])
-                        bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
-                        bio_message = await bio_channel.fetch_message(player_info[24])
-                        await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
-                        logging_embed = discord.Embed(
-                            title=f"{true_character_name} has changed their title to {title_name}",
-                            description=f"{author} has changed their title to {title_name} using {title_fame} fame from the shop.",
-                            colour=discord.Colour.blurple())
-                        logging_thread = guild.get_thread(player_info[25])
-                        await logging_thread.send(embed=logging_embed)
-                        await interaction.response.send_message(
-                            content=f"you have changed your title to {title_name} and increased your fame by {title_fame} by using an item from shop for the character named {character_name}.",
-                            ephemeral=True)
-                        await client.delete_inventory_item(guild_id, author_id, item_id[0], 1)
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+
+                # Fetch player information
+                await cursor.execute(
+                    """
+                    SELECT True_Character_Name, Character_Name, Fame, Prestige, Logging_Thread
+                    FROM Player_Characters
+                    WHERE Player_Name = ? AND (Character_Name = ? OR Nickname = ?)
+                    """,
+                    (author_name, character_name, character_name)
+                )
+                player_info = await cursor.fetchone()
+
+                if player_info is None:
+                    await interaction.followup.send(
+                        f"{author_name} does not have a character named '{character_name}' registered.",
+                        ephemeral=True
+                    )
+                    return
+
+                (true_character_name, character_name, fame, prestige, logging_thread) = player_info
+
+                # Fetch item information
+                await cursor.execute(
+                    """
+                    SELECT Fame_Required, Prestige_Cost, Name, Use_Limit
+                    FROM Store_Fame
+                    WHERE Item_Name = ?
+                    """,
+                    (name,)
+                )
+                item_info = await cursor.fetchone()
+
+                if item_info is None:
+                    await interaction.followup.send(
+                        f"The item '{name}' does not exist in the store.",
+                        ephemeral=True
+                    )
+                    return
+
+                (fame_required, prestige_cost, item_name, use_limit) = item_info
+
+                # Check usage count
+                await cursor.execute(
+                    """
+                    SELECT COUNT(Item_Name)
+                    FROM A_Audit_Prestige
+                    WHERE Author_ID = ? AND Character_Name = ? AND Item_Name = ? AND IsAllowed = 1
+                    """,
+                    (author_id, character_name, name)
+                )
+                usage_count_row = await cursor.fetchone()
+                usage_count = usage_count_row[0] if usage_count_row else 0
+
+                # Validate conditions
+                if usage_count >= use_limit:
+                    await interaction.followup.send(
+                        f"{author_name} has reached the usage limit for this item.",
+                        ephemeral=True
+                    )
+                    return
+
+                if prestige < prestige_cost:
+                    await interaction.followup.send(
+                        f"{author_name} does not have enough prestige to use this item.",
+                        ephemeral=True
+                    )
+                    return
+
+                if fame < fame_required:
+                    await interaction.followup.send(
+                        f"{author_name} does not have enough fame to use this item.",
+                        ephemeral=True
+                    )
+                    return
+
+                # Insert proposition request
+                await cursor.execute(
+                    """
+                    INSERT INTO A_Audit_Prestige
+                    (Author_ID, Character_Name, Item_Name, Prestige_Cost, IsAllowed, Time)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (author_id, character_name, name, prestige_cost, 0, datetime.datetime.now())
+                )
+                await conn.commit()
+
+                # Retrieve the proposition ID
+                await cursor.execute(
+                    "SELECT MAX(Transaction_ID) FROM A_Audit_Prestige WHERE Character_Name = ?",
+                    (character_name,)
+                )
+                proposition_id_row = await cursor.fetchone()
+                proposition_id = proposition_id_row[0] if proposition_id_row else None
+
+                if proposition_id is None:
+                    await interaction.followup.send(
+                        "Failed to create the proposition request.",
+                        ephemeral=True
+                    )
+                    return
+
+                # Create and send the PropositionView
+                view = PropositionView(
+                    allowed_user_id=approver.id,
+                    requester_name=author_name,
+                    character_name=character_name,
+                    item_name=name,
+                    prestige_cost=prestige_cost,
+                    proposition_id=proposition_id,
+                    bot=self.bot,
+                    prestige=prestige,
+                    logging_thread=logging_thread
+                )
+                await view.create_embed()
+
+                content = (
+                    f"{approver.mention}, {author_name} is requesting '{name}' with proposition ID {proposition_id}.\n"
+                    "Do you accept or reject this proposition?"
+                )
+                await interaction.followup.send(
+                    content=content,
+                    embed=view.embed,
+                    view=view,
+                    allowed_mentions=discord.AllowedMentions(users=True)
+                )
+
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(
+                f"An error occurred in the 'request' command for '{character_name}': {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred while processing your request: {e}",
+                ephemeral=True
+            )
+
+    @prestige_group.command(
+        name='history',
+        description='View your proposition history.'
+    )
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    @app_commands.autocomplete(name=shared_functions.fame_lookup)
+    async def history(self, interaction: discord.Interaction, character_name: str, name: typing.Optional[str],
+                      page_number: int = 1):
+        guild_id = interaction.guild_id
+        await interaction.response.defer(thinking=True)
+
+        try:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+
+                # Decide which query to execute based on whether 'name' is provided
+                if name is not None:
+                    await cursor.execute(
+                        "SELECT COUNT(*) FROM A_Audit_Prestige WHERE Character_Name = ? AND Item_Name = ?",
+                        (character_name, name)
+                    )
                 else:
-                    await interaction.response.send_message(
-                        f"{author} does not have a {character_name} registered under this character name or nickname.")
-        except unbelievaboat.errors.HTTPError:
-            await interaction.response.send_message(f"{author} does not have any {title_name} in their inventory.")
-        await client.close()
-    elif usage == 4:
-        cursor.execute(
-            f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND  Nickname = ?",
-            (author, character_name, author, character_name))
-        player_info = cursor.fetchone()
-        if player_info is not None:
-            true_character_name = player_info[3]
-            cursor.execute(
-                f"SELECT Fame, Title, Masculine_Name, Feminine_Name from Store_Title where Masculine_Name = ? or Feminine_Name = ?",
-                (player_info[27], player_info[27]))
-            title_information = cursor.fetchone()
-            if title_information is not None:
-                title_name = title_information[2] if player_info[27] != title_information[2] else title_information[3]
-                await EventCommand.title_change(self, guild_id, author, author_id, true_character_name, title_name,
-                                                player_info[27], f'Became the title of {title_name}', 'Used entitle!')
-                cursor.execute("Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-                accepted_bio_channel = cursor.fetchone()
-                bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4],
-                                            player_info[5], player_info[6], player_info[7], player_info[8],
-                                            player_info[9], player_info[10], player_info[11], player_info[12],
-                                            player_info[13], player_info[14], player_info[16], player_info[17],
-                                            player_info[18], player_info[19], player_info[20], player_info[21],
-                                            player_info[22], player_info[23], player_info[27], title_name,
-                                            player_info[30], player_info[31])
-                bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
-                bio_message = await bio_channel.fetch_message(player_info[24])
-                await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
-                logging_embed = discord.Embed(title=f"{true_character_name} has changed their title to {title_name}",
-                                              description=f"{author} has changed their title to {title_name} using {title} from the shop.",
-                                              colour=discord.Colour.blurple())
-                logging_thread = guild.get_thread(player_info[25])
-                await logging_thread.send(embed=logging_embed)
-                await interaction.response.send_message(
-                    content=f"you have changed your title to {title_name} for {character_name}.", ephemeral=True)
-            else:
-                await interaction.response.send_message(
-                    f"{author} does not have a title registered under this character name or nickname.")
-        else:
-            await interaction.response.send_message(
-                f"{author} does not have a {character_name} registered under this character name or nickname.")
-    else:
-        buttons = ["⏪", "⬅", "➡", "⏩"]  # skip to start, left, right, skip to end
-        cursor.execute("SELECT COUNT(masculine_name) FROM Store_Title")
-        admin_count = cursor.fetchone()
-        max_page = math.ceil(admin_count[0] / 20)
-        current_page = 1
-        low = 1 + ((current_page - 1) * 20)
-        high = 20 + ((current_page - 1) * 20)
-        cursor.execute(
-            f"SELECT ID, Effect, Fame, Masculine_Name, Feminine_Name FROM Store_Title WHERE ROWID BETWEEN {low} and {high}")
-        pull = cursor.fetchall()
-        embed = discord.Embed(title=f"Title Store Settings Page {current_page}",
-                              description=f'This is a list of available titles', colour=discord.Colour.blurple())
-        for result in pull:
-            embed.add_field(name=f"Title Store Item: {result[3]}/{result[4]}",
-                            value=f'**Effect**: {result[1]}, **Rewarded Fame**: {result[2]}', inline=False)
-        await interaction.response.send_message(embed=embed)
-        msg = await interaction.original_response()
-        for button in buttons:
-            await msg.add_reaction(button)
-        while True:
-            try:
-                reaction, user = await bot.wait_for('reaction_add', check=lambda reaction,
-                                                                                 user: user.id == interaction.user.id and reaction.emoji in buttons,
-                                                    timeout=60.0)
-            except asyncio.TimeoutError:
-                embed.set_footer(text="Request has timed out.")
-                await msg.edit(embed=embed)
-                await msg.clear_reactions()
-                cursor.close()
-                db.close()
-                return print("timed out")
-            else:
-                previous_page = current_page
-                if reaction.emoji == u"\u23EA":
-                    current_page = 1
-                    low = 1
-                    high = 20
-                elif reaction.emoji == u"\u2B05" and current_page > 1:
-                    low -= 20
-                    high -= 20
-                    current_page -= 1
-                elif reaction.emoji == u"\u27A1" and current_page < max_page:
-                    low += 20
-                    high += 20
-                    current_page += 1
-                elif reaction.emoji == u"\u23E9":
-                    current_page = max_page
-                    low = ((20 * max_page) - 19)
-                    high = (20 * max_page)
-                for button in buttons:
-                    await msg.remove_reaction(button, interaction.user)
-                if current_page != previous_page:
-                    cursor.execute(
-                        f"SELECT ID, Effect, Fame, Masculine_Name, Feminine_Name FROM Store_Title WHERE ROWID BETWEEN {low} and {high}")
-                    pull = cursor.fetchall()
-                    embed = discord.Embed(title=f"Title Store Settings Page {current_page}",
-                                          description=f'This is a list of available titles',
-                                          colour=discord.Colour.blurple())
-                    for result in pull:
-                        embed.add_field(name=f"Title Store Item: {result[3]}/{result[4]}",
-                                        value=f'**Effect**: {result[1]}, **Rewarded Fame**: {result[2]}', inline=False)
-                    await msg.edit(embed=embed)
-    cursor.close()
-    db.close()
+                    await cursor.execute(
+                        "SELECT COUNT(*) FROM A_Audit_Prestige WHERE Character_Name = ?",
+                        (character_name,)
+                    )
+
+                count_row = await cursor.fetchone()
+                proposition_count = count_row[0] if count_row else 0
+
+                if proposition_count == 0:
+                    await interaction.followup.send(
+                        f"No propositions found for '{character_name}'.",
+                        ephemeral=True
+                    )
+                    return
+
+                # Set up pagination variables
+                page_number = min(max(page_number, 1), math.ceil(proposition_count / 20))
+                items_per_page = 20
+                offset = (page_number - 1) * items_per_page
+
+                # Create and send the view with the results
+                view = PrestigeHistoryView(
+                    user_id=interaction.user.id,
+                    guild_id=guild_id,
+                    character_name=character_name,
+                    item_name=name,
+                    limit=items_per_page,
+                    offset=offset
+                )
+                await view.create_embed(results)
+                await interaction.followup.send(embed=view.embed, view=view)
+
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(
+                f"An error occurred in the 'history' command while fetching data for '{character_name}': {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred while fetching your proposition history. Please try again later.",
+                ephemeral=True
+            )
+
+    @character_group.command(name='cap', description='Set the personal cap of a character')
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def cap(self, interaction: discord.Interaction, character_name: str, level_cap: int):
+        """Set the personal level cap of a character."""
+        try:
+            # Clean and validate input
+            character_name_cleaned = unidecode(str.title(character_name)).replace(";", "").replace(")", "")
+            author_name = interaction.user.name
+            author_id = interaction.user.id
+            guild_id = interaction.guild_id
+            guild = interaction.guild
+
+            # Defer the response to allow for processing time
+            await interaction.response.defer(thinking=True)
+
+            # Validate level_cap input
+            if not 1 <= level_cap <= 20:
+                await interaction.followup.send(
+                    f"Level cap must be between 1 and 20. You provided: {level_cap}",
+                    ephemeral=True
+                )
+                return
+
+            # Connect to the database
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+
+                # Fetch character information
+                await cursor.execute(
+                    """
+                    SELECT Character_Name, Milestones, Level, Trials, Thread_ID
+                    FROM Player_Characters
+                    WHERE Player_Name = ? AND (Character_Name = ? OR Nickname = ?)
+                    """,
+                    (author_name, character_name_cleaned, character_name_cleaned)
+                )
+                character_info = await cursor.fetchone()
+
+                if character_info is None:
+                    await interaction.followup.send(
+                        f"Character '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+
+                (character_name_db, milestones, level, trials, thread_id) = character_info
+
+                # Update the personal cap in the database
+                await cursor.execute(
+                    "UPDATE Player_Characters SET Personal_Cap = ? WHERE Character_Name = ?",
+                    (level_cap, character_name_db)
+                )
+                await conn.commit()
+
+                # Initialize character changes
+                character_changes = shared_functions.CharacterChange(
+                    character_name=character_name_db,
+                    author=author_name,
+                    source=f'Cap Adjustment to {level_cap}'
+                )
+
+                # Perform level calculation
+                try:
+                    level_result = await level_calculation(
+                        cursor=cursor,
+                        guild=guild,
+                        guild_id=guild_id,
+                        author_id=author_id,
+                        character_name=character_name_db,
+                        personal_cap=level_cap,
+                        level=level,
+                        base=milestones,
+                        easy=0,
+                        medium=0,
+                        hard=0,
+                        deadly=0,
+                        misc=0
+                    )
+
+                    # Check if level_result is a tuple
+                    if isinstance(level_result, tuple):
+                        character_changes.level = level_result[0]
+                        character_changes.milestone_change = 0
+                        character_changes.milestones_total = level_result[1]
+                        character_changes.milestones_remaining = level_result[4]
+                    else:
+                        # Handle unexpected return type
+                        character_changes.source += " Error adjusting level: Unexpected result from level calculation."
+                        logging.error(f"Unexpected result from level_calculation: {level_result}")
+
+                except LevelCalculationError as e:
+                    character_changes.source += f" Error adjusting level: {e}"
+                    logging.exception(f"Level calculation error for character '{character_name_db}': {e}")
+
+                # Perform mythic calculation
+                try:
+                    mythic_result = await mythic_calculation(
+                        cursor=cursor,
+                        character_name=character_name_db,
+                        level=level,
+                        trials=trials,
+                        trial_change=0
+                    )
+
+                    if isinstance(mythic_result, tuple):
+                        character_changes.tier = mythic_result[0]
+                        character_changes.trials = mythic_result[1]
+                        character_changes.trial_change = 0
+                        character_changes.trials_remaining = mythic_result[2]
+                    else:
+                        # Handle unexpected return type
+                        character_changes.source += " Error adjusting mythic: Unexpected result from mythic calculation."
+                        logging.error(f"Unexpected result from mythic_calculation: {mythic_result}")
+
+                except MythicCalculationError as e:
+                    character_changes.source += f" Error adjusting mythic: {e}"
+                    logging.exception(f"Mythic calculation error for character '{character_name_db}': {e}")
+
+                # Create and send the log embed
+                character_log = await shared_functions.log_embed(character_changes, guild, thread_id, self.bot)
+                await interaction.followup.send(embed=character_log, ephemeral=True)
+
+                # Create and send the character embed
+                character_embed = await shared_functions.character_embed(cursor, character_name_db, guild)
+                await interaction.followup.send(embed=character_embed, ephemeral=True)
+
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred in the 'cap' command: {e}")
+            await interaction.followup.send(
+                "An unexpected error occurred while processing your request. Please try again later.",
+                ephemeral=True
+            )
+
+    display_group = discord.app_commands.Group(
+        name='display',
+        description='level_range group commands',
+        parent=character_group
+    )
+
+    @display_group.command(name='display',
+                             description='display all character information or specific character information')
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def display_info(self, interaction: discord.Interaction, player_name: typing.Optional[discord.Member],
+                      character_name: typing.Optional[str],
+                      page_number: int = 1):
+        """Display character information.
+        Display A specific view when a specific character is provided,
+        refine the list of characters when a specific player is provided."""
+        guild_id = interaction.guild_id
+        await interaction.response.defer(thinking=True)
+
+        try:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+
+                # Decide which query to execute based on whether 'name' is provided
+                if not player_name:
+                    await cursor.execute("SELECT COUNT(Character_Name) FROM Player_Characters")
+                else:
+                    await cursor.execute("SELECT COUNT(Character_Name) FROM Player_Characters WHERE Player_Name = ?",
+                                         (player_name.name,))
+                character_count = await cursor.fetchone()
+                (character_count,) = character_count
+                if character_name:
+                    view_type = 2
+                    await cursor.execute("SELECT character_name from Player_Characters where Character_Name = ?",
+                                         (character_name,))
+                    character = await cursor.fetchone()
+                    if not character:
+                        await interaction.followup.send(
+                            f"Character '{character_name}' not found.",
+                            ephemeral=True
+                        )
+                        return
+                    else:
+                        await cursor.execute(
+                            "SELECT character_name from Player_Characters where Character_Name = ? ORDER BY True_Character_Name asc",
+                            (character_name,))
+                        results = await cursor.fetchall()
+                        offset = results.index(character[0])
+                else:
+                    view_type = 1
+
+                # Set up pagination variables
+                page_number = min(max(page_number, 1), math.ceil(character_count / 20))
+                items_per_page = 5 if view_type == 1 else 1
+                offset = (page_number - 1) * items_per_page if view_type == 1 else offset
+
+                # Create and send the view with the results
+                view = CharacterDisplayView(
+                    user_id=interaction.user.id,
+                    guild_id=guild_id,
+                    player_name=player_name,
+                    character_name=character_name,
+                    limit=items_per_page,
+                    offset=offset,
+                    view_type=view_type
+                )
+                await view.update_results()
+                await view.create_embed()
+                await interaction.followup.send(embed=view.embed, view=view)
+
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(
+                f"An error occurred whilst fetching data! input values of player_name: {player_name}, character_name: {character_name}': {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred whilst fetching data. Please try again later.",
+                ephemeral=True
+            )
 
 
-@character.command()
-@app_commands.autocomplete(character_name=own_character_select_autocompletion)
-@app_commands.autocomplete(name=fame_lookup)
-@app_commands.choices(
-    modify=[discord.app_commands.Choice(name='Display', value=1), discord.app_commands.Choice(name='use', value=2)])
-async def proposition(interaction: discord.Interaction, character_name: typing.Optional[str], name: typing.Optional[str],
-                      approver: typing.Optional[discord.Member], modify: discord.app_commands.Choice[int] = 1):
-    "Proposition NPCs for Favors using your prestige!."
-    character_name = None if character_name is None else str.replace(
-        str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
-    guild_id = interaction.guild_id
-    author = interaction.user.name
-    guild = interaction.guild
-    modify = 1 if modify == 1 else modify.value
-    character_name = character_name if character_name is not None else "N/A"
-    name = name if name is not None else "N/A"
-    approver = approver if approver is not None else "N/A"
-    author_id = interaction.user.id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute("SELECT Fame_Required, Prestige_Cost, Name, Effect, Use_Limit from Store_Fame Where name = ?",
-                   (name,))
-    item_id = cursor.fetchone()
-    if modify == 2 and approver != "N/A" and item_id is not None:
-        cursor.execute(
-            f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND  Nickname = ?",
-            (author, character_name, author, character_name))
-        player_info = cursor.fetchone()
-        if player_info is not None:
-            true_character_name = player_info[3]
-            cursor.execute(
-                f"SELECT Count(Item_name) from A_Audit_Prestige where Author_ID = ? and Character_Name = ? and Item_Name = ? and IsAllowed = ?",
-                (author_id, character_name, name, 1))
-            title_information = cursor.fetchone()
-            if title_information[0] < item_id[4] and player_info[27] >= item_id[0] and player_info[30] >= item_id[1]:
-                await EventCommand.proposition_open(self, guild_id, author, author_id, player_info[3], item_id[2],
-                                                    item_id[1], 'Attempting to open a proposition', 'Proposition Open!')
-                cursor.execute("Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-                accepted_bio_channel = cursor.fetchone()
-                cursor.execute("Select MAX(Transaction_ID) FROM A_Audit_Prestige WHERE Character_Name = ?",
-                               (character_name,))
-                proposition_id = cursor.fetchone()
-                bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4],
-                                            player_info[5], player_info[6], player_info[7], player_info[8],
-                                            player_info[9], player_info[10], player_info[11], player_info[12],
-                                            player_info[13], player_info[14], player_info[16], player_info[17],
-                                            player_info[18], player_info[19], player_info[20], player_info[21],
-                                            player_info[22], player_info[23], player_info[27], player_info[28],
-                                            player_info[30] - item_id[1], player_info[31])
-                bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
-                bio_message = await bio_channel.fetch_message(player_info[24])
-                await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
-                logging_embed = discord.Embed(
-                    title=f"{true_character_name} has opened the following proposition of propositioned {name} ID: {proposition_id[0]}",
-                    description=f"{author} is attempting to use {item_id[1]} prestige to obtain the following effect of: \r\n {item_id[3]}.",
-                    colour=discord.Colour.blurple())
-                logging_thread = guild.get_thread(player_info[25])
-                await logging_thread.send(embed=logging_embed)
-                await interaction.response.send_message(
-                    content=f"<@{approver.id}>, {player_info[2]} is attempting to proposition for {name}, with ID of {proposition_id[0]} do you accept? \r\n use the /Gamemaster Proposition command to reject or deny this request using the Proposition ID!",
-                    allowed_mentions=discord.AllowedMentions(users=True))
-            elif title_information[0] >= item_id[4]:
-                await interaction.response.send_message(f"{author} has met the limit for usage of this proposition.")
-            elif player_info[27] < item_id[0]:
-                await interaction.response.send_message(f"{author} does not have enough fame to use this proposition.")
-            else:
-                await interaction.response.send_message(f"{author} does not have enough prestige to use this proposition.")
-        else:
-            await interaction.response.send_message(
-                f"{author} does not have a {character_name} registered under this character name or nickname.")
-    elif modify == 2 and approver != "N/A" and item_id is None:
-        await interaction.response.send_message(f"{name} is not an available proposition.")
-    elif modify == 2 and approver == "N/A":
-        await interaction.response.send_message(f"Please mention the approver of this proposition.")
-    else:
-        buttons = ["⏪", "⬅", "➡", "⏩"]  # skip to start, left, right, skip to end
-        cursor.execute("SELECT COUNT(Name) FROM Store_Fame")
-        admin_count = cursor.fetchone()
-        max_page = math.ceil(admin_count[0] / 20)
-        current_page = 1
-        low = 1 + ((current_page - 1) * 20)
-        high = 20 + ((current_page - 1) * 20)
-        cursor.execute(
-            f"SELECT Fame_Required, Prestige_Cost, Name, Effect, Use_Limit from Store_Fame WHERE ROWID BETWEEN {low} and {high}")
-        pull = cursor.fetchall()
-        embed = discord.Embed(title=f"Fame Store Settings Page {current_page}",
-                              description=f'This is a list of the administratively defined items',
-                              colour=discord.Colour.blurple())
-        for result in pull:
-            embed.add_field(name=f'**Name**: {result[2]}',
-                            value=f'**Fame Required**: {result[0]} **Prestige Cost**: {result[1]}, **Limit**: {result[4]} \r\n **Effect**: {result[3]}',
-                            inline=False)
-        await interaction.response.send_message(embed=embed)
-        msg = await interaction.original_response()
-        for button in buttons:
-            await msg.add_reaction(button)
-        while True:
-            try:
-                reaction, user = await bot.wait_for('reaction_add', check=lambda reaction,
-                                                                                 user: user.id == interaction.user.id and reaction.emoji in buttons,
-                                                    timeout=60.0)
-            except asyncio.TimeoutError:
-                embed.set_footer(text="Request has timed out.")
-                await msg.edit(embed=embed)
-                await msg.clear_reactions()
-                cursor.close()
-                db.close()
-                return print("timed out")
-            else:
-                previous_page = current_page
-                if reaction.emoji == u"\u23EA":
-                    current_page = 1
-                    low = 1
-                    high = 20
-                elif reaction.emoji == u"\u2B05" and current_page > 1:
-                    low -= 20
-                    high -= 20
-                    current_page -= 1
-                elif reaction.emoji == u"\u27A1" and current_page < max_page:
-                    low += 20
-                    high += 20
-                    current_page += 1
-                elif reaction.emoji == u"\u23E9":
-                    current_page = max_page
-                    low = ((20 * max_page) - 19)
-                    high = (20 * max_page)
-                for button in buttons:
-                    await msg.remove_reaction(button, interaction.user)
-                if current_page != previous_page:
-                    cursor.execute(
-                        f"SELECT Fame_Required, Prestige_Cost, Name, Effect, Use_Limit from Store_Fame WHERE ROWID BETWEEN {low} and {high}")
-                    pull = cursor.fetchall()
-                    embed = discord.Embed(title=f"Fame Store Settings Page {current_page}",
-                                          description=f'This is a list of the administratively defined items',
-                                          colour=discord.Colour.blurple())
-                    for result in pull:
-                        embed.add_field(name=f'**Name**: {result[2]}',
-                                        value=f'**Fame Required**: {result[0]} **Prestige Cost**: {result[1]}, **Limit**: {result[4]} \r\n **Effect**: {result[3]}',
-                                        inline=False)
-                    await msg.edit(embed=embed)
-                    cursor.close()
-    db.close()
 
+    @display_group.command(name='display', description='Display all characters in a level range')
+    @app_commands.describe(
+        level_range="the level range of the characters you are looking for. Keep in mind, this applies only to the preset low/med/high/max ranges your admin has set")
+    async def display_level_range(self, interaction: discord.Interaction, level_range: discord.Role, current_page: int = 1):
+        guild_id = interaction.guild_id
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+                await cursor.execute("Select min(level), max(level) from Level_Range where Role_ID = ?",
+                                     (level_range.id,))
+                level_range_info = await cursor.fetchone()
+                if not level_range_info:
+                    await interaction.followup.send(
+                        f"Level range {level_range.name} not found.",
+                        ephemeral=True
+                    )
+                    return
+                else:
+                    level_range_min, level_range_max = level_range_info
+                    await cursor.execute("SELECT COUNT(Character_Name) FROM Player_Characters WHERE ? <= level <= ?",
+                                         (level_range_min, level_range_max))
+                character_count = await cursor.fetchone()
+                (character_count,) = character_count
+                view_type = 1
 
-@character.command()
-@app_commands.autocomplete(character_name=own_character_select_autocompletion)
-async def cap(interaction: discord.Interaction, character_name: str, level_cap: int):
-    "THIS COMMAND DISPLAYS CHARACTER INFORMATION"
-    character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
-    author = interaction.user.name
-    guild_id = interaction.guild_id
-    guild = interaction.guild
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(
-        f"SELECT Character_Name FROM Player_Characters where Player_Name = ? and Character_Name = ? or  Player_Name = ? AND Nickname = ?",
-        (author, character_name, author, character_name))
-    character_info = cursor.fetchone()
-    if character_info is not None:
-        await EventCommand.adjust_personal_cap(self, guild_id, author, character_name, level_cap)
-        await interaction.response.send_message(f"{author} has adjusted the personal cap of {character_name} to {level_cap}.",
-                                        ephemeral=True)
-        cursor.execute(
-            f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?",
-            (author, character_name, character_name))
-        player_info = cursor.fetchone()
-        cursor.execute("Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-        accepted_bio_channel = cursor.fetchone()
-        cursor.execute("Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
-        character_log_channel_id = cursor.fetchone()
-        bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5],
-                                    player_info[6], player_info[7], player_info[8], player_info[9], player_info[10],
-                                    player_info[11], player_info[12], player_info[13], player_info[14], player_info[16],
-                                    player_info[17], player_info[18], player_info[19], player_info[20], player_info[21],
-                                    player_info[22], player_info[23], player_info[27], player_info[28], player_info[30],
-                                    player_info[31])
-        bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
-        bio_message = await bio_channel.fetch_message(player_info[24])
-        await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
-        logging_embed = discord.Embed(title=f"{character_name} has had their maximum level cap set to {level_cap}!",
-                                      description=f"This character can no longer level up past this point until changed!",
-                                      colour=discord.Colour.blurple())
-        logging_thread = guild.get_thread(player_info[25])
-        await logging_thread.send(embed=logging_embed)
-    else:
-        await interaction.response.send_message(
-            f"{author} does not have a {character_name} registered under this character name or nickname.")
-    cursor.close()
-    db.close()
+                # Set up pagination variables
+                page_number = min(max(page_number, 1), math.ceil(character_count / 20))
+                items_per_page = 5 if view_type == 1 else 1
+                offset = (page_number - 1) * items_per_page if view_type == 1 else offset
 
+                # Create and send the view with the results
+                view = LevelRangeDisplayView(
+                    user_id=interaction.user.id,
+                    guild_id=guild_id,
+                    level_range_min=level_range_min,
+                    level_range_max=level_range_max,
+                    limit=items_per_page,
+                    offset=offset,
+                    view_type=view_type
+                )
+                await view.update_results()
+                await view.create_embed()
+                await interaction.followup.send(embed=view.embed, view=view)
 
-@character.command()
-@app_commands.autocomplete(character_name=character_select_autocompletion)
-async def display(interaction: discord.Interaction, player_name: typing.Optional[discord.Member], character_name: str = 'All',
-                  current_page: int = 1):
-    "THIS COMMAND DISPLAYS CHARACTER INFORMATION"
-    character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
-    if player_name is not None:
-        player_name = player_name.name
-    guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    if player_name == 'NA':
-        player_name = interaction.user.name
-    if character_name == 'All':
-        cursor.execute("SELECT COUNT(Character_Name) FROM Player_Characters where Player_Name = '{player_name}'")
-        character_count = cursor.fetchone()
-        if character_count is None:
-            cursor.close()
-            db.close()
-            interaction.response.send_message(f"{player_name} was not a valid player to obtain the characters of!")
-            return
-        max_page = math.ceil(character_count[0] / 5)
-        if current_page >= max_page:
-            current_page = max_page
-        buttons = ["⏪", "⬅", "➡", "⏩"]  # skip to start, left, right, skip to end
-        low = 0 + (5 * (current_page - 1))
-        offset = 5
-        cursor.execute(
-            f"Select True_Character_Name, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Flux, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Mythweavers from Player_characters WHERE player_name = '{player_name}' LIMIT {low}, {offset}")
-        pull = cursor.fetchall()
-        embed = discord.Embed(title=f"{player_name} character page {current_page}",
-                              description=f"This is list of {player_name}'s characters",
-                              colour=discord.Colour.blurple())
-        x = 0
-        for result in pull:
-            x += 1
-            number = ordinal(x)
-            embed.add_field(name=f'{number} Character',
-                            value=f'**Name**: [{result[0]}](<{result[13]}>) \r\n **Level**: {result[1]}, **Mythic Tier**: {result[2]}',
-                            inline=False)
-            linkage = f""
-            if result[9] is not None:
-                linkage += f"**Tradition**: [{result[9]}]({result[10]})"
-            if result[11] is not None:
-                if result[9] is not None:
-                    linkage += f" "
-                linkage += f"**Template**: [{result[11]}]({result[12]})"
-            if result[9] is not None or result[11] is not None:
-                embed.add_field(name=f'Additional Info', value=linkage, inline=False)
-        await interaction.response.send_message(embed=embed)
-        msg = await interaction.original_response()
-        for button in buttons:
-            await msg.add_reaction(button)
-        while True:
-            try:
-                reaction, user = await bot.wait_for('reaction_add', check=lambda reaction,
-                                                                                 user: user.id == interaction.user.id and reaction.emoji in buttons,
-                                                    timeout=60.0)
-            except asyncio.TimeoutError:
-                embed.set_footer(text="Request has timed out.")
-                await msg.edit(embed=embed)
-                await msg.clear_reactions()
-                return print("timed out")
-            else:
-                previous_page = current_page
-                if reaction.emoji == u"\u23EA":
-                    current_page = 1
-                    low = 0 + (5 * (current_page - 1))
-                    offset = 5
-                elif reaction.emoji == u"\u2B05" and current_page > 1:
-                    current_page -= 1
-                    low = 0 + (5 * (current_page - 1))
-                    offset = 5
-                elif reaction.emoji == u"\u27A1" and current_page < max_page:
-                    current_page += 1
-                    low = 0 + (5 * (current_page - 1))
-                    offset = 5
-                elif reaction.emoji == u"\u23E9":
-                    current_page = max_page
-                    low = 0 + (5 * (current_page - 1))
-                    offset = 5
-                for button in buttons:
-                    await msg.remove_reaction(button, interaction.user)
-                if current_page != previous_page:
-                    cursor.execute(
-                        f"Select True_Character_Name, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Flux, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Mythweavers from Player_characters WHERE player = '{player_name}' LIMIT {low}, {offset}")
-                    edit_pull = cursor.fetchall()
-                    embed = discord.Embed(title=f"{player_name} character page {current_page}",
-                                          description=f"This is list of {player_name}'s characters",
-                                          colour=discord.Colour.blurple())
-                    x = 0
-                    for result in edit_pull:
-                        x += 1
-                        number = ordinal(x)
-                        embed.add_field(name=f'{number} Character',
-                                        value=f'**Name**: [{result[0]}](<{result[13]}>) \r\n **Level**: {result[1]}, **Mythic Tier**: {result[2]}',
-                                        inline=False)
-                        linkage = " "
-                        if result[9] is not None:
-                            linkage += f"**Tradition**: [{result[9]}]({result[10]})"
-                        if result[11] is not None:
-                            if result[9] is not None:
-                                linkage += f" "
-                            linkage += f"**Template**: [{result[11]}]({result[12]})"
-                        if result[9] is not None or result[11] is not None:
-                            embed.add_field(name=f'Additional Info', value=linkage, inline=False)
-                    await interaction.response.send_message(embed=embed)
-                    await msg.edit(embed=embed)
-    elif character_name != 'All':
-        sql = f"Select True_Character_Name, Nickname, Titles, Description, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Color, Mythweavers, Image_Link, Flux, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Gold_Value, Oath, Fame, Prestige, Title, Article_Link from Player_characters WHERE Character_Name = ? or Nickname = ?"
-        val = (character_name, character_name)
-        cursor.execute(sql, val)
-        result = cursor.fetchone()
-        if result is None:
-            await interaction.response.send_message(f"{character_name} is not a valid Nickname or Character Name.")
-            cursor.close()
-            db.close()
-            return
-        else:
-            color = result[11]
-            int_color = int(color[1:], 16)
-            description_field = f" "
-            if result[2] is not None:
-                description_field += f"**Other Names**: {result[2]}\r\n"
-            if result[24] is not None:
-                description_field += f"[**Backstory**](<{result[24]}>)"
-            embed = discord.Embed(title="Mythweavers Sheet", url=f'{result[12]}', description=f"{description_field}",
-                                  color=int_color)
-            if result[23] is not None:
-                author_field = f"{result[23]} {result[0]}"
-            else:
-                author_field = f"{result[0]}"
-            embed.set_author(name=author_field)
-            embed.set_thumbnail(url=f'{result[13]}')
-            embed.add_field(name=f'Information',
-                            value=f'**Level**: {result[4]}, **Mythic Tier**: {result[5]} **Fame**: {result[21]}, **Prestige**: {result[22]}',
-                            inline=False)
-            embed.add_field(name=f'Total Experience', value=f'**Milestones**: {result[6]}, **Remaining**:  {result[7]}')
-            embed.add_field(name=f'Mythic', value=f'**Trials**: {result[8]}, **Remaining**: {result[9]}')
-            embed.add_field(name="\u200B", value="\u200B")
-            embed.add_field(name=f'Current Wealth', value=f'**GP**: {round(result[10], 2)}')
-            embed.add_field(name=f'Effective Wealth', value=f'**GP**: {round(result[19], 2)}')
-            embed.add_field(name="\u200B", value="\u200B")
-            embed.add_field(name=f'Flux', value=f'**Flux**: {result[14]}', inline=False)
-            linkage = f""
-            if result[15] is not None:
-                linkage += f"**Tradition**: [{result[15]}]({result[16]})"
-            if result[17] is not None:
-                if result[15] is not None:
-                    linkage += " "
-                linkage += f"**Template**: [{result[17]}]({result[18]})"
-            if result[15] is not None or result[17] is not None:
-                embed.add_field(name=f'Additional Info', value=linkage, inline=False)
-            print(result[20])
-            if result[20] == 'Offerings':
-                embed.set_footer(text=f'{result[3]}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
-            elif result[20] == 'Poverty':
-                embed.set_footer(text=f'{result[3]}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
-            elif result[20] == 'Absolute':
-                embed.set_footer(text=f'{result[3]}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
-            else:
-                embed.set_footer(text=f'{result[3]}')
-            await interaction.response.send_message(embed=embed)
-    cursor.close()
-    db.close()
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(
+                f"An error occurred in the 'display level_range' command while fetching data for '{level_range.name}': {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred while fetching level_range information. Please try again later.",
+                ephemeral=True
+            )
 
-
-@character.command()
-@app_commands.describe(
-    level_range="the level range of the characters you are looking for. Keep in mind, this applies only to the preset low/med/high/max ranges your admin has set")
-async def list(interaction: discord.Interaction, level_range: discord.Role, current_page: int = 1):
-    "THIS COMMAND DISPLAYS CHARACTER INFORMATION"
-    guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute("SELECT Level FROM Level_Range WHERE Role_ID = {level_range.id} order by Level asc limit 1")
-    level_range_min = cursor.fetchone()
-    cursor.execute("SELECT Level FROM Level_Range WHERE Role_ID = {level_range.id} order by Level desc limit 1")
-    level_range_max = cursor.fetchone()
-    if level_range_min is None:
-        cursor.close()
-        db.close()
-        interaction.response.send_message(f"{level_range.name} was not a valid role to select", ephemeral=True)
-        return
-    cursor.execute(
-        f"SELECT COUNT(Character_Name) FROM Player_Characters where level >= {level_range_min[0]} and level <= {level_range_max[0]}")
-    character_count = cursor.fetchone()
-    if character_count[0] != 0:
-        max_page = math.ceil(character_count[0] / 5)
-        if current_page >= max_page:
-            current_page = max_page
-        buttons = ["⏪", "⬅", "➡", "⏩"]  # skip to start, left, right, skip to end
-        low = 0 + (5 * (current_page - 1))
-        offset = 5
-        cursor.execute(
-            f"Select True_Character_Name, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Flux, Tradition_Name, Tradition_Link, Template_Name, Template_Link from Player_characters WHERE level >= {level_range_min[0]} and level <= {level_range_max[0]} LIMIT {low}, {offset}")
-        pull = cursor.fetchall()
-        embed = discord.Embed(title=f"{level_range.name} character page {current_page}",
-                              description=f"This is list of characters in {level_range.name}",
-                              colour=discord.Colour.blurple())
-        for result in pull:
-            embed.add_field(name=f'Character Name', value=f'**Name**:{result[0]}', inline=False)
-            embed.add_field(name=f'Information', value=f'**Level**: {result[1]}, **Mythic Tier**: {result[2]}',
-                            inline=False)
-            embed.add_field(name=f'Total Experience',
-                            value=f'**Milestones**: {result[3]}, **Milestones Remaining**: {result[4]}, **Trials**: {result[5]}, **Trials Remaining**: {result[6]}',
-                            inline=False)
-            embed.add_field(name=f'Current Wealth', value=f'**GP**: {result[7]}, **Flux**: {result[8]}', inline=False)
-            linkage = f""
-            if result[9] is not None:
-                linkage += f"**Tradition**: [{result[9]}]({result[10]})"
-            if result[11] is not None:
-                if result[9] is not None:
-                    linkage += f" "
-                linkage += f"**Template**: [{result[11]}]({result[12]})"
-            if result[9] is not None or result[11] is not None:
-                embed.add_field(name=f'Additional Info', value=linkage, inline=False)
-        await interaction.response.send_message(embed=embed)
-        msg = await interaction.original_response()
-        for button in buttons:
-            await msg.add_reaction(button)
-        while True:
-            try:
-                reaction, user = await bot.wait_for('reaction_add', check=lambda reaction,
-                                                                                 user: user.id == interaction.user.id and reaction.emoji in buttons,
-                                                    timeout=60.0)
-            except asyncio.TimeoutError:
-                embed.set_footer(text="Request has timed out.")
-                await msg.edit(embed=embed)
-                await msg.clear_reactions()
-                return print("timed out")
-            else:
-                previous_page = current_page
-                if reaction.emoji == u"\u23EA":
-                    current_page = 1
-                    low = 0 + (5 * (current_page - 1))
-                    offset = 5
-                elif reaction.emoji == u"\u2B05" and current_page > 1:
-                    current_page -= 1
-                    low = 0 + (5 * (current_page - 1))
-                    offset = 5
-                elif reaction.emoji == u"\u27A1" and current_page < max_page:
-                    current_page += 1
-                    low = 0 + (5 * (current_page - 1))
-                    offset = 5
-                elif reaction.emoji == u"\u23E9":
-                    current_page = max_page
-                    low = 0 + (5 * (current_page - 1))
-                    offset = 5
-                for button in buttons:
-                    await msg.remove_reaction(button, interaction.user)
-                if current_page != previous_page:
-                    cursor.execute(
-                        f"Select True_Character_Name, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Flux, Tradition_Name, Tradition_Link, Template_Name, Template_Link from Player_characters WHERE level >= {level_range_min[0]} and level <= {level_range_max[0]} LIMIT {low}, {offset}")
-                    edit_pull = cursor.fetchall()
-                    embed = discord.Embed(title=f"{level_range.name} character page {current_page}",
-                                          description=f"This is list of characters in {level_range.name}",
-                                          colour=discord.Colour.blurple())
-                    for result in edit_pull:
-                        embed.add_field(name=f'Character Name', value=f'**Name**:{result[0]}', inline=False)
-                        embed.add_field(name=f'Information',
-                                        value=f'**Level**: {result[1]}, **Mythic Tier**: {result[2]}', inline=False)
-                        embed.add_field(name=f'Total Experience',
-                                        value=f'**Milestones**: {result[3]}, **Milestones Remaining**: {result[4]}, **Trials**: {result[5]}, **Trials Remaining**: {result[6]}',
-                                        inline=False)
-                        embed.add_field(name=f'Current Wealth', value=f'**GP**: {result[7]}, **Flux**: {result[8]}',
-                                        inline=False)
-                        linkage = None
-                        if result[9] is not None:
-                            linkage += f"**Tradition**: [{result[9]}]({result[10]})"
-                        if result[11] is not None:
-                            if result[9] is not None:
-                                linkage += f" "
-                            linkage += f"**Template**: [{result[11]}]({result[12]})"
-                        if result[9] is not None or result[11] is not None:
-                            embed.add_field(name=f'Additional Info', value=linkage, inline=False)
-                    await msg.edit(embed=embed)
-    else:
-        await interaction.response.send_message(f"{level_range.name} does not have any characters within this level range.",
-                                        ephemeral=True)
-
-
-@character.command()
-@app_commands.choices(
-    modify=[discord.app_commands.Choice(name='Create', value=1), discord.app_commands.Choice(name='Edit', value=2)])
-@app_commands.autocomplete(character_name=own_character_select_autocompletion)
-async def backstory(interaction: discord.Interaction, character_name: str, backstory: str,
-                    modify: discord.app_commands.Choice[int] = 1):
-    "THIS COMMAND CREATES OR CHANGES THE BACKSTORY ASSOCIATED WITH YOUR CHARACTER"
-    character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
-    author = interaction.user.name
-    guild_id = interaction.guild_id
-    guild = interaction.guild
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(
-        f"SELECT Character_Name, Article_ID, Mythweavers FROM Player_Characters where Player_Name = ? and Character_Name = ? or  Player_Name = ? AND Nickname = ?",
-        (author, character_name, author, character_name))
-    character_info = cursor.fetchone()
-    if character_info is not None:
-        if modify == 1:
-            if character_info[1] is not None:
-                await interaction.response.send_message(
-                    f"{author} already has a backstory associated with {character_name}. If you wish to edit it, use the Edit Option of this command",
-                    ephemeral=True)
-            else:
-                await EventCommand.create_bio(self, guild_id, character_info[0], backstory, character_info[2])
-                cursor.execute("Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-                accepted_bio_channel = cursor.fetchone()
-                cursor.execute("Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
-                character_log_channel_id = cursor.fetchone()
-                cursor.execute(
-                    f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND Nickname = ?",
-                    (author, character_name, author, character_name))
-                player_info = cursor.fetchone()
-                bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4],
-                                            player_info[5], player_info[6], player_info[7], player_info[8],
-                                            player_info[9], player_info[10], player_info[11], player_info[12],
-                                            player_info[13], player_info[14], player_info[16], player_info[17],
-                                            player_info[18], player_info[19], player_info[20], player_info[21],
-                                            player_info[22], player_info[23], player_info[27], player_info[28],
-                                            player_info[30], player_info[31])
-                bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
-                bio_message = await bio_channel.fetch_message(player_info[24])
-                await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
-                logging_embed = discord.Embed(title=f"{character_name} has had their backstory created!",
-                                              description=f"{author} has created the following [backstory](<{player_info[31]}>)",
-                                              colour=discord.Colour.blurple())
-                logging_thread = guild.get_thread(player_info[25])
-                await logging_thread.send(embed=logging_embed)
-                await interaction.response.send_message(f"{author} has created a backstory for {character_name}.",
-                                                ephemeral=True)
-        else:
-            if character_info[1] is None:
-                await interaction.response.send_message(
-                    f"{author} does not have a backstory associated with {character_name}. If you wish to create one, use the Create Option of this command",
-                    ephemeral=True)
-            else:
-                await EventCommand.edit_bio(self, guild_id, character_info[0], backstory, character_info[1])
-                cursor.execute("Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-                accepted_bio_channel = cursor.fetchone()
-                cursor.execute("Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
-                character_log_channel_id = cursor.fetchone()
-                cursor.execute(
-                    f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or  Player_Name = ? AND Nickname = ?",
-                    (author, character_name, author, character_name))
-                player_info = cursor.fetchone()
-                bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4],
-                                            player_info[5], player_info[6], player_info[7], player_info[8],
-                                            player_info[9], player_info[10], player_info[11], player_info[12],
-                                            player_info[13], player_info[14], player_info[16], player_info[17],
-                                            player_info[18], player_info[19], player_info[20], player_info[21],
-                                            player_info[22], player_info[23], player_info[27], player_info[28],
-                                            player_info[30], player_info[31])
-                bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
-                bio_message = await bio_channel.fetch_message(player_info[24])
-                await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
-                logging_embed = discord.Embed(title=f"{character_name} has had their backstory edited!",
-                                              description=f"{author} has edited the following backstory: \r\n {backstory}",
-                                              colour=discord.Colour.blurple())
-                logging_thread = guild.get_thread(player_info[25])
-                await logging_thread.send(embed=logging_embed)
-                await interaction.response.send_message(f"{author} has edited the backstory for {character_name}.",
-                                                ephemeral=True)
-    else:
-        cursor.execute(
-            f"SELECT Character_Name FROM A_STG_Player_Characters where Player_Name = ? and Character_Name = ? or  Player_Name = ? AND Nickname = ?",
-            (author, character_name, author, character_name))
-        character_info = cursor.fetchone()
-        if character_info is not None:
-            await EventCommand.edit_stage_bio(self, guild_id, character_info[0], backstory)
-        else:
-            await interaction.response.send_message(
-                f"{author} does not have a {character_name} registered under this character name or nickname.",
-                ephemeral=True)
-
-    cursor.close()
-    db.close()
-"""
+    @character_group.command(name='backstory', description='give or edit the backstory of your character')
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    @app_commands.describe(
+        backstory="The backstory you wish to give to your character, you may use a google drive share link")
+    async def backstory(self, interaction: discord.Interaction, character_name: str, backstory: str):
+        """Give or edit the backstory of a character."""
+        guild_id = interaction.guild_id
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+                await cursor.execute(
+                    "SELECT Character_Name, Article_ID, Mythweavers, Thread_ID FROM Player_Characters WHERE Player_Name = ? AND (Character_Name = ? OR Nickname = ?)",
+                    (interaction.user.name, character_name, character_name)
+                )
+                character_info = await cursor.fetchone()
+                if not character_info:
+                    await interaction.followup.send(
+                        f"Character '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+                else:
+                    (character_name, article_id, mythweavers, logging_thread_id) = character_info
+                    if not character_info[1]:
+                        await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'WA_Backstory_Category'")
+                        category = await cursor.fetchone()
+                        if not category:
+                            await interaction.followup.send(
+                                "Backstory category not found in the database.",
+                                ephemeral=True
+                            )
+                            return
+                        else:
+                            article = await shared_functions.put_wa_article(guild_id=guild_id, template='person',category=category[0])
+                            await cursor.execute("Update Player_Characters SET Article_ID = ?, Article_Link = ? WHERE Character_Name = ?", (article['id'], article['url'], character_name))
+                            await conn.commit()
+                            await shared_functions.character_embed(cursor=cursor, character_name=character_name, guild=interaction.guild)
+                            character_changes = shared_functions.CharacterChange(character_name=character_name, author=interaction.user.name, source=f'Backstory creation', backstory=article['url'])
+                            character_log = await shared_functions.log_embed(character_changes, interaction.guild, logging_thread_id, self.bot)
+                            await interaction.followup.send(embed=character_log, ephemeral=True)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(
+                f"an error occured in the backstory command for '{character_name}': {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred while fetching your proposition history. Please try again later.",
+                ephemeral=True
+            )
 
 
 # Modified RetirementView with character deletion
@@ -1910,85 +1871,28 @@ class RetirementView(discord.ui.View):
                 logging.error(f"Failed to edit message on timeout: {e}")
 
 
-class ShopView(discord.ui.View):
-    """Base class for shop views with pagination."""
-    def __init__(self, user_id, cursor, low, high):
-        super().__init__(timeout=180)
-        self.user_id = user_id
-        self.cursor = cursor
-        self.low = low
-        self.high = high
-        self.results = []
-        self.embed = None
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        """Ensure that only the user who initiated the view can interact with the buttons."""
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "You cannot interact with this button.",
-                ephemeral=True
-            )
-            return False
-        return True
-
-    @discord.ui.button(label='<', style=discord.ButtonStyle.danger)
-    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Handle moving to the previous page."""
-        if self.low > 1:
-            self.high -= 20
-            self.low -= 20
-            await self.update_results()
-            await self.create_embed()
-            await interaction.response.edit_message(
-                embed=self.embed,
-                view=self
-            )
-        else:
-            await interaction.response.send_message("You are on the first page.", ephemeral=True)
-
-    @discord.ui.button(label='>', style=discord.ButtonStyle.secondary)
-    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Handle moving to the next page."""
-        # Assume you have a method to check the max number of items
-        max_items = await self.get_max_items()
-        if self.high < max_items:
-            self.high += 20
-            self.low += 20
-            await self.update_results()
-            await self.create_embed()
-            await interaction.response.edit_message(
-                embed=self.embed,
-                view=self
-            )
-        else:
-            await interaction.response.send_message("You are on the last page.", ephemeral=True)
-
-    async def update_results(self):
-        """Fetch the results for the current page. To be implemented in subclasses."""
-        raise NotImplementedError
-
-    async def create_embed(self):
-        """Create the embed for the current page. To be implemented in subclasses."""
-        raise NotImplementedError
-
-    async def get_max_items(self):
-        """Get the total number of items. To be implemented in subclasses."""
-        raise NotImplementedError
-
-
-class TitleShopView(ShopView):
-    def __init__(self, user_id, cursor, low, high):
-        super().__init__(user_id, cursor, low, high)
+# Modified ShopView with additional logic
+class TitleShopView(shared_functions.ShopView):
+    def __init__(self, user_id, guild_id, offset, limit):
+        super().__init__(user_id, guild_id, offset, limit)
+        self.max_items = None  # Cache total number of items
 
     async def update_results(self):
         """Fetch the title results for the current page."""
-        statement = "SELECT ID, Effect, Fame, Masculine_Name, Feminine_Name FROM Store_Title LIMIT ? OFFSET ?"
-        await self.cursor.execute(statement, (20, self.low - 1))
-        self.results = await self.cursor.fetchall()
+        statement = """
+            SELECT ID, Effect, Fame, Masculine_Name, Feminine_Name
+            FROM Store_Title
+            LIMIT ? OFFSET ?
+        """
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.execute(statement, (self.limit, self.offset - 1))
+            self.results = await cursor.fetchall()
 
     async def create_embed(self):
         """Create the embed for the titles."""
-        self.embed = discord.Embed(title="Titles", description="List of available titles")
+        current_page = ((self.offset - 1) // self.limit) + 1
+        total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+        self.embed = discord.Embed(title="Titles", description=f"Page {current_page} of {total_pages}")
         for title in self.results:
             self.embed.add_field(
                 name=f"ID: {title[0]} - {title[3]} / {title[4]}",
@@ -1998,9 +1902,414 @@ class TitleShopView(ShopView):
 
     async def get_max_items(self):
         """Get the total number of titles."""
-        await self.cursor.execute("SELECT COUNT(*) FROM Store_Title")
-        count = await self.cursor.fetchone()
-        return count[0]
+        if self.max_items is None:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                cursor = await db.execute("SELECT COUNT(*) FROM Store_Title")
+                count = await cursor.fetchone()
+                self.max_items = count[0]
+        return self.max_items
+
+
+class PrestigeShopView(shared_functions.ShopView):
+    def __init__(self, user_id, guild_id, offset, limit):
+        super().__init__(user_id, guild_id, offset, limit)
+        self.max_items = None  # Cache total number of items
+
+    async def update_results(self):
+        """Fetch the title results for the current page."""
+        statement = """
+            SELECT ID, fame_Required, Prestige_Cost, Name, Effect, Use_Limit
+            FROM Store_Fame 
+            LIMIT ? OFFSET ?
+        """
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.execute(statement, (self.limit, self.offset - 1))
+            self.results = await cursor.fetchall()
+
+    async def create_embed(self):
+        """Create the embed for the titles."""
+        current_page = ((self.offset - 1) // self.limit) + 1
+        total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+        self.embed = discord.Embed(title="Fame Store", description=f"Page {current_page} of {total_pages}")
+        for fame in self.results:
+            self.embed.add_field(name=f'**Name**: {fame[2]}',
+                                 value=f'**Fame Required**: {fame[0]} **Prestige Cost**: {fame[1]}, **Limit**: {fame[4]} '
+                                       f'\r\n **Effect**: {fame[3]}',
+                                 inline=False)
+
+    async def get_max_items(self):
+        """Get the total number of titles."""
+        if self.max_items is None:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                cursor = await db.execute("SELECT COUNT(*) FROM Store_Title")
+                count = await cursor.fetchone()
+                self.max_items = count[0]
+        return self.max_items
+
+
+class PrestigeHistoryView(shared_functions.ShopView):
+    def __init__(self, user_id, guild_id, offset, limit, character_name, item_name):
+        super().__init__(user_id, guild_id, offset, limit)
+        self.max_items = None  # Cache total number of items
+        self.character_name = character_name
+        self.item_name = item_name
+
+    async def update_results(self):
+        """Fetch the history of prestige request  for the current page."""
+        if self.item_name is None:
+            statement = """
+                SELECT Item_Name, Prestige_Cost, Transaction_ID, Time, IsAllowed
+                FROM A_Audit_Prestige WHERE Character_Name = ? 
+                ORDER BY Transaction_ID DESC LIMIT ? OFFSET ? 
+            """
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                cursor = await db.execute(statement, (self.character_name, self.limit, self.offset - 1))
+                self.results = await cursor.fetchall()
+
+        else:
+            statement = """
+                            SELECT Item_Name, Prestige_Cost, Transaction_ID, Time, IsAllowed
+                            FROM A_Audit_Prestige WHERE Character_Name = ? AND Item_Name = ?
+                            ORDER BY Transaction_ID DESC LIMIT ? OFFSET ? 
+                        """
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                cursor = await db.execute(statement, (self.character_name, self.item_name, self.limit, self.offset - 1))
+                self.results = await cursor.fetchall()
+
+    async def create_embed(self):
+        """Create the embed for the titles."""
+        current_page = ((self.offset - 1) // self.limit) + 1
+        total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+        self.embed = discord.Embed(title=f"Prestige History for {self.character_name}",
+                                   description=f"Page {current_page} of {total_pages}")
+        for fame in self.results:
+            (item_name, prestige_cost, transaction_id, time, isallowed) = fame
+            allowed = "Approved" if isallowed == 1 else "Rejected"
+            self.embed.add_field(name=f'**Item Name**: {item_name}',
+                                 value=f'**Prestige Cost**: {prestige_cost} **Transaction ID**: {transaction_id}, **Allowed**: {allowed} '
+                                       f'\r\n **Time**: {time}',
+                                 inline=False)
+
+    async def get_max_items(self):
+        """Get the total number of titles."""
+        if self.max_items is None:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                if not self.character_name:
+                    cursor = await db.execute("SELECT COUNT(*) FROM Player_Characters")
+                else:
+                    cursor = await db.execute("SELECT COUNT(*) FROM Player_Characters WHERE Player_Name = ?",
+                                              (self.character_name,))
+                count = await cursor.fetchone()
+                self.max_items = count[0]
+        return self.max_items
+
+
+# Dual View Type Views
+class CharacterDisplayView(shared_functions.ShopView):
+    def __init__(self, user_id, guild_id, offset, limit, player_name, character_name, view_type):
+        super().__init__(user_id, guild_id, offset, limit, view_type)
+        self.max_items = None  # Cache total number of items
+        self.character_name = character_name
+        self.view_type = view_type
+        self.player_name = player_name
+
+    async def update_results(self):
+        """Fetch the history of prestige request  for the current page."""
+        if not self.player_name:
+            statement = """SELECT player_name, player_id, True_Character_Name, Title, Titles, Description, Oath, Level, 
+                            Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, 
+                            Flux, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name, 
+                            Tradition_Link, Template_Name, Template_Link, Article_Link
+                            FROM Player_Characters ORDER BY True_Character_Name ASC LIMIT ? OFFSET ?"""
+            val = (self.limit, self.offset - 1)
+
+        else:
+            statement = """SELECT player_name, True_Character_Name, Title, Titles, Description, Oath, Level, 
+                            Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, 
+                            Flux, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name, 
+                            Tradition_Link, Template_Name, Template_Link, Article_Link
+                            FROM Player_Characters WHERE Player_Name = ? ORDER BY True_Character_Name ASC LIMIT ? OFFSET ? """
+            val = (self.player_name, self.limit, self.offset - 1)
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.execute(statement, val)
+            self.results = await cursor.fetchall()
+
+    async def create_embed(self):
+        """Create the embed for the titles."""
+        if self.view_type == 1:
+            if not self.player_name:
+                current_page = ((self.offset - 1) // self.limit) + 1
+                total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+                self.embed = discord.Embed(title=f"Character Summary",
+                                           description=f"Page {current_page} of {total_pages}")
+            else:
+                current_page = ((self.offset - 1) // self.limit) + 1
+                total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+                self.embed = discord.Embed(title=f"Character Summary for {self.player_name}",
+                                           description=f"Page {current_page} of {total_pages}")
+            for result in self.results:
+                (player_name, true_character_name, title, titles, description, oath, level, tier, milestones,
+                 milestones_required, trials, trials_required, gold, gold_value, flux, fame, prestige, color,
+                 mythweavers, image_link, tradition_name, tradition_link, template_name, template_link,
+                 article_link) = result
+                self.embed.add_field(name=f'Character Name', value=f'**Name**:{true_character_name}')
+                self.embed.add_field(name=f'Information',
+                                     value=f'**Level**: {level}, **Mythic Tier**: {tier}')
+                self.embed.add_field(name=f'Total Experience',
+                                     value=f'**Milestones**: {milestones}, **Milestones Remaining**: {milestones_required}, **Trials**: {trials}, **Trials Remaining**: {trials_required}')
+                self.embed.add_field(name=f'Current Wealth', value=f'**GP**: {gold}, **Flux**: {flux}')
+                linkage = None
+                if not tradition_name:
+                    linkage += f"**Tradition**: [{tradition_name}]({tradition_link})"
+                if not template_link:
+                    if not tradition_name:
+                        linkage += f" "
+                    linkage += f"**Template**: [{template_name}]({template_link})"
+                if not tradition_name or not template_name:
+                    self.embed.add_field(name=f'Additional Info', value=linkage, inline=False)
+        else:
+            current_page = ((self.offset - 1) // self.limit) + 1
+            total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+            for result in self.results:
+                (player_name, true_character_name, title, titles, description, oath, level, tier, milestones,
+                 milestones_required, trials, trials_required, gold, gold_value, flux, fame, prestige, color,
+                 mythweavers, image_link, tradition_name, tradition_link, template_name, template_link,
+                 article_link) = result
+                self.embed = discord.Embed(title=f"Detailed view for {true_character_name}",
+                                           description=f"Page {current_page} of {total_pages}",
+                                           color=int(color[1:], 16))
+                self.embed.set_author(name=f'{player_name}')
+                self.embed.set_thumbnail(url=f'{image_link}')
+                self.embed.add_field(name=f'Character Name', value=f'**Name**:{true_character_name}')
+                self.embed.add_field(name=f'Information',
+                                     value=f'**Level**: {level}, **Mythic Tier**: {tier}')
+                self.embed.add_field(name=f'Total Experience',
+                                     value=f'**Milestones**: {milestones}, **Milestones Remaining**: {milestones_required}, **Trials**: {trials}, **Trials Remaining**: {trials_required}')
+                self.embed.add_field(name=f'Current Wealth',
+                                     value=f'**GP**: {gold}, **Illiquid GP**: {gold_value - gold} **Flux**: {flux}')
+                self.embed.add_field(name=f'Fame and Prestige', value=f'**Fame**: {fame}, **Prestige**: {prestige}')
+                linkage = None
+                if not tradition_name:
+                    linkage += f"**Tradition**: [{tradition_name}]({tradition_link})"
+                if not template_link:
+                    if not tradition_name:
+                        linkage += f" "
+                    linkage += f"**Template**: [{template_name}]({template_link})"
+                if not tradition_name or not template_name:
+                    self.embed.add_field(name=f'Additional Info', value=linkage, inline=False)
+                if oath == 'Offerings':
+                    self.embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
+                elif oath == 'Poverty':
+                    self.embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
+                elif oath == 'Absolute':
+                    self.embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
+                else:
+                    self.embed.set_footer(text=f'{description}')
+
+    async def get_max_items(self):
+        """Get the total number of titles."""
+        if self.max_items is None:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                if not self.player_name:
+                    cursor = await db.execute("SELECT COUNT(*) FROM Player_Characters")
+                else:
+                    cursor = await db.execute("SELECT COUNT(*) FROM Player_Characters WHERE Player_Name = ?",
+                                              (self.player_name,))
+                count = await cursor.fetchone()
+                self.max_items = count[0]
+        return self.max_items
+
+    async def on_view_change(self):
+        self.view_type = 1 if self.view_type == 2 else 2
+        if self.view_type == 1:
+            self.limit = 5  # Change the limit to 5 for the sumamry view
+        else:
+            self.limit = 1  # Change the limit to 1 for the detailed view
+
+
+class LevelRangeDisplayView(shared_functions.ShopView):
+    def __init__(self, user_id, guild_id, offset, limit, level_range_min, level_range_max, view_type):
+        super().__init__(user_id, guild_id, offset, limit, view_type)
+        self.max_items = None  # Cache total number of items
+        self.view_type = view_type
+        self.level_range_max = level_range_max
+        self.level_range_min = level_range_min
+
+    async def update_results(self):
+        """Fetch the history of prestige request  for the current page."""
+        statement = """SELECT player_name, player_id, True_Character_Name, Title, Titles, Description, Oath, Level, 
+                        Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, 
+                        Flux, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name, 
+                        Tradition_Link, Template_Name, Template_Link, Article_Link
+                        FROM Player_Characters WHERE ? <= level <= ? ORDER BY True_Character_Name ASC LIMIT ? OFFSET ? """
+        val = (self.limit, self.offset - 1)
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.execute(statement, val)
+            self.results = await cursor.fetchall()
+
+    async def create_embed(self):
+        """Create the embed for the titles."""
+        if self.view_type == 1:
+            if not self.player_name:
+                current_page = ((self.offset - 1) // self.limit) + 1
+                total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+                self.embed = discord.Embed(title=f"Character Summary",
+                                           description=f"Page {current_page} of {total_pages}")
+            else:
+                current_page = ((self.offset - 1) // self.limit) + 1
+                total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+                self.embed = discord.Embed(title=f"Character Summary for {self.player_name}",
+                                           description=f"Page {current_page} of {total_pages}")
+            for result in self.results:
+                (player_name, true_character_name, title, titles, description, oath, level, tier, milestones,
+                 milestones_required, trials, trials_required, gold, gold_value, flux, fame, prestige, color,
+                 mythweavers, image_link, tradition_name, tradition_link, template_name, template_link,
+                 article_link) = result
+                self.embed.add_field(name=f'Character Name', value=f'**Name**:{true_character_name}')
+                self.embed.add_field(name=f'Information',
+                                     value=f'**Level**: {level}, **Mythic Tier**: {tier}')
+                self.embed.add_field(name=f'Total Experience',
+                                     value=f'**Milestones**: {milestones}, **Milestones Remaining**: {milestones_required}, **Trials**: {trials}, **Trials Remaining**: {trials_required}')
+                self.embed.add_field(name=f'Current Wealth', value=f'**GP**: {gold}, **Flux**: {flux}')
+                linkage = None
+                if not tradition_name:
+                    linkage += f"**Tradition**: [{tradition_name}]({tradition_link})"
+                if not template_link:
+                    if not tradition_name:
+                        linkage += f" "
+                    linkage += f"**Template**: [{template_name}]({template_link})"
+                if not tradition_name or not template_name:
+                    self.embed.add_field(name=f'Additional Info', value=linkage, inline=False)
+        else:
+            current_page = ((self.offset - 1) // self.limit) + 1
+            total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+            for result in self.results:
+                (player_name, true_character_name, title, titles, description, oath, level, tier, milestones,
+                 milestones_required, trials, trials_required, gold, gold_value, flux, fame, prestige, color,
+                 mythweavers, image_link, tradition_name, tradition_link, template_name, template_link,
+                 article_link) = result
+                self.embed = discord.Embed(title=f"Detailed view for {true_character_name}",
+                                           description=f"Page {current_page} of {total_pages}",
+                                           color=int(color[1:], 16))
+                self.embed.set_author(name=f'{player_name}')
+                self.embed.set_thumbnail(url=f'{image_link}')
+                self.embed.add_field(name=f'Character Name', value=f'**Name**:{true_character_name}')
+                self.embed.add_field(name=f'Information',
+                                     value=f'**Level**: {level}, **Mythic Tier**: {tier}')
+                self.embed.add_field(name=f'Total Experience',
+                                     value=f'**Milestones**: {milestones}, **Milestones Remaining**: {milestones_required}, **Trials**: {trials}, **Trials Remaining**: {trials_required}')
+                self.embed.add_field(name=f'Current Wealth',
+                                     value=f'**GP**: {gold}, **Illiquid GP**: {gold_value - gold} **Flux**: {flux}')
+                self.embed.add_field(name=f'Fame and Prestige', value=f'**Fame**: {fame}, **Prestige**: {prestige}')
+                linkage = None
+                if not tradition_name:
+                    linkage += f"**Tradition**: [{tradition_name}]({tradition_link})"
+                if not template_link:
+                    if not tradition_name:
+                        linkage += f" "
+                    linkage += f"**Template**: [{template_name}]({template_link})"
+                if not tradition_name or not template_name:
+                    self.embed.add_field(name=f'Additional Info', value=linkage, inline=False)
+                if oath == 'Offerings':
+                    self.embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
+                elif oath == 'Poverty':
+                    self.embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
+                elif oath == 'Absolute':
+                    self.embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
+                else:
+                    self.embed.set_footer(text=f'{description}')
+
+    async def get_max_items(self):
+        """Get the total number of titles."""
+        if self.max_items is None:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                cursor = await db.execute("SELECT COUNT(*) FROM Player_Characters WHERE ? <= level <= ?",
+                                          (self.level_range_min, self.level_range_max))
+            count = await cursor.fetchone()
+            self.max_items = count[0]
+        return self.max_items
+
+    async def on_view_change(self):
+        self.view_type = 1 if self.view_type == 2 else 2
+        if self.view_type == 1:
+            self.limit = 5  # Change the limit to 5 for the sumamry view
+        else:
+            self.limit = 1  # Change the limit to 1 for the detailed view
+
+
+# Modified AcknowledgementView with additional logic
+class PropositionView(shared_functions.AcknowledgementView):
+    def __init__(
+            self,
+            allowed_user_id: int,
+            requester_name: str,
+            character_name: str,
+            item_name: str,
+            prestige_cost: int,
+            proposition_id: int,
+            bot: commands.Bot,
+            prestige: int,
+            logging_thread: int
+    ):
+        super().__init__(allowed_user_id)
+        self.requester_name = requester_name
+        self.character_name = character_name
+        self.item_name = item_name
+        self.prestige_cost = prestige_cost
+        self.proposition_id = proposition_id
+        self.bot = bot
+        self.prestige = prestige
+        self.logging_thread = logging_thread
+        self.embed = None
+
+    async def accepted(self, interaction: discord.Interaction):
+        """Handle the approval logic."""
+        # Update the database to mark the proposition as accepted
+        # Adjust prestige, log the transaction, notify the requester, etc.
+        await self.update_proposition_status(is_allowed=1)
+        self.embed = discord.Embed(
+            title="Proposition Accepted",
+            description=f"The proposition {self.proposition_id} has been accepted.",
+            color=discord.Color.green()
+        )
+        # Additional logic such as notifying the requester
+
+    async def rejected(self, interaction: discord.Interaction):
+        """Handle the rejection logic."""
+        # Update the database to mark the proposition as rejected
+        await self.update_proposition_status(is_allowed=-1)
+        self.embed = discord.Embed(
+            title="Proposition Rejected",
+            description=f"The proposition {self.proposition_id} has been rejected.",
+            color=discord.Color.red()
+        )
+        # Additional logic such as notifying the requester
+
+    async def create_embed(self):
+        """Create the initial embed for the proposition."""
+        self.embed = discord.Embed(
+            title="Proposition Request",
+            description=(
+                f"**Requester:** {self.requester_name}\n"
+                f"**Character:** {self.character_name}\n"
+                f"**Item:** {self.item_name}\n"
+                f"**Prestige Cost:** {self.prestige_cost}\n"
+                f"**Proposition ID:** {self.proposition_id}"
+            ),
+            color=discord.Color.blue()
+        )
+
+    async def update_proposition_status(self, is_allowed: int):
+        """Update the proposition status in the database."""
+        # Implement database update logic here
+        # For example:
+        async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as conn:
+            await conn.execute(
+                "UPDATE A_Audit_Prestige SET IsAllowed = ? WHERE Transaction_ID = ?",
+                (is_allowed, self.proposition_id)
+            )
+            await conn.commit()
+        # Additional logic such as adjusting prestige points
 
 
 logging.basicConfig(
