@@ -235,7 +235,7 @@ async def character_embed(cursor, character_name: str, guild) -> (Union[Tuple[di
         await cursor.execute(
             "SELECT player_name, player_id, True_Character_Name, Title, Titles, Description, Oath, Level, "
             "Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, "
-            "Flux, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name, "
+            "Essence, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name, "
             "Tradition_Link, Template_Name, Template_Link, Article_Link, Message_ID"
             " FROM Player_Characters WHERE Character_Name = ?", (character_name,))
         character_info = await cursor.fetchone()
@@ -270,7 +270,7 @@ async def character_embed(cursor, character_name: str, guild) -> (Union[Tuple[di
                         value=f'**GP**: {Decimal(character_info[13])}, '
                               f'**Effective** {Decimal(character_info[14])} GP',
                         inline=False)  # Gold, Effective Gold
-        embed.add_field(name="Current Flux", value=f'**Flux**: {character_info[15]}')
+        embed.add_field(name="Current Essence", value=f'**Essence**: {character_info[15]}')
         linkage = f""
         if character_info[21] is not None:  # Tradition Name
             linkage += f"**Tradition**: [{character_info[21]}]({character_info[22]})"
@@ -334,12 +334,12 @@ class CharacterChange:
     trial_change: Optional[int] = None
     trials: Optional[int] = None
     trials_remaining: Optional[int] = None
-    gold: Optional[float] = None
-    gold_change: Optional[float] = None
-    effective_gold: Optional[float] = None
-    transaction_id: Optional[str] = None
-    flux: Optional[int] = None
-    flux_change: Optional[int] = None
+    gold: Optional[Decimal] = None
+    gold_change: Optional[Decimal] = None
+    effective_gold: Optional[Decimal] = None
+    transaction_id: Optional[int] = None
+    essence: Optional[int] = None
+    essence_change: Optional[int] = None
     tradition_name: Optional[str] = None
     tradition_link: Optional[str] = None
     template_name: Optional[str] = None
@@ -351,6 +351,62 @@ class CharacterChange:
     prestige: Optional[int] = None
     source: Optional[str] = None
 
+
+@dataclass
+class UpdateCharacter:
+    character_name: str
+    level_package: Optional[Tuple[int, int, int]] = None  # (Level, Milestones, Milestones_Required)
+    mythic_package: Optional[Tuple[int, int, int]] = None  # (Tier, Trials, Trials_Required)
+    gold_package: Optional[Tuple[int, int, int]] = None  # (Gold, Gold_Value, Gold_Value_Max)
+    essence: Optional[int] = None
+    fame_package: Optional[Tuple[int, int]] = None  # (Fame, Prestige)
+
+
+async def update_character(cursor, change: UpdateCharacter) -> Union[str, Tuple[discord.Embed, str, int]]:
+    try:
+        # Lists to collect column assignments and values
+        assignments = []
+        values = []
+
+        # Handle level package
+        if change.level_package:
+            assignments.extend(["Level = ?", "Milestones = ?", "Milestones_Required = ?"])
+            values.extend(change.level_package)
+
+        # Handle mythic package
+        if change.mythic_package:
+            assignments.extend(["Tier = ?", "Trials = ?", "Trials_Required = ?"])
+            values.extend(change.mythic_package)
+
+        # Handle gold package
+        if change.gold_package:
+            assignments.extend(["Gold = ?", "Gold_Value = ?", "Gold_Value_Max = ?"])
+            values.extend(change.gold_package)
+
+        # Handle essence
+        if change.essence is not None:
+            assignments.append("Essence = ?")
+            values.append(change.essence)
+
+        # Handle fame package
+        if change.fame_package:
+            assignments.extend(["Fame = ?", "Prestige = ?"])
+            values.extend(change.fame_package)
+
+        # Check if there are any assignments to update
+        if not assignments:
+            return "No changes to update."
+
+        # Construct the SQL statement
+        sql_statement = f"UPDATE Player_Characters SET {', '.join(assignments)} WHERE Character_Name = ?"
+        values.append(change.character_name)
+
+        # Execute the SQL statement
+        await cursor.execute(sql_statement, values)
+        return "Character updated successfully."
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"An error occurred whilst updating '{change.character_name}': {e}")
+        return f"An error occurred whilst updating '{change.character_name}'."
 
 # Function to create the embed
 async def log_embed(change: CharacterChange, guild, thread, bot) -> discord.Embed:
@@ -437,13 +493,13 @@ async def log_embed(change: CharacterChange, guild, thread, bot) -> discord.Embe
                 )
             )
 
-        # Flux Change
-        if change.flux_change is not None:
+        # Essence Change
+        if change.essence_change is not None:
             embed.add_field(
-                name="Flux Change",
+                name="Essence Change",
                 value=(
-                    f"**Flux**: {change.flux}\n"
-                    f"**Flux Change**: {change.flux_change}"
+                    f"**Essence**: {change.essence}\n"
+                    f"**Essence Change**: {change.essence_change}"
                 )
             )
 
