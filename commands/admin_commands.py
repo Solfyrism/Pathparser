@@ -956,7 +956,6 @@ class AdminCommands(commands.Cog, name='admin'):
         try:
             shop = await client.get_inventory_items_all(guild_id, player.id)
             if shop is not None:
-                print(type(shop))
                 embed = discord.Embed(title=f"UBB Inventory", description=f'UBB inventory',
                                       colour=discord.Colour.blurple())
                 for idx, item in enumerate(shop.items):

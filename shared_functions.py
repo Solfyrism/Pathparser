@@ -441,7 +441,6 @@ class UpdateCharacter:
 
 async def update_character(guild_id, change: UpdateCharacter) -> Union[str, Tuple[discord.Embed, str, int]]:
     try:
-        print("updating character")
         # Lists to collect column assignments and values
         assignments = []
         values = []
@@ -479,12 +478,10 @@ async def update_character(guild_id, change: UpdateCharacter) -> Union[str, Tupl
         # Construct the SQL statement
         sql_statement = f"UPDATE Player_Characters SET {', '.join(assignments)} WHERE Character_Name = ?"
         values.append(change.character_name)
-        print(sql_statement, values)
         # Execute the SQL statement
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(sql_statement, values)
-            print("executed")
             await db.commit()
             return f"Character '{change.character_name}' updated successfully."
 
