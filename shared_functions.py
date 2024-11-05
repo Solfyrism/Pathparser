@@ -16,7 +16,6 @@ import matplotlib.pyplot as plt
 from zoneinfo import available_timezones, ZoneInfo
 import os
 from datetime import datetime
-from decimal import Decimal
 import aiosqlite
 import logging
 from dataclasses import dataclass
@@ -227,79 +226,157 @@ async def title_lookup(interaction: discord.Interaction, current: str) -> typing
 
 # *** DISPLAY FUNCTIONS *** #
 
-async def character_embed(cursor, character_name: str, guild) -> (Union[Tuple[discord.Embed, str, int], str]):
+async def character_embed(character_name: str, guild: discord.Guild) -> Union[
+    Tuple[discord.Embed, str, int], str]:
     try:
-        await cursor.execute("SELECT Search from Admin where Identifier = 'Accepted_Bio_Channel'")
-        channel_id = await cursor.fetchone()
-        # 8 7 7 6
-        await cursor.execute(
-            "SELECT player_name, player_id, True_Character_Name, Title, Titles, Description, Oath, Level, "
-            "Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, "
-            "Essence, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name, "
-            "Tradition_Link, Template_Name, Template_Link, Article_Link, Message_ID"
-            " FROM Player_Characters WHERE Character_Name = ?", (character_name,))
-        character_info = await cursor.fetchone()
-        color = character_info[17]
-        int_color = int(color[1:], 16)
-        description_field = f" "
-        if character_info[4] is not None:
-            description_field += f"**Other Names**: {character_info[4]} \r\n"  # Titles
-        if character_info[25] is not None:  # Backstory
-            description_field += f"[**Backstory**](<{character_info[25]}>)"
-        titled_character_name = character_info[2] if character_info[3] is None else \
-            f"{character_info[3]} {character_info[2]}"  # Store bought Title, Character Name, Store bought Title, Character Name
-        embed = discord.Embed(title=f"{titled_character_name}", url=f'{character_info[18]}',
-                              description=f"{description_field}",  # Character Name, Mythweavers, Description
-                              color=int_color)
-        embed.set_author(name=f'{character_info[0]}')  # Player Name
-        embed.set_thumbnail(url=f'{character_info[20]}')  # Image Link
-        embed.add_field(name="Information",
-                        value=f'**Level**: {character_info[7]}, '
-                              f'**Mythic Tier**: {character_info[8]}, '
-                              f'**Fame**: {character_info[16]}, '
-                              f'**Prestige**: {character_info[17]}',
-                        # Level, Tier, Fame, Prestige
-                        inline=False)
-        embed.add_field(name="Experience",
-                        value=f'**Milestones**: {character_info[9]}, '
-                              f'**Remaining**: {character_info[10]}')  # Milestones, Remaining Milestones
-        embed.add_field(name="Mythic",
-                        value=f'**Trials**: {character_info[11]}, '
-                              f'**Remaining**: {character_info[12]}')  # Trials, Remaining Trials
-        embed.add_field(name="Current Wealth",
-                        value=f'**GP**: {Decimal(character_info[13])}, '
-                              f'**Effective** {Decimal(character_info[14])} GP',
-                        inline=False)  # Gold, Effective Gold
-        embed.add_field(name="Current Essence", value=f'**Essence**: {character_info[15]}')
-        linkage = f""
-        if character_info[21] is not None:  # Tradition Name
-            linkage += f"**Tradition**: [{character_info[21]}]({character_info[22]})"
-        if character_info[23] is not None:  # Template Name
-            if character_info[21] is not None:  # check if there's a tradition to link to.
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.cursor()
+
+            # Fetch channel ID
+            await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
+            channel_id_row = await cursor.fetchone()
+            if not channel_id_row:
+                return f"No channel found with Identifier 'Accepted_Bio_Channel' in Admin table."
+            channel_id = channel_id_row['Search']
+
+            # Fetch character info
+            await cursor.execute(
+                """
+                SELECT player_name, player_id, True_Character_Name, Title, Titles, Description, Oath, Level,
+                       Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value,
+                       Essence, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name,
+                       Tradition_Link, Template_Name, Template_Link, Article_Link, Message_ID
+                FROM Player_Characters WHERE Character_Name = ?
+                """, (character_name,))
+            character_info = await cursor.fetchone()
+            if not character_info:
+                return f"No character found with Character_Name '{character_name}'."
+
+        # Unpack character_info using column names
+        player_name = character_info['player_name']
+        player_id = character_info['player_id']
+        true_character_name = character_info['True_Character_Name']
+        title = character_info['Title']
+        titles = character_info['Titles']
+        description = character_info['Description']
+        oath = character_info['Oath']
+        level = character_info['Level']
+        tier = character_info['Tier']
+        milestones = character_info['Milestones']
+        milestones_required = character_info['Milestones_Required']
+        trials = character_info['Trials']
+        trials_required = character_info['Trials_Required']
+        gold = character_info['Gold']
+        gold_value = character_info['Gold_Value']
+        essence = character_info['Essence']
+        fame = character_info['Fame']
+        prestige = character_info['Prestige']
+        color = character_info['Color']
+        mythweavers = character_info['Mythweavers']
+        image_link = character_info['Image_Link']
+        tradition_name = character_info['Tradition_Name']
+        tradition_link = character_info['Tradition_Link']
+        template_name = character_info['Template_Name']
+        template_link = character_info['Template_Link']
+        article_link = character_info['Article_Link']
+        message_id = character_info['Message_ID']
+
+        # Convert color to integer
+        try:
+            int_color = int(color.lstrip('#'), 16)
+        except ValueError:
+            int_color = 0x000000  # Default color if invalid
+
+        # Build embed description
+        description_field = ""
+        if titles:
+            description_field += f"**Other Names**: {titles}\n"
+        if article_link:
+            description_field += f"[**Backstory**]({article_link})"
+
+        titled_character_name = true_character_name if not title else f"{title} {true_character_name}"
+
+        embed = discord.Embed(
+            title=titled_character_name,
+            url=mythweavers,
+            description=description_field,
+            color=int_color
+        )
+        embed.set_author(name=player_name)
+        embed.set_thumbnail(url=image_link)
+        embed.add_field(
+            name="Information",
+            value=f'**Level**: {level}, **Mythic Tier**: {tier}\n**Fame**: {fame}, **Prestige**: {prestige}',
+            inline=False
+        )
+        embed.add_field(
+            name="Experience",
+            value=f'**Milestones**: {milestones}, **Remaining**: {milestones_required}'
+        )
+        embed.add_field(
+            name="Mythic",
+            value=f'**Trials**: {trials}, **Remaining**: {trials_required}'
+        )
+        embed.add_field(
+            name="Current Wealth",
+            value=f'**GP**: {Decimal(gold)}, **Effective**: {Decimal(gold_value)} GP',
+            inline=False
+        )
+        embed.add_field(
+            name="Current Essence",
+            value=f'**Essence**: {essence}'
+        )
+
+        # Additional Info
+        linkage = ""
+        if tradition_name:
+            linkage += f"**Tradition**: [{tradition_name}]({tradition_link})"
+        if template_name:
+            if tradition_name:
                 linkage += " "
-            linkage += f"**Template**: [{character_info[23]}]({character_info[24]})"
-        if character_info[21] is not None or character_info[23] is not None:
-            # check if there's a tradition or template worth adding to the embed.
-            embed.add_field(name=f'Additional Info', value=linkage, inline=False)
-        # Handling Oaths below.
-        description = character_info[5]
-        if character_info[6] == 'Offerings':
-            embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
-        elif character_info[6] == 'Poverty':
-            embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
-        elif character_info[6] == 'Absolute':
-            embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
-        else:
-            embed.set_footer(text=f'{description}')
-        message = f"<@{character_info[1]}>"
-        bio_channel = guild.get_channel(channel_id[0])
-        bio_message = await bio_channel.fetch_message(character_info[26])
-        await bio_message.edit(content=message, embed=embed)
-        return_value = embed, message, channel_id[0]
-    except (aiosqlite.Error, TypeError, ValueError) as e:
-        logging.exception(f"An error occurred whilst building character embed for '{character_name}': {e}")
-        return_value = f"An error occurred whilst building character embed for '{character_name}'."
-    return return_value
+            linkage += f"**Template**: [{template_name}]({template_link})"
+        if linkage:
+            embed.add_field(name='Additional Info', value=linkage, inline=False)
+
+        # Footer with Oath
+        oath_icons = {
+            'Offerings': 'https://i.imgur.com/dSuLyJd.png',
+            'Poverty': 'https://i.imgur.com/4Fr9ZnZ.png',
+            'Absolute': 'https://i.imgur.com/ibE5vSY.png'
+        }
+        icon_url = oath_icons.get(oath)
+        embed.set_footer(text=description, icon_url=icon_url)
+
+        message_content = f"<@{player_id}>"
+
+        # Fetch the bio channel
+        bio_channel = guild.get_channel(channel_id)
+        if bio_channel is None:
+            bio_channel = await guild.fetch_channel(channel_id)
+        if bio_channel is None:
+            return f"Channel with ID {channel_id} not found."
+
+        # Fetch and edit the message
+        try:
+            bio_message = await bio_channel.fetch_message(message_id)
+            await bio_message.edit(content=message_content, embed=embed)
+        except discord.NotFound:
+            return f"Message with ID {message_id} not found in channel {bio_channel.name}."
+        except discord.Forbidden:
+            return "Bot lacks permissions to edit the message."
+        except discord.HTTPException as e:
+            logging.exception(f"Discord error while editing message: {e}")
+            return "An error occurred while editing the message."
+
+        return embed, message_content, channel_id
+
+    except aiosqlite.Error as e:
+        logging.exception(f"Database error: {e}")
+        return f"An error occurred with the database."
+    except Exception as e:
+        logging.exception(f"An unexpected error occurred: {e}")
+        return f"An unexpected error occurred while building character embed for '{character_name}'."
 
 
 def name_fix(name) -> Optional[Tuple[str, str]]:
@@ -334,9 +411,9 @@ class CharacterChange:
     trial_change: Optional[int] = None
     trials: Optional[int] = None
     trials_remaining: Optional[int] = None
-    gold: Optional[Decimal] = None
-    gold_change: Optional[Decimal] = None
-    effective_gold: Optional[Decimal] = None
+    gold: Optional[float] = None
+    gold_change: Optional[float] = None
+    effective_gold: Optional[float] = None
     transaction_id: Optional[int] = None
     essence: Optional[int] = None
     essence_change: Optional[int] = None
@@ -362,8 +439,9 @@ class UpdateCharacter:
     fame_package: Optional[Tuple[int, int]] = None  # (Fame, Prestige)
 
 
-async def update_character(cursor, change: UpdateCharacter) -> Union[str, Tuple[discord.Embed, str, int]]:
+async def update_character(guild_id, change: UpdateCharacter) -> Union[str, Tuple[discord.Embed, str, int]]:
     try:
+        print("updating character")
         # Lists to collect column assignments and values
         assignments = []
         values = []
@@ -380,7 +458,8 @@ async def update_character(cursor, change: UpdateCharacter) -> Union[str, Tuple[
 
         # Handle gold package
         if change.gold_package:
-            assignments.extend(["Gold = ?", "Gold_Value = ?", "Gold_Value_Max = ?"])
+            assignments.extend(["Gold = CAST(? as numeric(16,2))", "Gold_Value = CAST(? as numeric(16,2))",
+                                "Gold_Value_Max = CAST(? as numeric(16,2))"])
             values.extend(change.gold_package)
 
         # Handle essence
@@ -400,13 +479,19 @@ async def update_character(cursor, change: UpdateCharacter) -> Union[str, Tuple[
         # Construct the SQL statement
         sql_statement = f"UPDATE Player_Characters SET {', '.join(assignments)} WHERE Character_Name = ?"
         values.append(change.character_name)
-
+        print(sql_statement, values)
         # Execute the SQL statement
-        await cursor.execute(sql_statement, values)
-        return "Character updated successfully."
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute(sql_statement, values)
+            print("executed")
+            await db.commit()
+            return f"Character '{change.character_name}' updated successfully."
+
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"An error occurred whilst updating '{change.character_name}': {e}")
         return f"An error occurred whilst updating '{change.character_name}'."
+
 
 # Function to create the embed
 async def log_embed(change: CharacterChange, guild, thread, bot) -> discord.Embed:
@@ -480,15 +565,15 @@ async def log_embed(change: CharacterChange, guild, thread, bot) -> discord.Embe
 
         # Wealth Changes
         if change.gold_change is not None:
-            gold = round(change.gold, 2) if change.gold is not None else "N/A"
-            gold_change = round(change.gold_change, 2)
-            effective_gold = round(change.effective_gold, 2) if change.effective_gold is not None else "N/A"
+            gold = change.gold if change.gold is not None else "N/A"
+            gold_change = change.gold_change
+            effective_gold = change.effective_gold if change.effective_gold is not None else "N/A"
             embed.add_field(
                 name="Wealth Changes",
                 value=(
-                    f"**Gold**: {gold}\n"
-                    f"**Gold Change**: {gold_change}\n"
-                    f"**Effective Gold**: {effective_gold} GP\n"
+                    f"**Gold**: {round(gold, 2)}\n"
+                    f"**Gold Change**: {round(gold_change, 2)}\n"
+                    f"**Effective Gold**: {round(effective_gold, 2)} GP\n"
                     f"**Transaction ID**: {change.transaction_id}"
                 )
             )
@@ -613,18 +698,17 @@ def get_utc_offset(tz):
 
 
 def time_to_minutes(t):
-    if t[:1] == '-':
-        hours, minutes = map(int, t[1:].split(':'))
-        hours = -abs(hours)
-        minutes = -abs(minutes)
-    elif t[:1] == '+':
-        hours, minutes = map(int, t[1:].split(':'))
-    elif len(t) == 5:
-        hours, minutes = map(int, t.split(':'))
-    else:
-        hours = 0
-        minutes = 0
-    return hours * 60 + minutes
+    pattern = r'^(?P<sign>[+-]?)(?P<hours>\d{1,2}):(?P<minutes>\d{2})$'
+    match = re.match(pattern, t)
+    if not match:
+        logging.error(f"Invalid time format: {t}")
+        return 0  # Or raise an exception
+
+    sign = -1 if match.group('sign') == '-' else 1
+    hours = int(match.group('hours'))
+    minutes = int(match.group('minutes'))
+    total_minutes = sign * (hours * 60 + minutes)
+    return total_minutes
 
 
 def fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset):
@@ -700,7 +784,7 @@ async def create_timecard_plot(guild_id, player_name, day, utc_offset):
     print(f"transforming of {utc_offset_time}")
     utc_offset_minutes = time_to_minutes(utc_offset_time)
     test = ['nuts', 'berries', 'bananas']
-    if type(player_name) is str:
+    if isinstance(player_name, str):
         row = fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset_minutes)
 
         if row:
@@ -743,7 +827,7 @@ async def create_timecard_plot(guild_id, player_name, day, utc_offset):
                             top=0.85)  # Adjust bottom and top margins to give room for the x-labels and title
 
         plt.tight_layout()
-    elif type(player_name) is type(test):  # Correct
+    elif isinstance(player_name, list):  # Correct
         player_list = []  # Initialize an empty list to store player names
         player_availability = []  # Initialize an empty list to store all players' availability data
         group_name = None
@@ -837,10 +921,9 @@ def convert_to_unix(military_time: str, timezone_str: str) -> str:
 
 
 def adjust_day(day, hours, utc_offset):
-    print(type(day), hours, type(utc_offset))
-    adjusted_day = day + (1 if int(hours) - int(utc_offset) >= 24 else -1 if int(hours) - utc_offset <= 0 else 0)
-    # Ensure the day wraps around in the range 1 to 7 (days of the week)
-    return (adjusted_day - 1) % 7 + 1
+    logging.debug(f"Adjusting day {day} with hours {hours} and UTC offset {utc_offset}")
+    adjusted_day = day + (1 if int(hours) - int(utc_offset) >= 24 else -1 if int(hours) - int(utc_offset) <= 0 else 0)
+    return ((adjusted_day - 1) % 7) + 1
 
 
 # *** MISC FUNCTIONS *** #
@@ -881,8 +964,8 @@ def ordinal(n):
     if 11 <= (n % 100) <= 13:
         suffix = "th"
     else:
-        suffix = ["th", "st", "nd", "rd"][n % 10] if n % 10 < 4 else "th"
-    return str(n) + suffix
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
 
 
 async def put_wa_article(guild_id: int, template: str, category: str, title: str, overview: str, author: str) -> (
@@ -1071,32 +1154,56 @@ async def put_wa_report(cursor, guild_id: int, session_id: int, overview: str, a
             return None
 
 
-async def patch_wa_report(cursor, guild_id: int, session_id: int, overview: str, author: str, plot: str,
-                          significance: int) -> Optional[dict]:
-    if guild_id in [883009758179762208, 280061170231017472]:
-        evaluated_overview = drive_word_document(overview)
-        try:
-            client = WaClient(
-                'pathparser',
-                'https://github.com/Solfyrism/Pathparser',
-                'V1.1',
-                os.getenv('WORLD_ANVIL_API'),
-                os.getenv('WORLD_ANVIL_USER')
-            )
-            world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
-            session_info = cursor.fetchone()
-            new_page = client.article.patch(session_info[0], {
-                'content': f'{overview}',
+async def patch_wa_report(guild_id: int, session_id: int, overview: str, author: str, plot: str, significance: int) -> \
+        Optional[dict]:
+    if guild_id not in [883009758179762208, 280061170231017472]:
+        logging.warning(f"Guild ID {guild_id} is not authorized to create articles.")
+        return None
+
+    evaluated_overview = drive_word_document(overview)
+    try:
+        client = WaClient(
+            'pathparser',
+            'https://github.com/Solfyrism/Pathparser',
+            'V1.1',
+            os.getenv('WORLD_ANVIL_API'),
+            os.getenv('WORLD_ANVIL_USER')
+        )
+        world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
+
+        # Establish a new database connection
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+
+            # Fetch session information
+            await cursor.execute("SELECT Article_ID, History_ID FROM Sessions WHERE Session_ID = ?", (session_id,))
+            session_info = await cursor.fetchone()
+            if not session_info:
+                logging.error(f"No session found with Session_ID {session_id}")
+                return None
+
+            article_id = session_info[0]
+            history_id = session_info[1]
+
+            # Update the article and history on World Anvil
+            new_page = client.article.patch(article_id, {
+                'content': evaluated_overview,
                 'world': {'id': world_id}
             })
-            new_history = client.history.patch(session_info[0], {
-                'content': f'{overview}',
+            new_history = client.history.patch(history_id, {
+                'content': evaluated_overview,
                 'world': {'id': world_id}
             })
-        except Exception as e:
-            # I haven't ever gotten a proper exception from the World Anvil API, so this is a catch-all until I can specify it down. https://pypi.org/project/pywaclient/#exceptions has them, but I'm not sure how to catch them yet.
-            logging.exception(f"Error in article creation for session '{session_id}': {e}")
-            return None
+
+            # Optionally update the database if needed
+            # await cursor.execute("UPDATE Sessions SET ... WHERE Session_ID = ?", (session_id,))
+            # await conn.commit()
+
+            return {'article': new_page, 'history': new_history}
+
+    except Exception as e:
+        logging.exception(f"Error in article update for session '{session_id}': {e}")
+        return None
 
 
 def drive_word_document(overview: str) -> Optional[str]:
@@ -1461,3 +1568,12 @@ class DualView(discord.ui.View):
     async def get_max_items(self):
         """Get the total number of items. To be implemented in subclasses."""
         raise NotImplementedError
+
+
+logging.basicConfig(
+    level=logging.ERROR,
+    format='%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    filename='pathparser.log',  # Specify the log file name
+    filemode='a'  # Append mode
+)

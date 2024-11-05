@@ -15,7 +15,6 @@ import aiosqlite
 import shared_functions
 from shared_functions import name_fix
 import commands.character_commands as character_commands
-from decimal import Decimal
 
 # *** GLOBAL VARIABLES *** #
 os.chdir("C:\\pathparser")
@@ -23,7 +22,7 @@ os.chdir("C:\\pathparser")
 
 async def transaction_reverse(cursor: aiosqlite.Cursor, transaction_id: int, author_id: int, author_name: str,
                               reason: str) -> (
-        Union[tuple[int, int, str, Decimal, Decimal, Decimal, Decimal], str]):
+        Union[tuple[int, int, str, float, float, float, float], str]):
     try:
         await cursor.execute(
             "Select Character_Name, Gold_value, Effective_Gold_Value, Effective_gold_value_max, source_command, Related_Transaction_ID FROM A_Audit_Gold WHERE Transaction_ID = ?",
@@ -71,151 +70,159 @@ async def transaction_reverse(cursor: aiosqlite.Cursor, transaction_id: int, aut
 
 
 async def session_reward_reversal(
-        cursor: aiosqlite.Cursor,
         interaction: discord.Interaction,
         session_id: int,
         character_name: str,
         author_name: str,
         session_level: int,
-        session_gold: Decimal,
+        session_gold: float,
         session_info: Union[tuple, aiosqlite.Row],
         source: str) -> (
         Union[shared_functions.CharacterChange, str]):
-    try:
-
-        if not session_info:
-            return f'invalid session ID of {session_id}'
-        else:
-            (info_player_id, info_player_name, info_character_name, info_level, info_tier, info_effective_gold,
-             info_received_milestones, info_received_trials, info_received_gold, info_received_fame,
-             info_received_prestige,
-             info_received_essence, info_transaction_id) = session_info
-            await cursor.execute(
-                "SELECT True_Character_Name, Oath, Level, Tier Milestones, Trials, Gold, Gold_Value, Gold_Value_Max, Essence, Thread_ID, Accepted_Date, Fame, Prestige FROM Player_Characters WHERE Character_Name = ? OR Nickname = ?",
-                (character_name, character_name))
-            player_info = await cursor.fetchone()
-            if not player_info:
-                return f"there is no {character_name} registered."
-            else:
-                (true_character_name, oath, character_level, tier, milestones, trials, gold, gold_value, gold_value_max,
-                 essence, thread_id, accepted_date, fame, prestige) = player_info
-                try:
-                    return_level = await character_commands.level_calculation(
-                        cursor=cursor,
-                        level=session_level,
-                        guild=interaction.guild,
-                        guild_id=interaction.guild.id,
-                        base=milestones,
-                        personal_cap=0,
-                        easy=0,
-                        medium=0,
-                        hard=0,
-                        deadly=0,
-                        misc=-info_received_milestones)
-                except character_commands.CalculationAidFunctionError as e:
-                    return_level = f"An error occurred whilst adjusting levels for {character_name} \r\n"
-                level_value = session_level if isinstance(return_level, str) else character_level[0]
-                try:
-                    return_mythic = await character_commands.mythic_calculation(
-                        cursor=cursor,
+    if not session_info:
+        return f'invalid session ID of {session_id}'
+    else:
+        async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            try:
+                (info_player_id, info_player_name, info_character_name, info_level, info_tier, info_effective_gold,
+                 info_received_milestones, info_received_trials, info_received_gold, info_received_fame,
+                 info_received_prestige, info_received_essence, info_transaction_id) = session_info
+                await cursor.execute(
+                    "SELECT True_Character_Name, Oath, Level, Tier, Milestones, Trials, Gold, Gold_Value, Gold_Value_Max, Essence, Thread_ID, Accepted_Date, Fame, Prestige FROM Player_Characters WHERE Character_Name = ? OR Nickname = ?",
+                    (character_name, character_name))
+                player_info = await cursor.fetchone()
+                if not player_info:
+                    return f"there is no {character_name} registered."
+                else:
+                    (true_character_name, oath, character_level, tier, milestones, trials, gold, gold_value,
+                     gold_value_max,
+                     essence, thread_id, accepted_date, fame, prestige) = player_info
+                    try:
+                        return_level = await character_commands.level_calculation(
+                            cursor=cursor,
+                            level=session_level,
+                            guild=interaction.guild,
+                            guild_id=interaction.guild.id,
+                            base=milestones,
+                            personal_cap=0,
+                            easy=0,
+                            medium=0,
+                            hard=0,
+                            deadly=0,
+                            misc=-info_received_milestones,
+                            author_id=interaction.user.id,
+                            character_name=character_name)
+                    except character_commands.CalculationAidFunctionError as e:
+                        return_level = f"An error occurred whilst adjusting levels for {character_name} \r\n"
+                    level_value = session_level if isinstance(return_level, str) else character_level[0]
+                    try:
+                        return_mythic = await character_commands.mythic_calculation(
+                            cursor=cursor,
+                            character_name=character_name,
+                            level=level_value,
+                            trials=trials,
+                            trial_change=-info_received_trials)
+                        return_mythic = return_mythic if tier != return_mythic[
+                            0] or info_received_trials != 0 else 0
+                    except character_commands.CalculationAidFunctionError as e:
+                        return_mythic = f"An error occurred whilst adjusting trials for {character_name} \r\n"
+                    try:
+                        return_gold = await character_commands.gold_calculation(
+                            guild_id=interaction.guild.id,
+                            character_name=character_name,
+                            level=level_value,
+                            oath=oath,
+                            gold=gold,
+                            author_name=interaction.user.name,
+                            author_id=interaction.user.id,
+                            gold_value=gold_value,
+                            gold_value_max=gold_value_max,
+                            gold_change=-info_received_gold,
+                            gold_value_change=float(0),
+                            gold_value_max_change=-session_gold,
+                            reason='Session Backout',
+                            source=source
+                        )
+                    except character_commands.CalculationAidFunctionError as e:
+                        return_gold = f"An error occurred whilst adjusting gold for {character_name} \r\n"
+                    try:
+                        return_essence = character_commands.essence_calculation(
+                            character_name=character_name,
+                            essence=essence,
+                            essence_change=-info_received_essence,
+                            accepted_date=accepted_date)
+                    except character_commands.CalculationAidFunctionError as e:
+                        return_essence = f"An error occurred whilst adjusting essence for {character_name} \r\n"
+                    if isinstance(return_level, tuple) and \
+                            (isinstance(return_mythic, tuple) or isinstance(return_mythic, int)) and \
+                            isinstance(return_gold, tuple) and \
+                            isinstance(return_essence, tuple):
+                        await cursor.execute("DELETE FROM Sessions_Archive WHERE Session_ID = ? AND Character_Name = ?",
+                                             (session_id, character_name))
+                        cursor.connection.commit()
+                    return_fame = (fame - info_received_fame, -info_received_fame, prestige - info_received_prestige,
+                                   -info_received_prestige)
+                    character_updates = shared_functions.UpdateCharacter(character_name=character_name)
+                    character_changes = shared_functions.CharacterChange(
                         character_name=character_name,
-                        level=level_value,
-                        trials=trials,
-                        trial_change=-info_received_trials)
-                    return_mythic = return_mythic if tier != return_mythic[
-                        0] or info_received_trials != 0 else 0
-                except character_commands.CalculationAidFunctionError as e:
-                    return_mythic = f"An error occurred whilst adjusting trials for {character_name} \r\n"
-                try:
-                    return_gold = character_commands.gold_calculation(
-                        cursor=cursor,
-                        character_name=character_name,
-                        level=level_value,
-                        oath=oath,
-                        gold=gold,
-                        author_name=interaction.user.name,
-                        author_id=interaction.user.id,
-                        gold_value=gold_value,
-                        gold_value_max=gold_value_max,
-                        gold_change=-info_received_gold,
-                        gold_value_change=Decimal(0),
-                        gold_value_max_change=-session_gold,
-                        reason='Session Backout',
-                        source=source
-                    )
-                except character_commands.CalculationAidFunctionError as e:
-                    return_gold = f"An error occurred whilst adjusting gold for {character_name} \r\n"
-                try:
-                    return_essence = character_commands.essence_calculation(
-                        cursor=cursor,
-                        character_name=character_name,
-                        essence=essence,
-                        essence_change=-info_received_essence,
-                        accepted_date=accepted_date)
-                except character_commands.CalculationAidFunctionError as e:
-                    return_essence = f"An error occurred whilst adjusting essence for {character_name} \r\n"
-                if isinstance(return_level, tuple) and \
-                        (isinstance(return_mythic, tuple) or isinstance(return_mythic, int)) and \
-                        isinstance(return_gold, tuple) and \
-                        isinstance(return_essence, tuple):
-                    await cursor.execute("DELETE FROM Sessions_Archive WHERE Session_ID = ? AND Character_Name = ?",
-                                         (session_id, character_name))
-                    cursor.connection.commit()
-                return_fame = (fame - info_received_fame, -info_received_fame, prestige - info_received_prestige,
-                               -info_received_prestige)
-                character_updates = shared_functions.UpdateCharacter(character_name=character_name)
-                character_changes = shared_functions.CharacterChange(
-                    character_name=character_name,
-                    author=interaction.user.name,
-                    source=source)
-                if isinstance(return_level, tuple):
-                    (new_level, total_milestones, min_milestones, milestones_to_level,
-                     milestones_required, awarded_total_milestones) = return_level
-                    character_updates.level_package = (new_level, total_milestones, min_milestones)
-                    character_changes.level = new_level
-                    character_changes.milestones_total = total_milestones
-                    character_changes.milestones_remaining = min_milestones
-                    character_changes.milestone_change = awarded_total_milestones
-                if isinstance(return_mythic, tuple):
-                    (new_tier, total_trials, trials_required, trial_change) = return_mythic
-                    character_updates.trial_package = (new_tier, total_trials, trials_required)
-                    character_changes.tier = new_tier
-                    character_changes.trials = total_trials
-                    character_changes.trials_remaining = trials_required
-                    character_changes.trial_change = trial_change
-                if isinstance(return_gold, tuple):
-                    (calculated_difference, gold_total, gold_value_total, gold_value_max_total,
-                     transaction_id) = return_gold
-                    character_updates.gold_package = (gold_total, gold_value_total, gold_value_max_total)
-                    character_changes.gold = gold_total
-                    character_changes.gold_change = calculated_difference
-                    character_changes.effective_gold = gold_value_total
-                    character_changes.effective_gold_max = gold_value_max_total
-                    character_changes.transaction_id = transaction_id
-                if isinstance(return_essence, tuple):
-                    (essence_total, essence_change) = return_essence
-                    character_updates.essence_package = essence_total
-                    character_changes.essence = essence_total
-                    character_changes.essence_change = essence_change
-                if isinstance(return_fame, tuple):
-                    (fame, fame_change, prestige, prestige_change) = return_fame
-                    character_updates.fame_package = (fame, prestige)
-                    character_changes.fame = fame
-                    character_changes.fame_change = fame_change
-                    character_changes.prestige = prestige
-                    character_changes.prestige_change = prestige_change
-                run_character_update = await shared_functions.update_character(cursor=cursor, change=character_updates)
-                return character_changes
-    except (aiosqlite.Error, TypeError, ValueError) as e:
-        logging.exception(
-            f"an error occurred for {author_name} whilst rewarding session with ID {session_id} for character {character_name}': {e}")
-        return f"An error occurred whilst adjusting session with ID '{session_id}' for {character_name} Error: {e}."
+                        author=interaction.user.name,
+                        source=source)
+                    if isinstance(return_level, tuple):
+                        (new_level,
+                         total_milestones,
+                         min_milestones,
+                         milestones_to_level,
+                         milestones_required,
+                         awarded_total_milestones) = return_level
+                        character_updates.level_package = (new_level, total_milestones, min_milestones)
+                        character_changes.level = new_level
+                        character_changes.milestones_total = total_milestones
+                        character_changes.milestones_remaining = min_milestones
+                        character_changes.milestone_change = awarded_total_milestones
+                    if isinstance(return_mythic, tuple):
+                        (new_tier, total_trials, trials_required, trial_change) = return_mythic
+                        character_updates.trial_package = (new_tier, total_trials, trials_required)
+                        character_changes.tier = new_tier
+                        character_changes.trials = total_trials
+                        character_changes.trials_remaining = trials_required
+                        character_changes.trial_change = trial_change
+                    if isinstance(return_gold, tuple):
+                        (calculated_difference, gold_total, gold_value_total, gold_value_max_total,
+                         transaction_id) = return_gold
+                        character_updates.gold_package = (gold_total, gold_value_total, gold_value_max_total)
+                        character_changes.gold = gold_total
+                        character_changes.gold_change = calculated_difference
+                        character_changes.effective_gold = gold_value_total
+                        character_changes.effective_gold_max = gold_value_max_total
+                        character_changes.transaction_id = transaction_id
+                    if isinstance(return_essence, tuple):
+                        (essence_total, essence_change) = return_essence
+                        character_updates.essence_package = essence_total
+                        character_changes.essence = essence_total
+                        character_changes.essence_change = essence_change
+                    if isinstance(return_fame, tuple):
+                        (fame, fame_change, prestige, prestige_change) = return_fame
+                        character_updates.fame_package = (fame, prestige)
+                        character_changes.fame = fame
+                        character_changes.fame_change = fame_change
+                        character_changes.prestige = prestige
+                        character_changes.prestige_change = prestige_change
+                    run_character_update = await shared_functions.update_character(guild_id=interaction.guild.id,
+                                                                                   change=character_updates)
+                    return character_changes
+            except (aiosqlite.Error, TypeError, ValueError) as e:
+                logging.exception(
+                    f"an error occurred for {author_name} whilst rewarding session with ID {session_id} for character {character_name}': {e}")
+                return f"An error occurred whilst adjusting session with ID '{session_id}' for {character_name} Error: {e}."
 
 
-async def session_reward_calculation(cursor: aiosqlite.Cursor, interaction: discord.Interaction, session_id: int,
+async def session_reward_calculation(interaction: discord.Interaction, session_id: int,
                                      character_name: str, author_name: str, session_level: int, source: str) -> (
         Union[shared_functions.CharacterChange, str]):
-    try:
+    async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as conn:
+        cursor = await conn.cursor()
+        # try:
         await cursor.execute(
             "SELECT GM_Name, Session_Name, Play_Time, Session_Range, Gold, Essence, Easy, Medium, Hard, Deadly, Trials, Alt_Reward_All, Alt_Reward_Party, Session_Thread, Message, Rewards_Message, Rewards_Thread, Fame, Prestige FROM Sessions WHERE Session_ID = ? and IsActive = 0 LIMIT 1",
             (session_id,))
@@ -234,7 +241,8 @@ async def session_reward_calculation(cursor: aiosqlite.Cursor, interaction: disc
             if not player_info:
                 return f"there is no {character_name} registered."
             else:
-                (player_id, true_character_name, oath, character_level, tier, milestones, trials, gold, gold_value, gold_value_max,
+                (player_id, true_character_name, oath, character_level, tier, milestones, trials, gold, gold_value,
+                 gold_value_max,
                  essence, thread_id, accepted_date, fame, prestige) = player_info
                 try:
                     return_level = await character_commands.level_calculation(
@@ -248,7 +256,9 @@ async def session_reward_calculation(cursor: aiosqlite.Cursor, interaction: disc
                         medium=session_medium,
                         hard=session_hard,
                         deadly=session_deadly,
-                        misc=0)
+                        misc=0,
+                        author_id=interaction.user.id,
+                        character_name=character_name)
                 except character_commands.CalculationAidFunctionError as e:
                     return_level = f"An error occurred whilst adjusting levels for {character_name} \r\n"
                 level_value = session_level if isinstance(return_level, str) else character_level[0]
@@ -264,8 +274,8 @@ async def session_reward_calculation(cursor: aiosqlite.Cursor, interaction: disc
                 except character_commands.CalculationAidFunctionError as e:
                     return_mythic = f"An error occurred whilst adjusting trials for {character_name} \r\n"
                 try:
-                    return_gold = character_commands.gold_calculation(
-                        cursor=cursor,
+                    return_gold = await character_commands.gold_calculation(
+                        guild_id=interaction.guild_id,
                         character_name=character_name,
                         level=level_value,
                         oath=oath,
@@ -273,8 +283,8 @@ async def session_reward_calculation(cursor: aiosqlite.Cursor, interaction: disc
                         gold_value=gold_value,
                         gold_value_max=gold_value_max,
                         gold_change=session_gold,
-                        gold_value_change=Decimal(0),
-                        gold_value_max_change=Decimal(0),
+                        gold_value_change=float(0),
+                        gold_value_max_change=float(0),
                         author_name=author_name,
                         author_id=interaction.user.id,
                         reason='Session Reward',
@@ -283,7 +293,6 @@ async def session_reward_calculation(cursor: aiosqlite.Cursor, interaction: disc
                     return_gold = f"An error occurred whilst adjusting gold for {character_name} \r\n"
                 try:
                     return_essence = character_commands.essence_calculation(
-                        cursor=cursor,
                         character_name=character_name,
                         essence=essence,
                         essence_change=session_essence,
@@ -297,8 +306,13 @@ async def session_reward_calculation(cursor: aiosqlite.Cursor, interaction: disc
                     author=interaction.user.name,
                     source=source)
                 if isinstance(return_level, tuple):
-                    (new_level, total_milestones, min_milestones, milestones_to_level,
-                     milestones_required, awarded_total_milestones) = return_level
+                    (
+                        new_level,
+                        total_milestones,
+                        min_milestones,
+                        milestones_to_level,
+                        milestones_required,
+                        awarded_total_milestones) = return_level
                     character_updates.level_package = (new_level, total_milestones, min_milestones)
                     character_changes.level = new_level
                     character_changes.milestones_total = total_milestones
@@ -344,19 +358,25 @@ async def session_reward_calculation(cursor: aiosqlite.Cursor, interaction: disc
                 else:
                     fame = None
                     prestige = None
-                run_character_update = await shared_functions.update_character(cursor=cursor, change=character_updates)
+                run_character_update = await shared_functions.update_character(guild_id=interaction.guild.id,
+                                                                               change=character_updates)
                 await cursor.execute(
                     "insert into Sessions_Archive (Session_ID, Player_ID, Character_Name, Level, Tier, "
                     "Effective_Gold, Received_Milestones, Received_Trials, Received_Gold, Received_Fame, "
                     "Received_Prestige, Received_Essence, Gold_Transaction_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (session_id, player_id, character_name, character_level, tier, awarded_total_milestones, awarded_total_milestones, trial_change, transaction_id,
-                     fame, prestige, essence, transaction_id))
-                cursor.connection.commit()
-                return character_changes,
-    except (aiosqlite.Error, TypeError, ValueError) as e:
+                    (session_id, player_id, character_name, character_level, tier, awarded_total_milestones,
+                     awarded_total_milestones, trial_change, transaction_id,
+                     fame_change, prestige_change, essence_change, transaction_id))
+                await conn.commit()
+                return character_changes
+
+
+"""    except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(
             f"an error occurred for {author_name} whilst rewarding session with ID {session_id} for character {character_name}': {e}")
         return f"An error occurred whilst adjusting session with ID '{session_id}' for {character_name} Error: {e}."
+"""
+
 
 def safe_add(a, b):
     # Treat None as zero
@@ -364,11 +384,13 @@ def safe_add(a, b):
     b = b if b is not None else 0
 
     # If either value is a Decimal, convert both to Decimal
-    if isinstance(a, Decimal) or isinstance(b, Decimal):
-        a = Decimal(a)
-        b = Decimal(b)
+    if isinstance(a, float) or isinstance(b, float):
+        a = float(a)
+        b = float(b)
 
     return a + b
+
+
 async def session_log_player(cursor: aiosqlite.Cursor,
                              interaction: discord.Interaction,
                              bot,
@@ -430,7 +452,7 @@ async def session_log_player(cursor: aiosqlite.Cursor,
                                  original_effective_gold,
                                  awarded_total_milestones, trial_change, calculated_difference, 0, 0, essence_change,
                                  transaction_id))
-        character_embed = await shared_functions.character_embed(cursor=cursor, character_name=character_name,
+        character_embed = await shared_functions.character_embed(character_name=character_name,
                                                                  guild=interaction.guild)
         character_log = await shared_functions.log_embed(change=character_changes, guild=interaction.guild,
                                                          thread=thread_id, bot=bot)
@@ -545,8 +567,12 @@ class AdminCommands(commands.Cog, name='admin'):
                             hard=hard,
                             deadly=deadly,
                             misc=misc_milestones)
-                        (new_level, total_milestones, min_milestones, milestones_to_level,
-                         milestones_required, awarded_total_milestones) = level_adjustment
+                        (new_level,
+                         total_milestones,
+                         min_milestones,
+                         milestones_to_level,
+                         milestones_required,
+                         awarded_total_milestones) = level_adjustment
                         mythic_adjustment = await character_commands.mythic_calculation(
                             cursor=cursor,
                             character_name=character_name,
@@ -569,7 +595,7 @@ class AdminCommands(commands.Cog, name='admin'):
                             character_changes.trial_change = 0
                         character_log = await shared_functions.log_embed(change=character_changes, guild=guild,
                                                                          thread=thread_id, bot=self.bot)
-                        character_embed = await shared_functions.character_embed(cursor=cursor,
+                        character_embed = await shared_functions.character_embed(
                                                                                  character_name=character_name,
                                                                                  guild=guild)
                         await interaction.followup.send(embed=character_log,
@@ -621,7 +647,7 @@ class AdminCommands(commands.Cog, name='admin'):
                             source=f"admin adjusted trials by {amount} for {character_name}")
                         character_log = await shared_functions.log_embed(change=character_changes, guild=guild,
                                                                          thread=thread_id, bot=self.bot)
-                        character_embed = await shared_functions.character_embed(cursor=cursor,
+                        character_embed = await shared_functions.character_embed(
                                                                                  character_name=character_name,
                                                                                  guild=guild)
                         await interaction.followup.send(embed=character_log,
@@ -635,16 +661,14 @@ class AdminCommands(commands.Cog, name='admin'):
     @character_group.command(name="gold_adjust",
                              description="commands for adding or removing gold from a character")
     @app_commands.autocomplete(character_name=shared_functions.character_select_autocompletion)
-    async def gold_adjust(self, interaction: discord.Interaction, character_name: str, reason: str, amount: float = 0,
-                          effective_gold: float = 0, lifetime_gold: float = 0,
+    async def gold_adjust(self, interaction: discord.Interaction, character_name: str, reason: str,
+                          amount: float = float(0),
+                          effective_gold: float = float(0), lifetime_gold: float = float(0),
                           ):
         """Adjust the gold a PC has"""
         _, unidecode_name = name_fix(character_name)
         guild_id = interaction.guild_id
         guild = interaction.guild
-        amount = Decimal(amount)
-        effective_gold = Decimal(effective_gold)
-        lifetime_gold = Decimal(lifetime_gold)
         await interaction.response.defer(thinking=True)
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
             cursor = await conn.cursor()
@@ -663,8 +687,8 @@ class AdminCommands(commands.Cog, name='admin'):
                     else:
                         (true_character_name, character_name, character_level, oath, gold, gold_value, gold_value_max,
                          thread_id) = player_info
-                        gold_result = character_commands.gold_calculation(
-                            cursor=cursor,
+                        gold_result = await character_commands.gold_calculation(
+                            guild_id=guild_id,
                             author_id=interaction.user.id,
                             author_name=interaction.user.name,
                             character_name=character_name,
@@ -683,12 +707,17 @@ class AdminCommands(commands.Cog, name='admin'):
                         else:
                             (calculated_difference, gold_total, gold_value_total, gold_value_max_total,
                              transaction_id) = gold_result
+                            gold_package = (gold_total, gold_value_total, gold_value_max_total)
+                            character_updates = shared_functions.UpdateCharacter(character_name=character_name,
+                                                                                 gold_package=gold_package)
+                            update_character = await shared_functions.update_character(guild_id=guild_id,
+                                                                                       change=character_updates)
                             character_changes = shared_functions.CharacterChange(
                                 character_name=character_name,
                                 author=interaction.user.name,
                                 gold=gold_total,
                                 gold_change=calculated_difference,
-                                effective_gold=effective_gold,
+                                effective_gold=gold_value_total,
                                 transaction_id=transaction_id,
                                 source=f"admin adjusted gold by {amount} for {character_name} for {reason}")
 
@@ -698,7 +727,6 @@ class AdminCommands(commands.Cog, name='admin'):
                                 thread=thread_id,
                                 bot=self.bot)
                             character_embed = await shared_functions.character_embed(
-                                cursor=cursor,
                                 character_name=character_name,
                                 guild=guild)
                             await interaction.followup.send(embed=character_log,
@@ -748,7 +776,6 @@ class AdminCommands(commands.Cog, name='admin'):
                         thread=thread_id,
                         bot=self.bot)
                     character_embed = await shared_functions.character_embed(
-                        cursor=cursor,
                         character_name=character_name,
                         guild=guild)
                     content = f"undid transaction {transaction_id} for {character_name} with a new transaction id of {new_transaction_id}."
@@ -774,7 +801,6 @@ class AdminCommands(commands.Cog, name='admin'):
                                 thread=thread_id,
                                 bot=self.bot)
                             character_embed = await shared_functions.character_embed(
-                                cursor=cursor,
                                 character_name=character_name,
                                 guild=guild)
                             content += f"\r\n undid related transaction {transaction_id} for {character_name} with a new transaction id of {new_transaction_id}."
@@ -792,15 +818,14 @@ class AdminCommands(commands.Cog, name='admin'):
         parent=admin_group
     )
 
-    @session_group.command()
-    async def session_management(self, interaction: discord.Interaction, session_id: int, gold: typing.Optional[int],
-                                 easy: typing.Optional[int], medium: typing.Optional[int], hard: typing.Optional[int],
-                                 deadly: typing.Optional[int], essence: typing.Optional[int],
-                                 trials: typing.Optional[int],
-                                 reward_all: typing.Optional[str], party_reward: typing.Optional[str],
-                                 fame: typing.Optional[int], prestige: typing.Optional[int]):
+    @session_group.command(name="management", description="command for managing sessions")
+    async def management(self, interaction: discord.Interaction, session_id: int, gold: typing.Optional[int],
+                         easy: typing.Optional[int], medium: typing.Optional[int], hard: typing.Optional[int],
+                         deadly: typing.Optional[int], essence: typing.Optional[int],
+                         trials: typing.Optional[int],
+                         reward_all: typing.Optional[str], party_reward: typing.Optional[str],
+                         fame: typing.Optional[int], prestige: typing.Optional[int]):
         """Update Session Information and alter the rewards received by the players"""
-        _, unidecode_name = name_fix(character_name)
         guild_id = interaction.guild_id
         guild = interaction.guild
         await interaction.response.defer(thinking=True)
@@ -837,7 +862,7 @@ class AdminCommands(commands.Cog, name='admin'):
                                              rewarded_hard,
                                              rewarded_deadly, rewarded_trials, rewarded_fame, rewarded_prestige,
                                              rewarded_reward_party,
-                                             rewarded_reward_all))
+                                             rewarded_reward_all, session_id))
                     await conn.commit()
                     if rewarded_gold < 0 or rewarded_easy < 0 or rewarded_medium < 0 or rewarded_hard < 0 or rewarded_deadly < 0 or rewarded_essence < 0 or rewarded_trials < 0:
                         await interaction.followup.send(
@@ -854,8 +879,10 @@ class AdminCommands(commands.Cog, name='admin'):
                                                   description=f"a report of the session: {session_name}",
                                                   color=discord.Color.blue())
                             for idx, player in enumerate(session_complex):
-                                (player_name, character_name, level, received_milestones, effective_gold, received_gold,
-                                 player_id, received_fame, forego, received_prestige) = player
+                                (player_id, player_name, character_name, level, tier, effective_gold,
+                                 received_milestones,
+                                 received_trials, received_gold, received_fame, received_prestige, received_essence,
+                                 gold_transaction_id) = player
                                 field = f"{player_name}'s {character_name}: \r\n"
                                 await cursor.execute(
                                     "SELECT True_Character_Name, milestones, trials, Fame, Prestige, Thread_ID from Player_Characters WHERE Character_Name = ? OR Nickname = ?",
@@ -866,7 +893,6 @@ class AdminCommands(commands.Cog, name='admin'):
                                 else:
                                     (true_character_name, milestones, trials, fame, prestige, thread_id) = player_info
                                     remove_rewards = await session_reward_reversal(
-                                        cursor=cursor,
                                         interaction=interaction,
                                         session_id=session_id,
                                         character_name=character_name,
@@ -879,7 +905,6 @@ class AdminCommands(commands.Cog, name='admin'):
                                         field += "failed to remove rewards, skipping adjustment. \r\n "
                                     else:
                                         add_rewards = await session_reward_calculation(
-                                            cursor=cursor,
                                             interaction=interaction,
                                             session_id=session_id,
                                             character_name=character_name,
@@ -887,8 +912,9 @@ class AdminCommands(commands.Cog, name='admin'):
                                             session_level=level,
                                             source="Session Adjustment",
                                         )
-                                        numeric_fields = ['milestones_change', 'milestones_total', 'milestones_remaining',
-                                                          'trials_change', 'trials_total', 'trials_remaining',
+                                        numeric_fields = ['milestone_change', 'milestones_total',
+                                                          'milestones_remaining',
+                                                          'trial_change', 'trials', 'trials_remaining',
                                                           'gold_change',
                                                           'essence_change', 'fame_change', 'prestige_change']
                                         for field in numeric_fields:
@@ -896,33 +922,58 @@ class AdminCommands(commands.Cog, name='admin'):
                                             r_value = getattr(remove_rewards, field)
                                             new_value = safe_add(a_value, r_value)
                                             setattr(add_rewards, field, new_value)
-                                        await shared_functions.log_embed(change=add_rewards, guild=guild, thread=thread_id, bot=self.bot)
-                                        await shared_functions.character_embed(cursor=cursor, character_name=character_name, guild=guild)
-            except (aiosqlite.Error, TypeError, ValueError, character_commands.CalculationAidFunctionError) as e:
+                                        await shared_functions.log_embed(change=add_rewards, guild=guild,
+                                                                         thread=thread_id, bot=self.bot)
+                                        await shared_functions.character_embed(
+                                                                               character_name=character_name,
+                                                                               guild=guild)
+                                        field += f"Rewards adjusted for {character_name}. \r\n"
+                                        if idx < 20:
+                                            embed.add_field(name=f"{player_name}'s {character_name}",
+                                                            value=field, inline=False)
+                                        elif idx == 21:
+                                            embed.add_field(name=f"Additional Players",
+                                                            value="Additional players have been adjusted, please check the session log for more information.",
+                                                            inline=False)
+                            await interaction.followup.send(embed=embed)
+            except(aiohttp.ClientError, aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(
-                    f"an error occurred for {interaction.user.name} whilst altering session with ID {session_id}': {e}")
+                    f"an error occurred for {interaction.user.name} whilst adjusting session with ID {session_id}': {e}")
                 await interaction.followup.send(
                     f"An error occurred whilst adjusting session with ID '{session_id}' Error: {e}.", ephemeral=True)
 
+    settings_group = discord.app_commands.Group(
+        name='settings',
+        description='Database Settings commands',
+        parent=admin_group
+    )
+
+    @settings_group.command(name="ubb_inventory", description="Display a unbelievaboat player's inventory")
+    async def ubb_inventory(self, interaction: discord.Interaction, player: discord.Member):
+        """Display a player's inventory to identify their owned items and set the serverside items for pouches, milestones, and other"""
+        guild_id = interaction.guild_id
+        client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
+        try:
+            shop = await client.get_inventory_items_all(guild_id, player.id)
+            if shop is not None:
+                print(type(shop))
+                embed = discord.Embed(title=f"UBB Inventory", description=f'UBB inventory',
+                                      colour=discord.Colour.blurple())
+                for idx, item in enumerate(shop.items):
+                    if idx <= 20:
+                        embed.add_field(name=f'**new item**', value=f'{item}', inline=False)
+                    if idx == 21:
+                        embed.add_field(name=f'**Additional Items**', value=f'Additional items exist, please narrow down the inventory for more information. Yes I could paginate this. No. I will not. Use a Dummy player with less items', inline=False)
+                await interaction.followup.send(embed=embed)
+            else:
+                await interaction.followup.send(f"This player does not have any items in their inventory.")
+        except unbelievaboat.errors.HTTPError as e:
+            logging.exception(f"An error occurred whilst trying to get the inventory for {player.name}: {e}")
+            await interaction.followup.send(f"An error occurred whilst trying to get the inventory for {player.name}: {e}")
+
 
 """
-@admin.command()
-async def ubb_inventory(interaction: discord.Interaction, player: discord.Member):
-    "Display a player's inventory to identify their owned items and set the serverside items for pouches, milestones, and other"
-    guild_id = interaction.guild_id
-    client = Client(os.getenv('UBB_TOKEN'))
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    shop = await client.get_inventory_items_all(guild_id, player.id)  # get the inventory
-    if shop is not None:
-        embed = discord.Embed(title=f"UBB Inventory", description=f'UBB inventory', colour=discord.Colour.blurple())
-        embed.add_field(name=f'**new item**', value=f'{shop}', inline=False)
-        await interaction.followup.send(embed=embed)
-    else:
-        await interaction.followup.send(f"This player does not have any items in their inventory.")
-    cursor.close()
-    db.close()
-    await client.close()
+
 
 
 @admin.command()
@@ -1986,3 +2037,11 @@ async def watest(interaction: discord.Interaction):
 async def setup(bot):
     bot.add_command(admin)
 """
+
+logging.basicConfig(
+    level=logging.ERROR,
+    format='%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    filename='pathparser.log',  # Specify the log file name
+    filemode='a'  # Append mode
+)

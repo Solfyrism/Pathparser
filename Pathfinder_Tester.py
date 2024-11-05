@@ -5,7 +5,7 @@ import os
 from test_functions import TestCommands
 from commands.character_commands import CharacterCommands
 from commands.admin_commands import AdminCommands
-
+import logging
 intents = discord.Intents.default()
 intents.typing = True
 intents.message_content = True
@@ -31,3 +31,13 @@ async def on_disconnect():
     print("Bot is disconnecting.")
 
 bot.run(os.getenv("DISCORD_TOKEN_V2"))
+
+
+
+logging.basicConfig(
+    level=logging.ERROR,
+    format='%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    filename='pathparser.log',  # Specify the log file name
+    filemode='a'  # Append mode
+)
