@@ -430,7 +430,7 @@ class CharacterChange:
 
 
 @dataclass
-class UpdateCharacter:
+class UpdateCharacterData:
     character_name: str
     level_package: Optional[Tuple[int, int, int]] = None  # (Level, Milestones, Milestones_Required)
     mythic_package: Optional[Tuple[int, int, int]] = None  # (Tier, Trials, Trials_Required)
@@ -439,7 +439,7 @@ class UpdateCharacter:
     fame_package: Optional[Tuple[int, int]] = None  # (Fame, Prestige)
 
 
-async def update_character(guild_id, change: UpdateCharacter) -> Union[str, Tuple[discord.Embed, str, int]]:
+async def update_character(guild_id, change: UpdateCharacterData) -> Union[str, Tuple[discord.Embed, str, int]]:
     try:
         # Lists to collect column assignments and values
         assignments = []

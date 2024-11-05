@@ -163,7 +163,7 @@ async def session_reward_reversal(
                         cursor.connection.commit()
                     return_fame = (fame - info_received_fame, -info_received_fame, prestige - info_received_prestige,
                                    -info_received_prestige)
-                    character_updates = shared_functions.UpdateCharacter(character_name=character_name)
+                    character_updates = shared_functions.UpdateCharacterData(character_name=character_name)
                     character_changes = shared_functions.CharacterChange(
                         character_name=character_name,
                         author=interaction.user.name,
@@ -300,7 +300,7 @@ async def session_reward_calculation(interaction: discord.Interaction, session_i
                 except character_commands.CalculationAidFunctionError as e:
                     return_essence = f"An error occurred whilst adjusting essence for {character_name} \r\n"
                 return_fame = (fame + session_fame, session_fame, prestige + session_prestige, session_prestige)
-                character_updates = shared_functions.UpdateCharacter(character_name=character_name)
+                character_updates = shared_functions.UpdateCharacterData(character_name=character_name)
                 character_changes = shared_functions.CharacterChange(
                     character_name=character_name,
                     author=interaction.user.name,
@@ -708,8 +708,8 @@ class AdminCommands(commands.Cog, name='admin'):
                             (calculated_difference, gold_total, gold_value_total, gold_value_max_total,
                              transaction_id) = gold_result
                             gold_package = (gold_total, gold_value_total, gold_value_max_total)
-                            character_updates = shared_functions.UpdateCharacter(character_name=character_name,
-                                                                                 gold_package=gold_package)
+                            character_updates = shared_functions.UpdateCharacterData(character_name=character_name,
+                                                                                     gold_package=gold_package)
                             update_character = await shared_functions.update_character(guild_id=guild_id,
                                                                                        change=character_updates)
                             character_changes = shared_functions.CharacterChange(
@@ -971,10 +971,79 @@ class AdminCommands(commands.Cog, name='admin'):
             await interaction.followup.send(f"An error occurred whilst trying to get the inventory for {player.name}: {e}")
 
 
+    @display_group.command(name='display',
+                           description='display all character information or specific character information')
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def display_info(self, interaction: discord.Interaction, player_name: typing.Optional[discord.Member],
+                           character_name: typing.Optional[str],
+                           page_number: int = 1):
+        """Display character information.
+        Display A specific view when a specific character is provided,
+        refine the list of characters when a specific player is provided."""
+        guild_id = interaction.guild_id
+        await interaction.response.defer(thinking=True)
+
+        try:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+
+                # Decide which query to execute based on whether 'name' is provided
+                if not player_name:
+                    await cursor.execute("SELECT COUNT(Character_Name) FROM Player_Characters")
+                else:
+                    await cursor.execute("SELECT COUNT(Character_Name) FROM Player_Characters WHERE Player_Name = ?",
+                                         (player_name.name,))
+                character_count = await cursor.fetchone()
+                (character_count,) = character_count
+                if character_name:
+                    view_type = 2
+                    await cursor.execute("SELECT character_name from Player_Characters where Character_Name = ?",
+                                         (character_name,))
+                    character = await cursor.fetchone()
+                    if not character:
+                        await interaction.followup.send(
+                            f"Character '{character_name}' not found.",
+                            ephemeral=True
+                        )
+                        return
+                    else:
+                        await cursor.execute(
+                            "SELECT character_name from Player_Characters where Character_Name = ? ORDER BY True_Character_Name asc",
+                            (character_name,))
+                        results = await cursor.fetchall()
+                        offset = results.index(character[0])
+                else:
+                    view_type = 1
+
+                # Set up pagination variables
+                page_number = min(max(page_number, 1), math.ceil(character_count / 20))
+                items_per_page = 5 if view_type == 1 else 1
+                offset = (page_number - 1) * items_per_page if view_type == 1 else offset
+
+                # Create and send the view with the results
+                view = CharacterDisplayView(
+                    user_id=interaction.user.id,
+                    guild_id=guild_id,
+                    player_name=player_name,
+                    character_name=character_name,
+                    limit=items_per_page,
+                    offset=offset,
+                    view_type=view_type
+                )
+                await view.update_results()
+                await view.create_embed()
+                await interaction.followup.send(embed=view.embed, view=view)
+
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(
+                f"An error occurred whilst fetching data! input values of player_name: {player_name}, character_name: {character_name}': {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred whilst fetching data. Please try again later.",
+                ephemeral=True
+            )
+
 """
-
-
-
 @admin.command()
 async def settings_display(interaction: discord.Interaction, current_page: int = 1):
     "Serverside Settings detailed view"
@@ -2036,6 +2105,130 @@ async def watest(interaction: discord.Interaction):
 async def setup(bot):
     bot.add_command(admin)
 """
+
+
+class CharacterDisplayView(shared_functions.DualView):
+    def __init__(self, user_id, guild_id, offset, limit, player_name, character_name, view_type):
+        super().__init__(user_id, guild_id, offset, limit, view_type)
+        self.max_items = None  # Cache total number of items
+        self.character_name = character_name
+        self.view_type = view_type
+        self.player_name = player_name
+
+    async def update_results(self):
+        """Fetch the history of prestige request  for the current page."""
+        if not self.player_name:
+            statement = """SELECT player_name, player_id, True_Character_Name, Title, Titles, Description, Oath, Level, 
+                            Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, 
+                            Essence, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name, 
+                            Tradition_Link, Template_Name, Template_Link, Article_Link
+                            FROM Player_Characters ORDER BY True_Character_Name ASC LIMIT ? OFFSET ?"""
+            val = (self.limit, self.offset - 1)
+
+        else:
+            statement = """SELECT player_name, True_Character_Name, Title, Titles, Description, Oath, Level, 
+                            Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, 
+                            Essence, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name, 
+                            Tradition_Link, Template_Name, Template_Link, Article_Link
+                            FROM Player_Characters WHERE Player_Name = ? ORDER BY True_Character_Name ASC LIMIT ? OFFSET ? """
+            val = (self.player_name, self.limit, self.offset - 1)
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.execute(statement, val)
+            self.results = await cursor.fetchall()
+
+    async def create_embed(self):
+        """Create the embed for the titles."""
+        if self.view_type == 1:
+            if not self.player_name:
+                current_page = ((self.offset - 1) // self.limit) + 1
+                total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+                self.embed = discord.Embed(title=f"Character Summary",
+                                           description=f"Page {current_page} of {total_pages}")
+            else:
+                current_page = ((self.offset - 1) // self.limit) + 1
+                total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+                self.embed = discord.Embed(title=f"Character Summary for {self.player_name}",
+                                           description=f"Page {current_page} of {total_pages}")
+            for result in self.results:
+                (player_name, true_character_name, title, titles, description, oath, level, tier, milestones,
+                 milestones_required, trials, trials_required, gold, gold_value, essence, fame, prestige, color,
+                 mythweavers, image_link, tradition_name, tradition_link, template_name, template_link,
+                 article_link) = result
+                self.embed.add_field(name=f'Character Name', value=f'**Name**:{true_character_name}')
+                self.embed.add_field(name=f'Information',
+                                     value=f'**Level**: {level}, **Mythic Tier**: {tier}')
+                self.embed.add_field(name=f'Total Experience',
+                                     value=f'**Milestones**: {milestones}, **Milestones Remaining**: {milestones_required}, **Trials**: {trials}, **Trials Remaining**: {trials_required}')
+                self.embed.add_field(name=f'Current Wealth', value=f'**GP**: {gold}, **Essence**: {essence}')
+                linkage = None
+                if not tradition_name:
+                    linkage += f"**Tradition**: [{tradition_name}]({tradition_link})"
+                if not template_link:
+                    if not tradition_name:
+                        linkage += f" "
+                    linkage += f"**Template**: [{template_name}]({template_link})"
+                if not tradition_name or not template_name:
+                    self.embed.add_field(name=f'Additional Info', value=linkage, inline=False)
+        else:
+            current_page = ((self.offset - 1) // self.limit) + 1
+            total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+            for result in self.results:
+                (player_name, true_character_name, title, titles, description, oath, level, tier, milestones,
+                 milestones_required, trials, trials_required, gold, gold_value, essence, fame, prestige, color,
+                 mythweavers, image_link, tradition_name, tradition_link, template_name, template_link,
+                 article_link) = result
+                self.embed = discord.Embed(title=f"Detailed view for {true_character_name}",
+                                           description=f"Page {current_page} of {total_pages}",
+                                           color=int(color[1:], 16))
+                self.embed.set_author(name=f'{player_name}')
+                self.embed.set_thumbnail(url=f'{image_link}')
+                self.embed.add_field(name=f'Character Name', value=f'**Name**:{true_character_name}')
+                self.embed.add_field(name=f'Information',
+                                     value=f'**Level**: {level}, **Mythic Tier**: {tier}')
+                self.embed.add_field(name=f'Total Experience',
+                                     value=f'**Milestones**: {milestones}, **Milestones Remaining**: {milestones_required}, **Trials**: {trials}, **Trials Remaining**: {trials_required}')
+                self.embed.add_field(name=f'Current Wealth',
+                                     value=f'**GP**: {gold}, **Illiquid GP**: {gold_value - gold} **Essence**: {essence}')
+                self.embed.add_field(name=f'Fame and Prestige', value=f'**Fame**: {fame}, **Prestige**: {prestige}')
+                linkage = None
+                if not tradition_name:
+                    linkage += f"**Tradition**: [{tradition_name}]({tradition_link})"
+                if not template_link:
+                    if not tradition_name:
+                        linkage += f" "
+                    linkage += f"**Template**: [{template_name}]({template_link})"
+                if not tradition_name or not template_name:
+                    self.embed.add_field(name=f'Additional Info', value=linkage, inline=False)
+                if oath == 'Offerings':
+                    self.embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
+                elif oath == 'Poverty':
+                    self.embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
+                elif oath == 'Absolute':
+                    self.embed.set_footer(text=f'{description}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
+                else:
+                    self.embed.set_footer(text=f'{description}')
+
+    async def get_max_items(self):
+        """Get the total number of titles."""
+        if self.max_items is None:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                if not self.player_name:
+                    cursor = await db.execute("SELECT COUNT(*) FROM Player_Characters")
+                else:
+                    cursor = await db.execute("SELECT COUNT(*) FROM Player_Characters WHERE Player_Name = ?",
+                                              (self.player_name,))
+                count = await cursor.fetchone()
+                self.max_items = count[0]
+        return self.max_items
+
+    async def on_view_change(self):
+        self.view_type = 1 if self.view_type == 2 else 2
+        if self.view_type == 1:
+            self.limit = 5  # Change the limit to 5 for the sumamry view
+        else:
+            self.limit = 1  # Change the limit to 1 for the detailed view
+
+
 
 logging.basicConfig(
     level=logging.ERROR,

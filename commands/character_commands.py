@@ -899,7 +899,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                 client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
                                 await client.delete_inventory_item(guild_id, author_id, item_id[0], used)
                                 mythic_results = await mythic_calculation(cursor, character_name, level, trials, 0)
-                                character_updates = shared_functions.UpdateCharacter(
+                                character_updates = shared_functions.UpdateCharacterData(
                                     level_package=(level, base, new_level_info[4]),
                                     character_name=character_name
                                 )
@@ -988,7 +988,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                     (tier, total_trials, trials_remaining, trial_change) = mythic_results
                                 client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
                                 await client.delete_inventory_item(guild_id, author_id, item_id[0], used)
-                                character_updates = shared_functions.UpdateCharacter(
+                                character_updates = shared_functions.UpdateCharacterData(
                                     mythic_package=(tier, trials, trials_remaining),
                                     character_name=character_name
                                 )
@@ -1091,7 +1091,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                 else:
                                     client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
                                     await client.delete_inventory_item(guild_id, author_id, item_id[0], 1)
-                                    character_updates = shared_functions.UpdateCharacter(
+                                    character_updates = shared_functions.UpdateCharacterData(
                                         gold_package=(gold, gold_value, gold_value_max),
                                         character_name=character_name
                                     )
@@ -1610,7 +1610,7 @@ class CharacterCommands(commands.Cog, name='character'):
                 )
                 if level_cap < level:
                     # Perform level calculation
-                    character_updates = shared_functions.UpdateCharacter(character_name=character_name_db)
+                    character_updates = shared_functions.UpdateCharacterData(character_name=character_name_db)
                     try:
                         level_result = await level_calculation(
                             cursor=cursor,
@@ -2096,7 +2096,7 @@ class PrestigeHistoryView(shared_functions.ShopView):
 
 
 # Dual View Type Views
-class CharacterDisplayView(shared_functions.ShopView):
+class CharacterDisplayView(shared_functions.DualView):
     def __init__(self, user_id, guild_id, offset, limit, player_name, character_name, view_type):
         super().__init__(user_id, guild_id, offset, limit, view_type)
         self.max_items = None  # Cache total number of items
