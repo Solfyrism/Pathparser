@@ -23,6 +23,7 @@ import re
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from urllib.parse import urlparse, parse_qs
+from decimal import Decimal, ROUND_HALF_UP
 
 load_dotenv()
 # CALL ME MR MONEYBAGS BECAUSE HERE IS MY CASH
@@ -87,7 +88,8 @@ async def own_character_select_autocompletion(interaction: discord.Interaction, 
     return data
 
 
-async def get_plots(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
+async def get_plots_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
+    app_commands.Choice[str]]:
     """This is a test command for the wa command."""
     data = []
     guild_id = interaction.guild_id
@@ -108,7 +110,8 @@ async def get_plots(interaction: discord.Interaction, current: str) -> typing.Li
     return data
 
 
-async def get_precreated_plots(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
+async def get_precreated_plots_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
+    app_commands.Choice[str]]:
     """This is a test command for the wa command."""
     data = []
     client = WaClient(
@@ -126,15 +129,16 @@ async def get_precreated_plots(interaction: discord.Interaction, current: str) -
     return data
 
 
-async def session_lookup(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
+async def session_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
+    app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
-        "SELECT Session_ID, Session_Name FROM Sessions WHERE GM_Name = ? AND Session_ID LIKE ?  and Completed_Time is not Null OR GM_Name = ? AND Session_Name like ? and Completed_Time is not Null Limit 15",
-        (interaction.user.name, f"%{current}%", interaction.user.name, f"%{current}%"))
+        "SELECT Session_ID, Session_Name FROM Sessions WHERE GM_Name = ? and Completed_Time is not Null AND (Session_ID LIKE ? OR Session_Name like ?) Limit 15",
+        (interaction.user.name, f"%{current}%", f"%{current}%"))
     session_list = cursor.fetchall()
     for test_text in session_list:
         if current in str(test_text[0]) or str.lower(current) in str.lower(test_text[1]):
@@ -164,7 +168,7 @@ async def group_id_autocompletion(interaction: discord.Interaction, current: str
     return data
 
 
-async def player_session_lookup(interaction: discord.Interaction, current: str) -> typing.List[
+async def player_session_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[
     app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
@@ -186,7 +190,7 @@ async def player_session_lookup(interaction: discord.Interaction, current: str) 
     return data
 
 
-async def fame_lookup(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
+async def fame_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -206,7 +210,7 @@ async def fame_lookup(interaction: discord.Interaction, current: str) -> typing.
     return data
 
 
-async def title_lookup(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
+async def title_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -221,6 +225,30 @@ async def title_lookup(interaction: discord.Interaction, current: str) -> typing
             data.append(app_commands.Choice(name=f"{characters[1]}", value=characters[1]))
     cursor.close()
     db.close()
+    return data
+
+
+async def settings_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild_id
+    admin_bool = interaction.user.guild_permissions.administrator
+    if admin_bool:
+        with sqlite3.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = db.cursor()
+            current = unidecode(current.lower())
+            try:
+                cursor.execute(
+                    "SELECT Identifier from Admin WHERE Search LIKE ? Limit 20",
+                    f"%{current}%")
+                settings_list = cursor.fetchall()
+                for setting in settings_list:
+                    if current in setting[1].lower():
+                        data.append(app_commands.Choice(name=f"{setting[0]}", value=setting[0]))
+                cursor.close()
+            except (aiosqlite, TypeError, ValueError) as e:
+                logging.exception(f"An error occurred whilst fetching settings: {e}")
+    else:
+        data.append(app_commands.Choice(name="How did you get here?", value="None"))
     return data
 
 
@@ -411,9 +439,9 @@ class CharacterChange:
     trial_change: Optional[int] = None
     trials: Optional[int] = None
     trials_remaining: Optional[int] = None
-    gold: Optional[float] = None
-    gold_change: Optional[float] = None
-    effective_gold: Optional[float] = None
+    gold: Optional[Decimal] = None
+    gold_change: Optional[Decimal] = None
+    effective_gold: Optional[Decimal] = None
     transaction_id: Optional[int] = None
     essence: Optional[int] = None
     essence_change: Optional[int] = None
@@ -434,12 +462,12 @@ class UpdateCharacterData:
     character_name: str
     level_package: Optional[Tuple[int, int, int]] = None  # (Level, Milestones, Milestones_Required)
     mythic_package: Optional[Tuple[int, int, int]] = None  # (Tier, Trials, Trials_Required)
-    gold_package: Optional[Tuple[int, int, int]] = None  # (Gold, Gold_Value, Gold_Value_Max)
+    gold_package: Optional[Tuple[Decimal, Decimal, Decimal]] = None  # (Gold, Gold_Value, Gold_Value_Max)
     essence: Optional[int] = None
     fame_package: Optional[Tuple[int, int]] = None  # (Fame, Prestige)
 
 
-async def update_character(guild_id, change: UpdateCharacterData) -> Union[str, Tuple[discord.Embed, str, int]]:
+async def update_character(guild_id: int, change: UpdateCharacterData) -> str:
     try:
         # Lists to collect column assignments and values
         assignments = []
@@ -457,9 +485,11 @@ async def update_character(guild_id, change: UpdateCharacterData) -> Union[str, 
 
         # Handle gold package
         if change.gold_package:
-            assignments.extend(["Gold = CAST(? as numeric(16,2))", "Gold_Value = CAST(? as numeric(16,2))",
-                                "Gold_Value_Max = CAST(? as numeric(16,2))"])
-            values.extend(change.gold_package)
+            # Ensure values are Decimal and formatted to two decimal places
+            gold_values = [str(Decimal(value).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) for value in
+                           change.gold_package]
+            assignments.extend(["Gold = ?", "Gold_Value = ?", "Gold_Value_Max = ?"])
+            values.extend(gold_values)
 
         # Handle essence
         if change.essence is not None:
@@ -478,16 +508,23 @@ async def update_character(guild_id, change: UpdateCharacterData) -> Union[str, 
         # Construct the SQL statement
         sql_statement = f"UPDATE Player_Characters SET {', '.join(assignments)} WHERE Character_Name = ?"
         values.append(change.character_name)
+
         # Execute the SQL statement
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
-            cursor = await db.cursor()
-            await cursor.execute(sql_statement, values)
+            await db.execute(sql_statement, values)
             await db.commit()
+            logging.info(f"Character '{change.character_name}' updated successfully.")
             return f"Character '{change.character_name}' updated successfully."
 
-    except (aiosqlite.Error, TypeError, ValueError) as e:
-        logging.exception(f"An error occurred whilst updating '{change.character_name}': {e}")
-        return f"An error occurred whilst updating '{change.character_name}'."
+    except aiosqlite.Error as e:
+        logging.exception(f"Database error while updating '{change.character_name}': {e}")
+        return f"An error occurred with the database while updating '{change.character_name}'."
+    except (TypeError, ValueError) as e:
+        logging.exception(f"Invalid data provided for '{change.character_name}': {e}")
+        return f"Invalid data provided for '{change.character_name}'. Please check the input values."
+    except Exception as e:
+        logging.exception(f"An unexpected error occurred while updating '{change.character_name}': {e}")
+        return f"An unexpected error occurred while updating '{change.character_name}'."
 
 
 # Function to create the embed
