@@ -465,12 +465,26 @@ def calculate_essence(character_name: str, essence: int, essence_change: int,
         raise CalculationAidFunctionError(f"Error in essence calculation for {character_name} with error: {e}")
 
 
+def calculate_fame(character_name: str, fame: int, fame_change: int,
+                   prestige: int, prestige_change: int):
+    try:
+        logging.info(f"Calculating fame for character '{character_name}'")
+        fame_total = fame + fame_change
+        prestige_total = prestige + prestige_change if prestige + prestige_change <= fame_total else fame_total
+        final_prestige_change = prestige_total - prestige
+        return_value = fame_total, fame_change, prestige_total, final_prestige_change
+        return return_value
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error in essence calculation for {character_name} with error: {e}")
+        raise CalculationAidFunctionError(f"Error in essence calculation for {character_name} with error: {e}")
+
+
 async def ubb_inventory_check(guild_id: int, author_id: int, item_id: int, amount: int) -> int:
     client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
     try:
         logging.info(f"Retrieving inventory item {item_id} for user {author_id}")
         inventory = await client.get_inventory_item(guild_id, author_id, item_id)
-        inventory_remaining = inventory.quantity
+        inventory_remaining = 0 if not inventory else inventory.quantity
         amount = min(amount, inventory_remaining)
         return amount
     except unbelievaboat.errors.HTTPError:
@@ -1268,7 +1282,7 @@ class CharacterCommands(commands.Cog, name='character'):
             cursor = await conn.cursor()
             try:
                 await cursor.execute(
-                    "select True_character_name, title, fame, Logging_ID from Player_Characters where Player_Name = ? and (Character_Name = ? or Nickname = ?)",
+                    "select True_character_name, title, fame, prestige, Logging_ID from Player_Characters where Player_Name = ? and (Character_Name = ? or Nickname = ?)",
                     (author, character_name, character_name))
                 #               player validation to confirm if player is the owner of the character and they exist.
                 player_info = await cursor.fetchone()
@@ -1278,7 +1292,7 @@ class CharacterCommands(commands.Cog, name='character'):
                         ephemeral=True
                     )
                 else:  # Player found
-                    (true_character_name, player_title, player_fame, logging_id) = player_info
+                    (true_character_name, player_title, player_fame, player_prestige, logging_id) = player_info
                     await cursor.execute(
                         "SELECT ID, Fame, Masculine_Name, Feminine_Name from Store_Title where Masculine_name = ? or Feminine_name = ?",
                         (title, title))
@@ -1316,9 +1330,16 @@ class CharacterCommands(commands.Cog, name='character'):
                                 ephemeral=True
                             )
                         else:  # Title is in inventory
+                            fame_calculation = calculate_fame(
+                                character_name=character_name,
+                                fame=player_fame,
+                                fame_change=title_fame,
+                                prestige=player_prestige,
+                                prestige_change=titel_fame)
+                            (total_fame, adjusted_fame, total_prestige, adjusted_prestige) = fame_calculation
                             await cursor.execute(
-                                "UPDATE Player_Characters SET Title = ?, Fame = ? WHERE Character_Name = ?",
-                                (title_name, player_fame + title_fame, character_name))
+                                "UPDATE Player_Characters SET Title = ?, Fame = ?, prestige = ? WHERE Character_Name = ?",
+                                (title_name, total_fame, total_prestige, character_name))
                             await conn.commit()
                             client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
                             await client.delete_inventory_item(guild_id, author_id, title_information[0])
@@ -1329,8 +1350,10 @@ class CharacterCommands(commands.Cog, name='character'):
                                 character_name=character_name,
                                 author=author,
                                 source=f'Entitle applying the title of {title_name}',
-                                fame=title_fame,
-                                total_fame=player_fame + title_fame)
+                                fame=adjusted_fame,
+                                total_fame=total_fame,
+                                prestige=adjusted_prestige,
+                                total_prestige=total_prestige)
                             character_log = await shared_functions.log_embed(character_changes, guild,
                                                                              logging_thread_id, self.bot)
                             await interaction.followup.send(embed=character_log, ephemeral=True)
@@ -1382,8 +1405,8 @@ class CharacterCommands(commands.Cog, name='character'):
                             title_name = title_information[2] if player_title == title_information[3] else \
                                 title_information[3]
                             await cursor.execute(
-                                "UPDATE Player_Characters SET Title = ?, Fame = ? WHERE Character_Name = ?",
-                                (title_name, player_fame - title_fame, character_name))
+                                "UPDATE Player_Characters SET Title = ? WHERE Character_Name = ?",
+                                (title_name, character_name))
                             await conn.commit()
                             await shared_functions.character_embed(
                                 character_name=character_name,
@@ -1391,8 +1414,7 @@ class CharacterCommands(commands.Cog, name='character'):
                             character_changes = shared_functions.CharacterChange(
                                 character_name=character_name,
                                 author=author,
-                                source=f'Entitle swapping the gender of {player_title}',
-                                total_fame=player_fame)
+                                source=f'Entitle swapping the gender of {player_title}')
                             character_log = await shared_functions.log_embed(character_changes, guild,
                                                                              logging_thread_id, self.bot)
                             await interaction.followup.send(embed=character_log, ephemeral=True)
@@ -2432,88 +2454,90 @@ class LevelRangeDisplayView(shared_functions.DualView):
         else:
             self.limit = 1  # Change the limit to 1 for the detailed view
 
+        # Modified RecipientAcknowledgementView with additional logic
+        class PropositionViewRecipient(shared_functions.RecipientAcknowledgementView):
+            def __init__(
+                    self,
+                    allowed_user_id: int,
+                    requester_name: str,
+                    character_name: str,
+                    item_name: str,
+                    prestige_cost: int,
+                    proposition_id: int,
+                    bot: commands.Bot,
+                    guild_id: int,
+                    prestige: int,
+                    logging_thread: int
+            ):
+                super().__init__(allowed_user_id)
+                self.guild_id = guild_id
+                self.requester_name = requester_name
+                self.character_name = character_name
+                self.item_name = item_name
+                self.prestige_cost = prestige_cost
+                self.proposition_id = proposition_id
+                self.bot = bot
+                self.prestige = prestige
+                self.logging_thread = logging_thread
+                self.embed = None
 
-# Modified AcknowledgementView with additional logic
-class PropositionView(shared_functions.AcknowledgementView):
-    def __init__(
-            self,
-            allowed_user_id: int,
-            requester_name: str,
-            character_name: str,
-            item_name: str,
-            prestige_cost: int,
-            proposition_id: int,
-            bot: commands.Bot,
-            guild_id: int,
-            prestige: int,
-            logging_thread: int
-    ):
-        super().__init__(allowed_user_id)
-        self.guild_id = guild_id
-        self.requester_name = requester_name
-        self.character_name = character_name
-        self.item_name = item_name
-        self.prestige_cost = prestige_cost
-        self.proposition_id = proposition_id
-        self.bot = bot
-        self.prestige = prestige
-        self.logging_thread = logging_thread
-        self.embed = None
+            async def accepted(self, interaction: discord.Interaction):
+                """Handle the approval logic."""
+                # Update the database to mark the proposition as accepted
+                # Adjust prestige, log the transaction, notify the requester, etc.
+                await self.update_proposition_status(is_allowed=1)
+                self.embed = discord.Embed(
+                    title="Proposition Accepted",
+                    description=f"The proposition {self.proposition_id} has been accepted.",
+                    color=discord.Color.green()
+                )
+                # Additional logic such as notifying the requester
 
-    async def accepted(self, interaction: discord.Interaction):
-        """Handle the approval logic."""
-        # Update the database to mark the proposition as accepted
-        # Adjust prestige, log the transaction, notify the requester, etc.
-        await self.update_proposition_status(is_allowed=1)
-        self.embed = discord.Embed(
-            title="Proposition Accepted",
-            description=f"The proposition {self.proposition_id} has been accepted.",
-            color=discord.Color.green()
-        )
-        # Additional logic such as notifying the requester
+            async def rejected(self, interaction: discord.Interaction):
+                """Handle the rejection logic."""
+                # Update the database to mark the proposition as rejected
+                await self.update_proposition_status(guild=interaction.guild, is_allowed=-1)
+                self.embed = discord.Embed(
+                    title="Proposition Rejected",
+                    description=f"The proposition {self.proposition_id} has been rejected.",
+                    color=discord.Color.red()
+                )
+                # Additional logic such as notifying the requester
 
-    async def rejected(self, interaction: discord.Interaction):
-        """Handle the rejection logic."""
-        # Update the database to mark the proposition as rejected
-        await self.update_proposition_status(is_allowed=-1)
-        self.embed = discord.Embed(
-            title="Proposition Rejected",
-            description=f"The proposition {self.proposition_id} has been rejected.",
-            color=discord.Color.red()
-        )
-        # Additional logic such as notifying the requester
+            async def create_embed(self):
+                """Create the initial embed for the proposition."""
+                self.embed = discord.Embed(
+                    title="Proposition Request",
+                    description=(
+                        f"**Requester:** {self.requester_name}\n"
+                        f"**Character:** {self.character_name}\n"
+                        f"**Item:** {self.item_name}\n"
+                        f"**Prestige Cost:** {self.prestige_cost}\n"
+                        f"**Proposition ID:** {self.proposition_id}"
+                    ),
+                    color=discord.Color.blue()
+                )
 
-    async def create_embed(self):
-        """Create the initial embed for the proposition."""
-        self.embed = discord.Embed(
-            title="Proposition Request",
-            description=(
-                f"**Requester:** {self.requester_name}\n"
-                f"**Character:** {self.character_name}\n"
-                f"**Item:** {self.item_name}\n"
-                f"**Prestige Cost:** {self.prestige_cost}\n"
-                f"**Proposition ID:** {self.proposition_id}"
-            ),
-            color=discord.Color.blue()
-        )
-
-    async def update_proposition_status(self, is_allowed: int):
-        """Update the proposition status in the database."""
-        # Implement database update logic here
-        # For example:
-        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as conn:
-            await conn.execute(
-                "UPDATE A_Audit_Prestige SET IsAllowed = ? WHERE Transaction_ID = ?",
-                (is_allowed, self.proposition_id)
-            )
-            await conn.commit()
-            await conn.execute(
-                "UPDATE Player_Characters SET Prestige = Prestige - ? WHERE Character_Name = ?",
-                (self.prestige_cost, self.proposition_id)
-            )
-            await conn.commit()
-
-        # Additional logic such as adjusting prestige points
+            async def update_proposition_status(self, guild: discord.Guild, is_allowed: int):
+                """Update the proposition status in the database."""
+                if is_allowed == 1:
+                    async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as conn:
+                        await conn.execute(
+                            "UPDATE A_Audit_Prestige SET IsAllowed = ? WHERE Transaction_ID = ?",
+                            (is_allowed, self.proposition_id)
+                        )
+                        await conn.commit()
+                        await conn.execute(
+                            "UPDATE Player_Characters SET Prestige = Prestige - ? WHERE Character_Name = ?",
+                            (self.prestige_cost, self.character_name)
+                        )
+                        await conn.commit()
+                        await shared_functions.character_embed(character_name=self.character_name, guild=guild)
+                        character_changes = shared_functions.CharacterChange(character_name=self.character_name,
+                                                                             author=self.requester_name,
+                                                                             source=f'Prestige Request',
+                                                                             prestige=self.prestige_cost)
+                        await shared_functions.log_embed(character_changes, self.guild_id, self.logging_thread)
 
 
 logging.basicConfig(

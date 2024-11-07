@@ -3119,8 +3119,8 @@ async def watest(ctx: commands.Context):
     )
 #    timeline = client.timeline.get('906c8c14-2283-47e0-96e2-0fcd9f71d0d0', granularity=str(1))
 #    print(timeline)
-    history = client.history.get('76c474c1-c1db-4587-ab62-471e3a29f55f', granularity=str(2))
-    print(history)
+#    history = client.history.get('76c474c1-c1db-4587-ab62-471e3a29f55f', granularity=str(2))
+#    print(history)
 #    category = client.category.get('a9eee0b7-6121-4680-aa43-f128b8c19506', granularity=str(1))
 #    print(category)
 #    authenticated_user = client.user.identity()
@@ -3131,8 +3131,9 @@ async def watest(ctx: commands.Context):
 #    print(f"this category contains the following categories {categories}")
 #    articles = [article for article in client.world.articles('f7a60480-ea15-4867-ae03-e9e0c676060a', 'b71f939a-f72d-413b-b4d7-4ebff1e162ca')]
 #    print(articles)
-    specific_article = client.article.get('3e958a12-25f5-40cc-a421-b1121a357ba7', granularity=str(1))
-    print(f"THIS IS {specific_article}")
+#    specific_article = client.article.get('3e958a12-25f5-40cc-a421-b1121a357ba7', granularity=str(1))
+#    print(f"THIS IS {specific_article}")
+
 #    print(f"Content for  {specific_article['content']}")
 #    world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
 

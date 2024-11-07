@@ -223,12 +223,15 @@ async def title_autocomplete(interaction: discord.Interaction, current: str) -> 
     for characters in character_list:
         if current in characters[1]:
             data.append(app_commands.Choice(name=f"{characters[1]}", value=characters[1]))
+        if current in characters[2]:
+            data.append(app_commands.Choice(name=f"{characters[2]}", value=characters[2]))
     cursor.close()
     db.close()
     return data
 
 
-async def settings_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
+async def settings_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[
+    app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     admin_bool = interaction.user.guild_permissions.administrator
@@ -1405,7 +1408,7 @@ class ShopView(discord.ui.View):
         raise NotImplementedError
 
 
-class AcknowledgementView(discord.ui.View):
+class RecipientAcknowledgementView(discord.ui.View):
     """Base class for views requiring acknowledgment."""
 
     def __init__(self, allowed_user_id: int):
@@ -1426,6 +1429,62 @@ class AcknowledgementView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Ensure that only the allowed user can interact with the buttons."""
         if interaction.user.id != self.allowed_user_id:
+            await interaction.response.send_message(
+                "You cannot interact with this button.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    async def accept(self, interaction: discord.Interaction):
+        """Handle the accept action."""
+        await self.accepted(interaction)
+        await interaction.response.edit_message(
+            embed=self.embed,
+            view=None
+        )
+
+    async def reject(self, interaction: discord.Interaction):
+        """Handle the reject action."""
+        await self.rejected(interaction)
+        await interaction.response.edit_message(
+            embed=self.embed,
+            view=None
+        )
+
+    async def accepted(self, interaction: discord.Interaction):
+        """To be implemented in subclasses."""
+        raise NotImplementedError
+
+    async def rejected(self, interaction: discord.Interaction):
+        """To be implemented in subclasses."""
+        raise NotImplementedError
+
+    async def create_embed(self):
+        """To be implemented in subclasses."""
+        raise NotImplementedError
+
+
+class SelfAcknowledgementView(discord.ui.View):
+    """Base class for views requiring acknowledgment."""
+
+    def __init__(self):
+        super().__init__(timeout=180)
+        self.embed = None
+
+        # Initialize buttons
+        self.accept_button = discord.ui.Button(label='Accept', style=discord.ButtonStyle.primary)
+        self.reject_button = discord.ui.Button(label='Reject', style=discord.ButtonStyle.danger)
+
+        self.accept_button.callback = self.accept
+        self.reject_button.callback = self.reject
+
+        self.add_item(self.accept_button)
+        self.add_item(self.reject_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Ensure that only the user who initiated the view can interact with the buttons."""
+        if interaction.user.id != self.user_id:
             await interaction.response.send_message(
                 "You cannot interact with this button.",
                 ephemeral=True
