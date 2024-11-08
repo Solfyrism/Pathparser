@@ -2172,8 +2172,8 @@ class CharacterCommands(commands.Cog, name='character'):
 
     @gold_group.command(name='send',
                         description='Send gold to a crafter or other players for the purposes of their transactions')
-    @app_commands.autocomplete(character_from=own_character_select_autocompletion)
-    @app_commands.autocomplete(character_to=character_select_autocompletion)
+    @app_commands.autocomplete(character_from=shared_functions.own_character_select_autocompletion)
+    @app_commands.autocomplete(character_to=shared_functions.character_select_autocompletion)
     async def send(self, interaction: discord.Interaction, character_from: str, character_to: str, amount: float,
                    expected_value: float, reason: str):
         """Send gold to a crafter or other players for the purposes of their transactions. Expected Value is the MARKET price of what they will give you in return. This will ping the player involved"""

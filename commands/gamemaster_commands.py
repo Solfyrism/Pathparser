@@ -21,9 +21,13 @@ os.chdir("C:\\pathparser")
 
 
 
-@gamemaster.command()
+
+
+
+
+"""@gamemaster.command()
 async def help(ctx: commands.Context):
-    """Help commands for the associated tree"""
+    "Help commands for the associated tree"
     embed = discord.Embed(title=f"Gamemaster Help", description=f'This is a list of GM administrative commands', colour=discord.Colour.blurple())
     embed.add_field(name=f'**Create**', value=f'**GAMEMASTER**: Create a session and post an announcement!', inline=False)
     embed.add_field(name=f'**Edit**', value=f'**GAMEMASTER**: Edit the session information!', inline=False)
@@ -39,7 +43,7 @@ async def help(ctx: commands.Context):
 
 @player.command()
 async def help(ctx: commands.Context):
-    """Help commands for the associated tree"""
+    "Help commands for the associated tree"
     embed = discord.Embed(title=f"Player Help", description=f'This is a list of Playerside commands', colour=discord.Colour.blurple())
     embed.add_field(name=f'**Join**', value=f'**PLAYER**: join a session using one your characters!', inline=False)
     embed.add_field(name=f'**Leave**', value=f'**PLAYER**: Leave a session that you have joined!', inline=False)
@@ -50,7 +54,7 @@ async def help(ctx: commands.Context):
 @gamemaster.command()
 @app_commands.choices(acceptance=[discord.app_commands.Choice(name='accept', value=1), discord.app_commands.Choice(name='rejectance', value=2)])
 async def proposition(ctx: commands.Context, proposition_id: int, reason: typing.Optional[str], acceptance: discord.app_commands.Choice[int] = 1):
-    """Accept or reject a proposition!"""
+    "Accept or reject a proposition!"
     guild_id = ctx.guild_id
     author = ctx.user.name
     guild = ctx.guild
@@ -84,7 +88,7 @@ async def proposition(ctx: commands.Context, proposition_id: int, reason: typing
 @gamemaster.command()
 @app_commands.autocomplete(character=character_select_autocompletion)
 async def glorify(ctx: commands.Context, character: str, fame: int, prestige: int, reason: typing.Optional[str]):
-    """Add or remove from a player's fame and prestige!"""
+    "Add or remove from a player's fame and prestige!"
     guild_id = ctx.guild_id
     author = ctx.user.name
     guild = ctx.guild
@@ -115,7 +119,7 @@ async def glorify(ctx: commands.Context, character: str, fame: int, prestige: in
 @app_commands.describe(overflow="Allow for adjust role ranges!")
 @app_commands.choices(overflow=[discord.app_commands.Choice(name='current range only!', value=1), discord.app_commands.Choice(name='include next level bracket!', value=2), discord.app_commands.Choice(name='include lower level bracket!', value=3),discord.app_commands.Choice(name='ignore role requirements!', value=4)])
 async def create(interaction: discord.Interaction, session_name: str, session_range: discord.Role, player_limit: int, play_location: str, game_link: typing.Optional[str], hammer_time: str, overview: str, description: str, overflow: discord.app_commands.Choice[int] = 1):
-    """Create a new session."""
+    "Create a new session."
     guild_id = interaction.guild_id
     author = interaction.user.name
     author_id = interaction.user.id
@@ -222,7 +226,7 @@ async def create(interaction: discord.Interaction, session_name: str, session_ra
 @app_commands.describe(overflow="Allow for adjust role ranges!")
 @app_commands.choices(overflow=[discord.app_commands.Choice(name='current range only!', value=1), discord.app_commands.Choice(name='include next level bracket!', value=2),discord.app_commands.Choice(name='include lower level bracket!', value=3),discord.app_commands.Choice(name='ignore role requirements!', value=4)])
 async def edit(interaction: discord.Interaction, session_id: int, session_range: typing.Optional[discord.Role], session_name: typing.Optional[str], player_limit: typing.Optional[int], play_location: typing.Optional[str], game_link: typing.Optional[str], hammer_time: typing.Optional[str], overview: typing.Optional[str], description: typing.Optional[str], overflow: typing.Optional[discord.app_commands.Choice[int]]):
-    """GM: Edit an Active Session."""
+    "GM: Edit an Active Session."
     guild_id = interaction.guild_id
     author = interaction.user.name
     author_id = interaction.user.id
@@ -348,7 +352,7 @@ async def edit(interaction: discord.Interaction, session_id: int, session_range:
 
 @gamemaster.command()
 async def delete(interaction: discord.Interaction, session_id: int):
-    """Delete an ACTIVE Session."""
+    "Delete an ACTIVE Session."
     guild_id = interaction.guild_id
     guild = interaction.guild
     author = interaction.user.name
@@ -384,7 +388,7 @@ async def delete(interaction: discord.Interaction, session_id: int):
 @app_commands.describe(randomizer="for the purposes of picking a number of randomized players")
 @app_commands.describe(specific_character="Picking a specific player's character. You will have to use their CHARACTER Name for this.")
 async def accept(interaction: discord.Interaction, session_id: int, player_1: typing.Optional[discord.Member], player_2: typing.Optional[discord.Member], player_3: typing.Optional[discord.Member], player_4: typing.Optional[discord.Member], player_5: typing.Optional[discord.Member], player_6: typing.Optional[discord.Member], specific_character: typing.Optional[str], randomizer: int = 0):
-    """GM: Accept player Sign-ups into your session for participation"""
+    "GM: Accept player Sign-ups into your session for participation"
     guild_id = interaction.guild_id
     author = interaction.user.name
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -631,7 +635,7 @@ async def accept(interaction: discord.Interaction, session_id: int, player_1: ty
 
 @gamemaster.command()
 async def remove(interaction: discord.Interaction, session_id: int, player: discord.Member):
-    """GM: Kick a player out of your session or remove them from rewards"""
+    "GM: Kick a player out of your session or remove them from rewards"
     guild_id = interaction.guild_id
     author = interaction.user.name
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
@@ -714,7 +718,7 @@ async def remove(interaction: discord.Interaction, session_id: int, player: disc
 @app_commands.describe(reward_all="A reward for each individual member of the party")
 @app_commands.describe(party_reward="A reward for the party to divy up amongst themselves, or not. Link a google doc if reward exceeds character limit.")
 async def reward(interaction: discord.Interaction, session_id: int, gold: float, easy: int = 0, medium: int = 0, hard: int = 0, deadly: int = 0, trials: int = 0, reward_all: str = None, fame: int = 2, prestige: int = 2, party_reward: str = None):
-    """GM: Reward Players for Participating in your session."""
+    "GM: Reward Players for Participating in your session."
     awarded_flux = 10
     if gold < 0 or easy < 0 or medium < 0 or hard < 0 or deadly < 0 or flux < 0 or trials < 0:
         await interaction.response.send_message(f"Your players might not judge you out loud for trying to give them a negative award, but I do...")
@@ -726,12 +730,12 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
     author = interaction.user.name
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
-    cursor.execute(f"""SELECT GM_Name, Session_Name, Session_Range, Play_Location, Play_Time, Message, Session_Thread, IsActive FROM Sessions WHERE Session_ID = {session_id} LIMIT 1""")
+    cursor.execute(f"SELECT GM_Name, Session_Name, Session_Range, Play_Location, Play_Time, Message, Session_Thread, IsActive FROM Sessions WHERE Session_ID = {session_id} LIMIT 1")
     session_info = cursor.fetchone()
     if session_info is not None:
         if session_info[7] == 1:
             mentions = f"Session Rewards for {session_info[1]}: "
-            cursor.execute(f"""SELECT Player_Name, Player_ID, Character_Name, Level, Tier, Effective_Wealth  FROM Sessions_Participants WHERE Session_ID = {session_id}""")
+            cursor.execute(f"SELECT Player_Name, Player_ID, Character_Name, Level, Tier, Effective_Wealth  FROM Sessions_Participants WHERE Session_ID = {session_id}")
             session_players = cursor.fetchall()
             if session_players == []:
                 await interaction.response.send_message(f"No players could be found participating in session with {session_id} can be found!")
@@ -743,7 +747,7 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
                     mentions += f"<@{player[1]}> "
                     character_name = player[2]
     #                Setting Job Rewards
-                    cursor.execute(f"""SELECT Easy, Medium, Hard, Deadly from AA_Milestones WHERE level = {player[3]}""")
+                    cursor.execute(f"SELECT Easy, Medium, Hard, Deadly from AA_Milestones WHERE level = {player[3]}")
                     job_info = cursor.fetchone()
                     easy_jobs = easy * job_info[0]
                     medium_jobs = medium * job_info[1]
@@ -886,24 +890,24 @@ async def reward(interaction: discord.Interaction, session_id: int, gold: float,
 
 @gamemaster.command()
 async def endow(interaction: discord.Interaction, session_id: int, player_1: typing.Optional[discord.Member], player_1_reward: typing.Optional[str], player_2: typing.Optional[discord.Member], player_2_reward: typing.Optional[str], player_3: typing.Optional[discord.Member], player_3_reward: typing.Optional[str], player_4: typing.Optional[discord.Member], player_4_reward: typing.Optional[str], player_5: typing.Optional[discord.Member], player_5_reward: typing.Optional[str], player_6: typing.Optional[discord.Member], player_6_reward: typing.Optional[str]):
-    """GM: Reward Players for Participating in your session."""
+    "GM: Reward Players for Participating in your session."
     guild_id = interaction.guild_id
     guild = interaction.guild
     author = interaction.user.name
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
-    cursor.execute(f"""SELECT GM_Name, Session_Name, Session_Range, Play_Location, Play_Time, Message FROM Sessions WHERE Session_ID = {session_id} LIMIT 1""")
+    cursor.execute(f"SELECT GM_Name, Session_Name, Session_Range, Play_Location, Play_Time, Message FROM Sessions WHERE Session_ID = {session_id} LIMIT 1")
     session_info = cursor.fetchone()
     await interaction.response.defer(thinking=True)
     if session_info is not None:
         embed = discord.Embed(title=f"{session_info[1]}", description=f"Personal Reward Display", color=discord.Colour.green())
         embed.set_footer(text=f"Session ID is {session_id}")
         if player_1 is not None and player_1_reward is not None:
-            cursor.execute(f"""SELECT Character_Name FROM Sessions_Archive WHERE Player_Name = '{player_1.name}' AND Session_ID = {session_id}""")
+            cursor.execute(f"SELECT Character_Name FROM Sessions_Archive WHERE Player_Name = '{player_1.name}' AND Session_ID = {session_id}")
             session_player_info = cursor.fetchone()
             response = f"<@{player_1.id}> "
             if session_player_info is not None:
-                cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?""", (session_player_info[0],))
+                cursor.execute(f"SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?", (session_player_info[0],))
                 character_info = cursor.fetchone()
                 await Event.session_endowment(self, author, guild_id, session_id, player_1.name, player_1_reward, character_info[0])
                 source = f"Personal reward for Session ID: {session_id}"
@@ -915,11 +919,11 @@ async def endow(interaction: discord.Interaction, session_id: int, player_1: typ
                 response += f"has not participated in this session or could not be found!"
             embed.add_field(name=f'**Player**: {player_1.name}', value=response, inline=False)
         if player_2 is not None and player_2_reward is not None:
-            cursor.execute(f"""SELECT Character_Name FROM Sessions_Archive WHERE Player_Name = '{player_2.name}' AND Session_ID = {session_id}""")
+            cursor.execute(f"SELECT Character_Name FROM Sessions_Archive WHERE Player_Name = '{player_2.name}' AND Session_ID = {session_id}")
             session_player_info = cursor.fetchone()
             response = f"<@{player_2.id}> "
             if session_player_info is not None:
-                cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?""",(session_player_info[0],))
+                cursor.execute(f"SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?",(session_player_info[0],))
                 character_info = cursor.fetchone()
                 await Event.session_endowment(self, author, guild_id, session_id, player_2.name, player_2_reward, character_info[0])
                 source = f"Personal reward for Session ID: {session_id}"
@@ -931,11 +935,11 @@ async def endow(interaction: discord.Interaction, session_id: int, player_1: typ
                 response += f"has not participated in this session or could not be found!"
             embed.add_field(name=f'**Player**: {player_2.name}', value=response, inline=False)
         if player_3 is not None and player_3_reward is not None:
-            cursor.execute(f"""SELECT Character_Name FROM Sessions_Archive WHERE Player_Name = '{player_3.name}' AND Session_ID = {session_id}""")
+            cursor.execute(f"SELECT Character_Name FROM Sessions_Archive WHERE Player_Name = '{player_3.name}' AND Session_ID = {session_id}")
             session_player_info = cursor.fetchone()
             response = f"<@{player_3.id}> "
             if session_player_info is not None:
-                cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?""",(session_player_info[0],))
+                cursor.execute(f"SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?",(session_player_info[0],))
                 character_info = cursor.fetchone()
                 await Event.session_endowment(self, author, guild_id, session_id, player_3.name, player_3_reward, character_info[0])
                 source = f"Personal reward for Session ID: {session_id}"
@@ -947,11 +951,11 @@ async def endow(interaction: discord.Interaction, session_id: int, player_1: typ
                 response += f"has not participated in this session or could not be found!"
             embed.add_field(name=f'**Player**: {player_3.name}', value=response, inline=False)
         if player_4 is not None and player_4_reward is not None:
-            cursor.execute(f"""SELECT Character_Name FROM Sessions_Archive WHERE Player_Name = '{player_4.name}' AND Session_ID = {session_id}""")
+            cursor.execute(f"SELECT Character_Name FROM Sessions_Archive WHERE Player_Name = '{player_4.name}' AND Session_ID = {session_id}")
             session_player_info = cursor.fetchone()
             response = f"<@{player_4.id}> "
             if session_player_info is not None:
-                cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?""",(session_player_info[0],))
+                cursor.execute(f"SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?",(session_player_info[0],))
                 character_info = cursor.fetchone()
                 await Event.session_endowment(self, author, guild_id, session_id, player_4.name, player_4_reward, character_info[0])
                 source = f"Personal reward for Session ID: {session_id}"
@@ -963,11 +967,11 @@ async def endow(interaction: discord.Interaction, session_id: int, player_1: typ
                 response += f"has not participated in this session or could not be found!"
             embed.add_field(name=f'**Player**: {player_4.name}', value=response, inline=False)
         if player_5 is not None and player_5_reward is not None:
-            cursor.execute(f"""SELECT Character_Name FROM Sessions_Archive WHERE Player_Name = '{player_5.name}' AND Session_ID = {session_id}""")
+            cursor.execute(f"SELECT Character_Name FROM Sessions_Archive WHERE Player_Name = '{player_5.name}' AND Session_ID = {session_id}")
             session_player_info = cursor.fetchone()
             response = f"<@{player_5.id}> "
             if session_player_info is not None:
-                cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?""", (session_player_info[0],))
+                cursor.execute(f"SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?", (session_player_info[0],))
                 character_info = cursor.fetchone()
                 await Event.session_endowment(self, author, guild_id, session_id, player_5.name, player_5_reward, character_info[0])
                 source = f"Personal reward for Session ID: {session_id}"
@@ -979,11 +983,11 @@ async def endow(interaction: discord.Interaction, session_id: int, player_1: typ
                 response += f"has not participated in this session or could not be found!"
             embed.add_field(name=f'**Player**: {player_5.name}', value=response, inline=False)
         if player_6 is not None and player_6_reward is not None:
-            cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Sessions_Archive WHERE Player_Name = '{player_6.name}' AND Session_ID = {session_id}""")
+            cursor.execute(f"SELECT Character_Name, Thread_ID FROM Sessions_Archive WHERE Player_Name = '{player_6.name}' AND Session_ID = {session_id}")
             session_player_info = cursor.fetchone()
             response = f"<@{player_6.id}> "
             if session_player_info is not None:
-                cursor.execute(f"""SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?""", (session_player_info[0],))
+                cursor.execute(f"SELECT Character_Name, Thread_ID FROM Player_Characters WHERE Character_Name = ?", (session_player_info[0],))
                 character_info = cursor.fetchone()
                 await Event.session_endowment(self, author, guild_id, session_id, player_6.name, player_6_reward, character_info[0])
                 source = f"Personal reward for Session ID: {session_id}"
@@ -1091,7 +1095,7 @@ async def claim(interaction: discord.Interaction, session_id: int, character_nam
                                 await Event.remove_player(self, guild_id, session_id, reward_info[0], reward_info[1], author)
                                 db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
                                 cursor = db.cursor()
-                                cursor.execute(f"""SELECT Easy, Medium, Hard, Deadly from AA_Milestones WHERE level = {validate_recipient[6]}""")
+                                cursor.execute(f"SELECT Easy, Medium, Hard, Deadly from AA_Milestones WHERE level = {validate_recipient[6]}")
                                 job_info = cursor.fetchone()
                                 easy_jobs = session_info[5] * job_info[0]
                                 medium_jobs = session_info[6] * job_info[1]
@@ -1126,7 +1130,7 @@ async def claim(interaction: discord.Interaction, session_id: int, character_nam
                                 await logging_thread.send(embed=embed_log)
                                 await interaction.response.send_message(f"Rewards have been claimed for {character_name}!")
             else:
-                cursor.execute(f"""SELECT Easy, Medium, Hard, Deadly from AA_Milestones WHERE level = {validate_recipient[6]}""")
+                cursor.execute(f"SELECT Easy, Medium, Hard, Deadly from AA_Milestones WHERE level = {validate_recipient[6]}")
                 job_info = cursor.fetchone()
                 easy_jobs = session_info[5] * job_info[0]
                 medium_jobs = session_info[6] * job_info[1]
@@ -1187,7 +1191,7 @@ async def claim(interaction: discord.Interaction, session_id: int, character_nam
 
 @gamemaster.command()
 async def notify(interaction: discord.Interaction, session_id: int, message: str = "Session Notice!"):
-    """Notify players about an ACTIVE Session."""
+    "Notify players about an ACTIVE Session."
     guild_id = interaction.guild_id
     author = interaction.user.name
     author_id = interaction.user.id
@@ -1220,7 +1224,7 @@ async def notify(interaction: discord.Interaction, session_id: int, message: str
 @app_commands.describe(group="Displaying All Participants & Signups, Active Participants Only, or Potential Sign-ups Only for a session")
 @app_commands.choices(group=[discord.app_commands.Choice(name='All', value=1), discord.app_commands.Choice(name='Participants', value=2), discord.app_commands.Choice(name='Sign-ups', value=3)])
 async def display(ctx: commands.Context, session_id: int, group: discord.app_commands.Choice[int] = 1):
-    """ALL: THIS COMMAND DISPLAYS SESSION INFORMATION"""
+    "ALL: THIS COMMAND DISPLAYS SESSION INFORMATION"
     guild_id = ctx.guild.id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
@@ -1298,3 +1302,4 @@ async def display(ctx: commands.Context, session_id: int, group: discord.app_com
         await ctx.response.send_message(embed=embed)
     cursor.close()
     db.close()
+"""
