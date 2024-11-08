@@ -351,7 +351,10 @@ async def gold_calculation(
         gold_value_change: Decimal,
         gold_value_max_change: Decimal,
         source: str,
-        reason: str
+        reason: str,
+        ignore_limitations: bool = False,
+        is_transaction: bool = True,
+        related_transaction: int = None
 ) -> Tuple[Decimal, Decimal, Decimal, Decimal, int]:
     time = datetime.datetime.now()
 
@@ -359,12 +362,12 @@ async def gold_calculation(
         if gold_change > 0:
             gold_value += gold_value_change
             gold_value_max_total = gold_value_max + gold_value_max_change
-            if oath == 'Offerings':
+            if oath == 'Offerings' and not ignore_limitations:
                 # Only half the gold change is applied
                 adjusted_gold_change = (gold_change * Decimal('0.5')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 gold_total = gold + adjusted_gold_change
                 new_effective_gold = gold_value + adjusted_gold_change
-            elif oath in ('Poverty', 'Absolute'):
+            elif oath in ('Poverty', 'Absolute') and not ignore_limitations:
                 max_gold = (Decimal('80') * Decimal(level) ** 2) if oath == 'Poverty' else (
                         Decimal(level) * Decimal('5'))
                 if gold_value >= max_gold:
@@ -378,7 +381,7 @@ async def gold_calculation(
                 gold_total = gold + adjusted_gold_change
                 new_effective_gold = gold_value + adjusted_gold_change
             else:
-                # Other oaths gain gold normally
+                # Other oaths gain gold normally. When receiving gold sent by another player, ignore limitations 
                 adjusted_gold_change = gold_change
                 gold_total = gold + adjusted_gold_change
                 new_effective_gold = gold_value + adjusted_gold_change
@@ -386,8 +389,19 @@ async def gold_calculation(
             # For gold loss, apply the change directly
             adjusted_gold_change = gold_change
             gold_total = gold + adjusted_gold_change
-            new_effective_gold = gold_value + adjusted_gold_change + gold_value_change
-            gold_value_max_total = gold_value_max + gold_value_max_change
+            if gold_value_change > 0:
+                if oath in ('Poverty', 'Absolute'):
+                    max_gold = (Decimal('80') * Decimal(level) ** 2) if oath == 'Poverty' else (
+                            Decimal(level) * Decimal('5'))
+                    if gold_value + gold_change >= max_gold:
+                        # Cannot gain more gold
+                        raise ValueError("Gold_Value cannot exceed max.")
+                    else:
+                        new_effective_gold = gold_value + adjusted_gold_change
+                else:
+                    new_effective_gold = gold_value + adjusted_gold_change
+            else:
+                new_effective_gold = gold_value + adjusted_gold_change + gold_value_change
 
         # Ensure gold values are not negative
         if gold_total < 0 or new_effective_gold < 0:
@@ -406,29 +420,33 @@ async def gold_calculation(
             gold_value_max_total_str = str(gold_value_max_total)
 
             # Update the database
-            sql = """
-            INSERT INTO A_Audit_Gold(
-                Author_Name, Author_ID, Character_Name, Gold_Value,
-                Effective_Gold_Value, Effective_Gold_Value_Max, Reason,
-                Source_Command, Time
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            val = (
-                author_name,
-                author_id,
-                character_name,
-                adjusted_gold_change_str,
-                new_effective_gold_str,
-                gold_value_max_total_str,
-                reason,
-                source,
-                time
-            )
-            await cursor.execute(sql, val)
-            await conn.commit()
-            await cursor.execute("SELECT Max(transaction_id) FROM A_Audit_Gold")
-            transaction_id_row = await cursor.fetchone()
-            transaction_id = transaction_id_row[0]
+            if is_transaction:
+                sql = """
+                INSERT INTO A_Audit_Gold(
+                    Author_Name, Author_ID, Character_Name, Gold_Value,
+                    Effective_Gold_Value, Effective_Gold_Value_Max, Reason, Related_Transaction_ID,
+                    Source_Command, Time
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                val = (
+                    author_name,
+                    author_id,
+                    character_name,
+                    adjusted_gold_change_str,
+                    new_effective_gold_str,
+                    gold_value_max_total_str,
+                    reason,
+                    source,
+                    related_transaction,
+                    time
+                )
+                await cursor.execute(sql, val)
+                await conn.commit()
+                await cursor.execute("SELECT Max(transaction_id) FROM A_Audit_Gold")
+                transaction_id_row = await cursor.fetchone()
+                transaction_id = transaction_id_row[0]
+            else:
+                transaction_id = 0
             logging.info(f"Gold updated for character '{character_name}', transaction_id: {transaction_id}.")
             return (
                 adjusted_gold_change,
@@ -668,7 +686,8 @@ class CharacterCommands(commands.Cog, name='character'):
                             sql = "insert into A_STG_Player_Characters (Player_Name, Player_ID, Character_Name, True_Character_Name, Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Essence, Color, Mythweavers, Image_Link, Backstory, Date_Created) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
                             val = (
                                 author, author_id, character_name, true_character_name, nickname, titles, description,
-                                oath_name, starting_level[0], 0, base, milestones_to_level, 0, 0, 0, color, mythweavers, image_link, backstory, time)
+                                oath_name, starting_level[0], 0, base, milestones_to_level, 0, 0, 0, color, mythweavers,
+                                image_link, backstory, time)
                             await cursor.execute(sql, val)
                             await conn.commit()
                             embed = await stg_character_embed(cursor, character_name)
@@ -678,7 +697,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                 url=f'https://cdn.discordapp.com/attachments/977939245463392276/1194140952789536808/download.jpg?ex=65af456d&is=659cd06d&hm=1613025f9f1c1263823881c91a81fc4b93831ff91df9f4a84c813e9fab6467e9&')
                             embed[0].set_footer(text=f'Oops! You used a bad URL, please fix it.')
                             await interaction.response.send_message(embed=embed)
-                            sql = f"Update A_STG_Player_Characters SET Image_Link = ? AND Mythweavers = ? WHERE Character_Name = ?"
+                            sql = "Update A_STG_Player_Characters SET Image_Link = ? AND Mythweavers = ? WHERE Character_Name = ?"
                             val = (
                                 "https://cdn.discordapp.com/attachments/977939245463392276/1194140952789536808/download.jpg?ex=65af456d&is=659cd06d&hm=1613025f9f1c1263823881c91a81fc4b93831ff91df9f4a84c813e9fab6467e9&",
                                 "https://cdn.discordapp.com/attachments/977939245463392276/1194141019088891984/super_saiyan_mr_bean_by_zakariajames6_defpqaz-fullview.jpg?ex=65af457d&is=659cd07d&hm=57bdefe2d376face6a842a7b7a5ed8021e854a64e798f901824242c4a939a37b&",
@@ -1127,6 +1146,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                         level=level,
                                         trials=trials,
                                         trial_change=1,
+                                        tier=tier,
                                         guild_id=guild_id)
                                     (tier, total_trials, trials_remaining, trial_change) = mythic_results
                                 client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
@@ -1625,7 +1645,7 @@ class CharacterCommands(commands.Cog, name='character'):
                 await cursor.execute("SELECT Search From Admin Where Identifier = 'Character_Transaction_Channel'")
                 character_transaction_channel_id = await cursor.fetchone()
                 if character_transaction_channel_id is None:
-                   await interaction.followup.send(
+                    await interaction.followup.send(
                         content=content,
                         embed=view.embed,
                         view=view,
@@ -1634,9 +1654,11 @@ class CharacterCommands(commands.Cog, name='character'):
                 else:
                     character_transaction_channel = interaction.guild.get_channel(character_transaction_channel_id[0])
                     if not character_transaction_channel:
-                        character_transaction_channel = interaction.guild.get_channel(character_transaction_channel_id[0])
+                        character_transaction_channel = interaction.guild.get_channel(
+                            character_transaction_channel_id[0])
                     if not character_transaction_channel:
-                        await interaction.followup.send(f"Character Transaction Channel not found. Please notify your admin! it is set to <#{character_transaction_channel_id[0]}>")
+                        await interaction.followup.send(
+                            f"Character Transaction Channel not found. Please notify your admin! it is set to <#{character_transaction_channel_id[0]}>")
                     else:
                         sent_message = await character_transaction_channel.send(
                             content=content,
@@ -1749,7 +1771,7 @@ class CharacterCommands(commands.Cog, name='character'):
                     # Fetch character information
                 await cursor.execute(
                     """
-                    SELECT Character_Name, Milestones, Level, Trials, Thread_ID
+                    SELECT Character_Name, Milestones, Level, tier, Trials, Thread_ID
                     FROM Player_Characters
                     WHERE Player_Name = ? AND (Character_Name = ? OR Nickname = ?)
                     """,
@@ -1764,7 +1786,7 @@ class CharacterCommands(commands.Cog, name='character'):
                     )
                     return
 
-                (character_name_db, milestones, level, trials, thread_id) = character_info
+                (character_name_db, milestones, level, tier, trials, thread_id) = character_info
 
                 # Update the personal cap in the database
                 await cursor.execute(
@@ -1826,6 +1848,7 @@ class CharacterCommands(commands.Cog, name='character'):
                             guild_id=guild_id,
                             character_name=character_name_db,
                             level=level,
+                            tier=tier,
                             trials=trials,
                             trial_change=0
                         )
@@ -2063,6 +2086,378 @@ class CharacterCommands(commands.Cog, name='character'):
                 ephemeral=True
             )
 
+    gold_group = discord.app_commands.Group(
+        name='gold',
+        description='Commands for managing gold on a character',
+        parent=character_group
+    )
+
+    @gold_group.command(name='buy', description='Buy items from NPCs for non-player trades and crafts')
+    @app_commands.describe(
+        market_value="market value of the item regardless of crafting. Items crafted for other players have an expected value of 0.")
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def buy(self, interaction: discord.Interaction, character_name: str, expenditure: float, market_value: float,
+                  reason: str):
+        """Buy items from NPCs for non-player trades and crafts. Expected Value is the MARKET price of what you are buying, not the price you are paying."""
+        try:
+            await interaction.response.defer(thinking=True)
+            _, character_name = name_fix(character_name)
+            reason = str.replace(reason, ";", "")
+            guild_id = interaction.guild_id
+            guild = interaction.guild
+            author = interaction.user.name
+            author_id = interaction.user.id
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+                if expenditure <= 0:
+                    await interaction.response.send_message(
+                        f"Little comrade! Please buy something of actual value! {expenditure} is too small to purchase anything with!")
+                elif market_value < 0:
+                    await interaction.response.send_message(
+                        f"Little comrade! You cannot have an expected value of: {market_value}, it is too little gold to work with!")
+                elif expenditure > 0:
+                    await cursor.execute(
+                        "SELECT Character_Name, Level, Oath, Gold, Gold_Value, Gold_Value_Max, Thread_ID  FROM Player_Characters where Player_Name = ? AND (Character_Name = ? or Nickname = ?)",
+                        (author, character_name, character_name))
+                    player_info = cursor.fetchone()
+                    if not player_info:
+                        await interaction.response.send_message(
+                            f"{interaction.user.name} does not have a character named {character_name}")
+                    else:
+                        (character_name, level, oath, gold, gold_value, gold_value_max, logging_thread_id) = player_info
+                        if player_info[2] < expenditure:
+                            await interaction.response.send_message(
+                                f"{interaction.user.name} does not have enough gold to buy this item.")
+                        else:
+                            gold_result = await gold_calculation(
+                                guild_id=guild_id,
+                                character_name=character_name,
+                                level=level,
+                                oath=oath,
+                                gold=gold,
+                                gold_change=Decimal(expenditure),
+                                gold_value=gold_value,
+                                gold_value_max=gold_value_max,
+                                gold_value_change=Decimal(market_value),
+                                gold_value_max_change=Decimal(0),
+                                reason=reason,
+                                source='Character Gold Buy Command',
+                                author_name=interaction.user.name,
+                                author_id=interaction.user.id
+                            )
+                            if isinstance(gold_result, tuple):
+                                (difference, gold_total, gold_value_total, gold_max_value_total,
+                                 transaction_id) = gold_result
+                                character_updates = shared_functions.UpdateCharacterData(
+                                    character_name=character_name,
+                                    gold_package=(gold, gold_total, gold_max_value_total)
+                                )
+                                await shared_functions.update_character(change=changes_changes, guild_id=guild_id)
+                                character_changes = shared_functions.CharacterChange(
+                                    character_name=character_name,
+                                    author=author,
+                                    source=f'Gold Buy of {expenditure} with an expected value of {market_value}',
+                                    gold_change=difference,
+                                    gold=gold_total,
+                                    effective_gold=gold_total,
+                                    transaction_id=transaction_id
+                                )
+                                await shared_functions.character_embed(character_name=character_name, guild=guild)
+                                character_log = await shared_functions.log_embed(character_changes, guild,
+                                                                                 logging_thread_id, self.bot)
+                                await interaction.response.send_message(embed=character_log)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            await interaction.response.send_message(f"An error occurred in the buy command: {e}")
+            logging.exception(f"An error occurred in the buy command: {e}")
+
+    @gold_group.command(name='send',
+                        description='Send gold to a crafter or other players for the purposes of their transactions')
+    @app_commands.autocomplete(character_from=own_character_select_autocompletion)
+    @app_commands.autocomplete(character_to=character_select_autocompletion)
+    async def send(self, interaction: discord.Interaction, character_from: str, character_to: str, amount: float,
+                   expected_value: float, reason: str):
+        """Send gold to a crafter or other players for the purposes of their transactions. Expected Value is the MARKET price of what they will give you in return. This will ping the player involved"""
+        try:
+            await interaction.response.defer(thinking=True)
+            guild_id = interaction.guild_id
+            guild = interaction.guild
+            author = interaction.user.name
+            author_id = interaction.user.id
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+                if amount <= 0:
+                    await interaction.response.send_message(
+                        f"Little comrade! Please send something of actual value! {amount} is too small to send!")
+                elif expected_value < 0:
+                    await interaction.response.send_message(
+                        f"Little comrade! You cannot have an expected value of: {expected_value}, it is too little gold to work with!")
+                elif expected_value < amount:
+                    await interaction.response.send_message(
+                        f"Little comrade! You cannot have an expected value of: {expected_value}, it is too little gold to work with!")
+                else:
+                    await cursor.execute(
+                        "SELECT Character_Name, Level, Oath, Gold, Gold_Value, Gold_Value_Max, Thread_ID  FROM Player_Characters where Player_Name = ? AND (Character_Name = ? or Nickname = ?)",
+                        (author, character_from, character_from))
+                    player_info = cursor.fetchone()
+                    if not player_info:
+                        await interaction.response.send_message(
+                            f"{interaction.user.name} does not have a character named {character_from}")
+                    else:
+                        (source_character_name, source_level, source_oath, source_gold, source_gold_value,
+                         source_gold_value_max,
+                         source_logging_thread_id) = player_info
+                        if player_info[2] < amount:
+                            await interaction.response.send_message(
+                                f"{interaction.user.name} does not have enough gold to send this amount.")
+                        else:
+                            await cursor.execute(
+                                "SELECT Player_ID, Character_Name, Level, Oath, Gold, Gold_Value, Gold_Value_Max, Thread_ID  FROM Player_Characters where Character_Name = ?",
+                                (character_to,))
+                            if not player_info:
+                                await interaction.response.send_message(
+                                    f"Couldn't find character named {character_to}")
+                            else:
+                                (target_player_id, character_to, target_level, target_oath, target_gold,
+                                 target_gold_value, target_gold_value_max,
+                                 target_logging_thread_id) = player_info
+                                gold_results = await gold_calculation(
+                                    guild_id=guild_id,
+                                    character_name=character_from,
+                                    level=source_level,
+                                    oath=source_oath,
+                                    gold=source_gold,
+                                    gold_change=-abs(Decimal(amount)),
+                                    gold_value=source_gold_value,
+                                    gold_value_max=source_gold_value_max,
+                                    gold_value_change=abs(Decimal(expected_value)),
+                                    gold_value_max_change=Decimal(0),
+                                    reason=reason,
+                                    source='Character Gold Send Command',
+                                    is_transaction=False,
+                                    author_id=author_id,
+                                    author_name=author
+                                )
+                                if isinstance(gold_results, tuple):
+                                    (calculated_difference, calculated_gold_total, calculated_gold_value_total,
+                                     calculated_gold_max_value_total, calculated_transaction_id) = gold_results
+                                    view = GoldSendView(
+                                        allowed_user_id=target_player_id,
+                                        requester_name=author,
+                                        requester_id=author_id,
+                                        character_name=character_from,
+                                        recipient_name=character_to,
+                                        gold_change=abs(calculated_difference),
+                                        # This is the amount of gold that will be sent. Since an earlier step performs quantize to it there is no need to quantize it a second time/..
+                                        source_level=source_level,
+                                        source_oath=source_oath,
+                                        source_gold=source_gold,
+                                        source_gold_value=source_gold_value,
+                                        source_gold_value_max=source_gold_value_max,
+                                        target_level=target_level,
+                                        target_oath=target_oath,
+                                        recipient_gold=target_gold,
+                                        recipient_gold_value=target_gold_value,
+                                        recipient_gold_value_max=target_gold_value_max,
+                                        market_value=abs(expected_value.quantize(Decimal('0.01'))),
+                                        bot=self.bot,
+                                        guild_id=guild_id,
+                                        source_logging_thread=source_logging_thread_id,
+                                        recipient_logging_thread=target_logging_thread_id,
+                                        reason=reason)
+                                    await view.create_embed()
+                                    await interaction.response.send_message(embed=view.embed, view=view)
+                                else:
+                                    embed = discord.Embed(title="Gold Send Failed!", description=gold_results)
+                                    await interaction.response.send_message(embed=embed)
+
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            await interaction.response.send_message(f"An error occurred in the gold send command: {e}")
+            logging.exception(f"An error occurred in the send command: {e}")
+
+    @gold_group.command(name='history', description='display history transactions')
+    @app_commands.autocomplete(character_name=shared_functions.character_select_autocompletion)
+    async def display_gold(self, interaction: discord.Interaction, character_name: str, page_number: int = 1):
+        """Display the gold transaction history of a character."""
+        guild_id = interaction.guild_id
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+                await cursor.execute(
+                    "SELECT COUNT(*) FROM A_Audit_Gold WHERE Character_Name = ?",
+                    (character_name,)
+                )
+                count_row = await cursor.fetchone()
+                transaction_count = count_row[0] if count_row else 0
+
+                if transaction_count == 0:
+                    await interaction.followup.send(
+                        f"No gold transactions found for '{character_name}'.",
+                        ephemeral=True
+                    )
+                    return
+
+                # Set up pagination variables
+                page_number = min(max(page_number, 1), math.ceil(transaction_count / 20))
+                items_per_page = 20
+                offset = (page_number - 1) * items_per_page
+
+                # Create and send the view with the results
+                view = GoldHistoryView(
+                    user_id=interaction.user.id,
+                    guild_id=guild_id,
+                    character_name=character_name,
+                    limit=items_per_page,
+                    offset=offset
+                )
+                await view.update_results()
+                await view.create_embed()
+                await interaction.followup.send(embed=view.embed, view=view)
+
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(
+                f"An error occurred in the 'display' command while fetching data for '{character_name}': {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred while fetching your gold transaction history. Please try again later.",
+                ephemeral=True
+            )
+
+    @gold_group.command(name='consume', description='Consume equipment gold for a specific purpose')
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def consume(self, interaction: discord.Interaction, character_name: str, amount: float, reason: str):
+        try:
+            guild_id = interaction.guild_id
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+                await cursor.execute(
+                    "SELECT Character_Name, Level, Oath, Gold, Gold_Value, Gold_Value_Max, Thread_ID  FROM Player_Characters where Player_Name = ? AND (Character_Name = ? or Nickname = ?)",
+                    (interaction.user.name, character_name, character_name)
+                )
+                player_info = await cursor.fetchone()
+                if not player_info:
+                    await interaction.response.send_message(
+                        f"Character '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+                else:
+                    (character_name, level, oath, gold, gold_value, gold_value_max, logging_thread_id) = player_info
+                    if gold_value - gold < amount:
+                        await interaction.response.send_message(
+                            f"{interaction.user.name} does not have enough illiquid wealth to consume this amount.",
+                            ephemeral=True
+                        )
+                        return
+                    gold_result = await gold_calculation(
+                        guild_id=guild_id,
+                        character_name=character_name,
+                        level=level,
+                        oath=oath,
+                        gold=gold,
+                        gold_change=Decimal(0),
+                        gold_value=gold_value,
+                        gold_value_max=gold_value_max,
+                        gold_value_change=-abs(Decimal(amount)),
+                        gold_value_max_change=Decimal(0),
+                        reason=reason,
+                        source='Character Gold Consume Command',
+                        author_id=interaction.user.id,
+                        author_name=interaction.user.name
+                    )
+                    if isinstance(gold_result, tuple):
+                        (difference, gold_total, gold_value_total, gold_max_value_total, transaction_id) = gold_result
+                        character_updates = shared_functions.UpdateCharacterData(
+                            character_name=character_name,
+                            gold_package=(gold, gold_total, gold_max_value_total)
+                        )
+                        await shared_functions.update_character(change=character_updates, guild_id=guild_id)
+                        character_changes = shared_functions.CharacterChange(
+                            character_name=character_name,
+                            author=interaction.user.name,
+                            source=f'Gold Consume of {amount} for {reason}',
+                            gold_change=difference,
+                            gold=gold_total,
+                            effective_gold=gold_total,
+                            transaction_id=transaction_id
+                        )
+                        character_log = await shared_functions.log_embed(character_changes, interaction.guild,
+                                                                         logging_thread_id, self.bot)
+                        await shared_functions.character_embed(character_name=character_name, guild=interaction.guild)
+                        await interaction.response.send_message(embed=character_log)
+
+                    else:
+                        await interaction.response.send_message(
+                            f"An error occurred while processing the gold consumption: {gold_result}",
+                            ephemeral=True
+                        )
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            await interaction.response.send_message(f"An error occurred in the consume command: {e}")
+            logging.exception(f"An error occurred in the consume command: {e}")
+
+    @gold_group.command(name='claim', description='claim a set amount of gold.')
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def claim(self, interaction: discord.Interaction, character_name: str, amount: float, reason: str):
+        try:
+            guild_id = interaction.guild_id
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+                await cursor.execute(
+                    "SELECT Character_Name, level, oath, Gold, Gold_Value, Gold_Value_Max, Thread_ID  FROM Player_Characters where Player_Name = ? AND (Character_Name = ? or Nickname = ?)",
+                    (interaction.user.name, character_name, character_name)
+                )
+                player_info = await cursor.fetchone()
+                if not player_info:
+                    await interaction.response.send_message(
+                        f"Character '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+                else:
+                    (character_name, level, oath, gold, gold_value, gold_value_max, logging_thread_id) = player_info
+                    gold_result = await gold_calculation(
+                        author_id=interaction.user.id,
+                        author_name=interaction.user.name,
+                        guild_id=guild_id,
+                        level=level,
+                        oath=oath,
+                        character_name=character_name,
+                        gold=gold,
+                        gold_change=Decimal(amount),
+                        gold_value=gold_value,
+                        gold_value_max=gold_value_max,
+                        gold_value_change=Decimal(0),
+                        gold_value_max_change=Decimal(0),
+                        reason=reason,
+                        source='Character Gold Claim Command'
+                    )
+                    if isinstance(gold_result, tuple):
+                        (difference, gold_total, gold_value_total, gold_max_value_total, transaction_id) = gold_result
+                        character_updates = shared_functions.UpdateCharacterData(
+                            character_name=character_name,
+                            gold_package=(gold, gold_total, gold_max_value_total)
+                        )
+                        await shared_functions.update_character(change=character_updates, guild_id=guild_id)
+                        character_changes = shared_functions.CharacterChange(
+                            character_name=character_name,
+                            author=interaction.user.name,
+                            source=f'Gold Claim of {amount} for {reason}',
+                            gold_change=difference,
+                            gold=gold_total,
+                            effective_gold=gold_total,
+                            transaction_id=transaction_id
+                        )
+                        character_log = await shared_functions.log_embed(character_changes, interaction.guild,
+                                                                         logging_thread_id, self.bot)
+                        await shared_functions.character_embed(character_name=character_name, guild=interaction.guild)
+                        await interaction.response.send_message(embed=character_log)
+
+                    else:
+                        await interaction.response.send_message(gold_result, ephemeral=True)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            await interaction.response.send_message(f"An error occurred in the claim command: {e}")
+            logging.exception(f"An error occurred in the claim command: {e}")
+
 
 # Modified RetirementView with character deletion
 class RetirementView(discord.ui.View):
@@ -2089,14 +2484,15 @@ class RetirementView(discord.ui.View):
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Handle the confirmation of character retirement."""
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
             try:
                 # Optional: Check if character exists before deletion
                 sql_check = """
                     SELECT 1 FROM Player_Characters
                     WHERE Player_ID = ? AND (Character_Name = ? OR Nickname = ?)
                 """
-                row = await conn.execute_fetchone(sql_check,
-                                                  (interaction.user.id, self.character_name, self.character_name))
+                await cursor.execute(sql_check, (interaction.user.id, self.character_name, self.character_name))
+                row = await cursor.fetchone()
                 if not row:
                     await interaction.response.edit_message(
                         content="Character not found or already retired.",
@@ -2269,6 +2665,51 @@ class PrestigeHistoryView(shared_functions.ShopView):
                 else:
                     cursor = await db.execute("SELECT COUNT(*) FROM Player_Characters WHERE Player_Name = ?",
                                               (self.character_name,))
+                count = await cursor.fetchone()
+                self.max_items = count[0]
+        return self.max_items
+
+
+class GoldHistoryView(shared_functions.ShopView):
+    def __init__(self, user_id, guild_id, offset, limit, character_name):
+        super().__init__(user_id, guild_id, offset, limit)
+        self.max_items = None  # Cache total number of items
+        self.character_name = character_name
+
+    async def update_results(self):
+        """Fetch the history of prestige request  for the current page."""
+
+        statement = """
+                        SELECT Transaction_ID, Author_Name, Author_ID, Character_Name, 
+                        gold_value, Effective_Gold_Value, Effective_Gold_Value_Max, 
+                        Reason, Source_Command, Time, Related_Transaction_ID
+                        FROM A_Audit_Gold WHERE Character_Name = ?
+                        ORDER BY Transaction_ID DESC LIMIT ? OFFSET ? 
+                    """
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.execute(statement, (self.character_name, self.limit, self.offset - 1))
+            self.results = await cursor.fetchall()
+
+    async def create_embed(self):
+        """Create the embed for the titles."""
+        current_page = ((self.offset - 1) // self.limit) + 1
+        total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+        self.embed = discord.Embed(title=f"Gold History for {self.character_name}",
+                                   description=f"Page {current_page} of {total_pages}")
+        for item in self.results:
+            (transaction_id, author_name, author_id, character_name,
+             gold_value, effective_gold_value, effective_gold_value_max,
+             reason, source_command, time, related_transaction_id) = item
+            self.embed.add_field(name=f'**Transaction ID**: {transaction_id}',
+                                 value=f'**Author**: {author_name} Source: {source_command}\r\n ***Gold Changes***: **Gold Value**: {gold_value}, **Effective Gold Value**: {effective_gold_value}, **Effective Gold Value Max**: {effective_gold_value_max}\r\n{reason}',
+                                 inline=False)
+
+    async def get_max_items(self):
+        """Get the total number of titles."""
+        if self.max_items is None:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                cursor = await db.execute("SELECT COUNT(*) FROM A_AUDIT_GOLD WHERE Character_Name = ?",
+                                          (self.character_name,))
                 count = await cursor.fetchone()
                 self.max_items = count[0]
         return self.max_items
@@ -2500,90 +2941,260 @@ class LevelRangeDisplayView(shared_functions.DualView):
         else:
             self.limit = 1  # Change the limit to 1 for the detailed view
 
-        # Modified RecipientAcknowledgementView with additional logic
-        class PropositionViewRecipient(shared_functions.RecipientAcknowledgementView):
-            def __init__(
-                    self,
-                    allowed_user_id: int,
-                    requester_name: str,
-                    character_name: str,
-                    item_name: str,
-                    prestige_cost: int,
-                    proposition_id: int,
-                    bot: commands.Bot,
-                    guild_id: int,
-                    prestige: int,
-                    logging_thread: int
-            ):
-                super().__init__(allowed_user_id)
-                self.guild_id = guild_id
-                self.requester_name = requester_name
-                self.character_name = character_name
-                self.item_name = item_name
-                self.prestige_cost = prestige_cost
-                self.proposition_id = proposition_id
-                self.bot = bot
-                self.prestige = prestige
-                self.logging_thread = logging_thread
-                self.embed = None
 
-            async def accepted(self, interaction: discord.Interaction):
-                """Handle the approval logic."""
-                # Update the database to mark the proposition as accepted
-                # Adjust prestige, log the transaction, notify the requester, etc.
-                await self.update_proposition_status(is_allowed=1)
-                self.embed = discord.Embed(
-                    title="Proposition Accepted",
-                    description=f"The proposition {self.proposition_id} has been accepted.",
+# Modified RecipientAcknowledgementView with additional logic
+class PropositionViewRecipient(shared_functions.RecipientAcknowledgementView):
+    def __init__(
+            self,
+            allowed_user_id: int,
+            requester_name: str,
+            character_name: str,
+            item_name: str,
+            prestige_cost: int,
+            proposition_id: int,
+            bot: commands.Bot,
+            guild_id: int,
+            prestige: int,
+            logging_thread: int
+    ):
+        super().__init__(allowed_user_id)
+        self.guild_id = guild_id
+        self.requester_name = requester_name
+        self.character_name = character_name
+        self.item_name = item_name
+        self.prestige_cost = prestige_cost
+        self.proposition_id = proposition_id
+        self.bot = bot
+        self.prestige = prestige
+        self.logging_thread = logging_thread
+        self.embed = None
+
+    async def accepted(self, interaction: discord.Interaction):
+        """Handle the approval logic."""
+        # Update the database to mark the proposition as accepted
+        # Adjust prestige, log the transaction, notify the requester, etc.
+        self.embed = discord.Embed(
+            title="Proposition Accepted",
+            description=f"The proposition {self.proposition_id} has been accepted.",
+            color=discord.Color.green()
+        )
+        # Additional logic such as notifying the requester
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as conn:
+            await conn.execute(
+                "UPDATE A_Audit_Prestige SET IsAllowed = ? WHERE Transaction_ID = ?",
+                (1, self.proposition_id)
+            )
+            await conn.commit()
+            await conn.execute(
+                "UPDATE Player_Characters SET Prestige = Prestige - ? WHERE Character_Name = ?",
+                (self.prestige_cost, self.character_name)
+            )
+            await conn.commit()
+            await shared_functions.character_embed(character_name=self.character_name, guild=interaction.guild)
+            character_changes = shared_functions.CharacterChange(character_name=self.character_name,
+                                                                 author=self.requester_name,
+                                                                 source=f'Prestige Request',
+                                                                 prestige=self.prestige_cost)
+            await shared_functions.log_embed(character_changes, guild=interaction.guild, thread=self.logging_thread,
+                                             bot=self.bot)
+
+    async def rejected(self, interaction: discord.Interaction):
+        """Handle the rejection logic."""
+        # Update the database to mark the proposition as rejected
+        await self.update_proposition_status(guild=interaction.guild, is_allowed=-1)
+        self.embed = discord.Embed(
+            title="Proposition Rejected",
+            description=f"The proposition {self.proposition_id} has been rejected.",
+            color=discord.Color.red()
+        )
+        # Additional logic such as notifying the requester
+
+    async def create_embed(self):
+        """Create the initial embed for the proposition."""
+        self.embed = discord.Embed(
+            title="Proposition Request",
+            description=(
+                f"**Requester:** {self.requester_name}\n"
+                f"**Character:** {self.character_name}\n"
+                f"**Item:** {self.item_name}\n"
+                f"**Prestige Cost:** {self.prestige_cost}\n"
+                f"**Proposition ID:** {self.proposition_id}"
+            ),
+            color=discord.Color.blue()
+        )
+
+
+class GoldSendView(shared_functions.RecipientAcknowledgementView):
+    def __init__(
+            self,
+            allowed_user_id: int,
+            requester_name: str,
+            requester_id: int,
+            character_name: str,
+            recipient_name: str,
+            source_level: int,
+            source_oath: str,
+            source_gold: Decimal,
+            source_gold_value: Decimal,
+            source_gold_value_max: Decimal,
+            target_level: int,
+            target_oath: str,
+            recipient_gold: Decimal,
+            recipient_gold_value: Decimal,
+            recipient_gold_value_max: Decimal,
+            gold_change: Decimal,
+            market_value: Decimal,
+            bot: commands.Bot,
+            guild_id: int,
+            source_logging_thread: int,
+            recipient_logging_thread: int,
+            reason: str
+    ):
+        super().__init__(allowed_user_id)
+        self.guild_id = guild_id
+        self.requester_name = requester_name
+        self.requester_id = requester_id
+        self.character_name = character_name
+        self.recipient_name = recipient_name  # Name of the recipient
+        self.source_level = source_level  # Level of the source character
+        self.source_oath = source_oath
+        self.source_gold = source_gold
+        self.source_gold_value = source_gold_value
+        self.source_gold_value_max = source_gold_value_max
+        self.target_level = target_level  # Level of the recipient character
+        self.target_oath = target_oath
+        self.recipient_gold = recipient_gold
+        self.recipient_gold_value = recipient_gold_value
+        self.recipient_gold_value_max = recipient_gold_value_max
+        self.gold_change = gold_change  # Amount of gold to be sent
+        self.market_value = market_value  # Market value of the item
+        self.bot = bot
+        self.source_logging_thread = source_logging_thread
+        self.recipient_logging_thread = recipient_logging_thread
+        self.reason = reason
+        self.embed = None
+
+    async def accepted(self, interaction: discord.Interaction):
+        """Handle the approval logic."""
+        # Update the database to mark the proposition as accepted
+        # Adjust prestige, log the transaction, notify the requester, etc.
+
+        self.embed = discord.Embed(
+            title=f"{self.character_name} Transaction Accepted",
+            description=f"The request of \r\n{self.reason}\r\n has been accepted by <@{self.allowed_user_id}'s {self.recipient_name}.",
+            color=discord.Color.green()
+        )
+        # Additional logic such as notifying the requester
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            source_gold_calculation = gold_calculation(
+                guild_id=self.guild_id,
+                character_name=self.character_name,
+                level=self.source_level,
+                oath=self.source_oath,
+                gold=self.source_gold,
+                gold_value=self.source_gold_value,
+                gold_value_max=self.source_gold_value_max,
+                gold_change=-abs(self.gold_change),
+                gold_value_change=abs(self.market_value),
+                gold_value_max_change=Decimal(0),
+                source=f"Gold Send",
+                reason=self.reason,
+                author_id=interaction.user.id,
+                author_name=interaction.user.name)
+            if isinstance(source_gold_calculation, tuple):
+                recipient_gold_calculation = gold_calculation(
+                    guild_id=self.guild_id,
+                    character_name=self.recipient_name,
+                    level=self.target_level,
+                    oath=self.target_oath,
+                    gold=self.recipient_gold,
+                    gold_value=self.recipient_gold_value,
+                    gold_value_max=self.recipient_gold_value_max,
+                    gold_change=abs(self.gold_change),
+                    gold_value_change=self.Decimal(0),
+                    gold_value_max_change=Decimal(0),
+                    source=f"Gold Send",
+                    reason=self.reason,
+                    related_transaction=source_gold_calculation[4],
+                    author_name=self.requester_name,
+                    author_id=interaction.user.id)
+                if isinstance(recipient_gold_calculation, str):
+                    await cursor.execute("DELETE FROM A_Audit_Gold WHERE Transaction_ID = ?",
+                                         (source_gold_calculation[4],))
+                    await conn.commit()
+
+            else:
+                await interaction.message.edit(
+                    content=f"An error occurred in the gold send command: {source_gold_calculation}")
+            if isinstance(source_gold_calculation, tuple) and isinstance(recipient_gold_calculation, tuple):
+                (source_calc_difference, source_calc_gold_total, source_calc_gold_value_total,
+                 source_calc_gold_max_total, source_calc_transaction_id) = source_gold_calculation
+                (recipient_calc_difference, recipient_calc_gold_total, recipient_calc_gold_value_total,
+                 recipient_calc_gold_max_total, recipient_calc_transaction_id) = recipient_gold_calculation
+                await cursor.execute(
+                    "UPDATE Player_Characters SET Gold = ?, Gold_Value = ?, Gold_Value_max WHERE Character_Name = ?",
+                    (source_calc_gold_total, source_calc_gold_value_total, source_calc_gold_value_total,
+                     self.character_name)
+                )
+                await conn.commit()
+                await shared_functions.character_embed(character_name=self.character_name, guild=interaction.guild)
+                character_changes = shared_functions.CharacterChange(character_name=self.character_name,
+                                                                     author=self.requester_name,
+                                                                     source=f'Gold Send',
+                                                                     gold=self.gold_change)
+                await shared_functions.log_embed(character_changes, guild=interaction.guild,
+                                                 thread=self.source_logging_thread, bot=self.bot)
+                await conn.execute(
+                    "UPDATE Player_Characters SET Gold = ?, Gold_Value = ?, Gold_Value_max WHERE Character_Name = ?",
+                    (recipient_calc_gold_total, recipient_calc_gold_value_total, recipient_calc_gold_max_total,
+                     self.recipient_name)
+                )
+                await conn.commit()
+                await cursor.execute("UPDATE A_Audit_Gold SET Related_Transaction_ID = ? WHERE Transaction_ID = ?",
+                                     (recipient_calc_transaction_id, source_calc_transaction_id))
+                await conn.commit()
+                await shared_functions.character_embed(character_name=self.recipient_name, guild=interaction.guild)
+                character_changes = shared_functions.CharacterChange(character_name=self.recipient_name,
+                                                                     author=self.requester_name,
+                                                                     source=f'Gold Send',
+                                                                     gold=self.gold_change)
+                await shared_functions.log_embed(character_changes, guild=interaction.guild,
+                                                 thread=self.recipient_logging_thread, bot=self.bot)
+                await shared_functions.character_embed(character_name=self.recipient_name, guild=interaction.guild)
+                await shared_functions.character_embed(character_name=self.character_name, guild=interaction.guild)
+                embed = discord.Embed(
+                    title=f"Gold Transaction Completed",
+                    description=f"{self.character_name} has sent {self.gold_change} GP to {self.recipient_name}.\r\n {self.reason}",
                     color=discord.Color.green()
                 )
-                # Additional logic such as notifying the requester
+                embed.set_footer(
+                    text=f"Transaction ID: {source_calc_transaction_id}, Recipient Transaction ID: {recipient_calc_transaction_id}")
+                await interaction.message.edit(content=None, embed=embed, view=None)
+            else:
+                await interaction.message.edit(
+                    content=f"An error occurred in the gold send command: {recipient_gold_calculation}")
 
-            async def rejected(self, interaction: discord.Interaction):
-                """Handle the rejection logic."""
-                # Update the database to mark the proposition as rejected
-                await self.update_proposition_status(guild=interaction.guild, is_allowed=-1)
-                self.embed = discord.Embed(
-                    title="Proposition Rejected",
-                    description=f"The proposition {self.proposition_id} has been rejected.",
-                    color=discord.Color.red()
-                )
-                # Additional logic such as notifying the requester
+    async def rejected(self, interaction: discord.Interaction):
+        """Handle the rejection logic."""
+        # Update the database to mark the proposition as rejected
+        await self.update_proposition_status(guild=interaction.guild, is_allowed=-1)
+        self.embed = discord.Embed(
+            title=f"{self.character_name}'s Transaction Rejected",
+            description=f"The request of \r\n {self.reason} \r\n has been rejected by <@{self.allowed_user_id}>'s {self.recipient_name}.",
+            color=discord.Color.red()
+        )
+        # Additional logic such as notifying the requester
 
-            async def create_embed(self):
-                """Create the initial embed for the proposition."""
-                self.embed = discord.Embed(
-                    title="Proposition Request",
-                    description=(
-                        f"**Requester:** {self.requester_name}\n"
-                        f"**Character:** {self.character_name}\n"
-                        f"**Item:** {self.item_name}\n"
-                        f"**Prestige Cost:** {self.prestige_cost}\n"
-                        f"**Proposition ID:** {self.proposition_id}"
-                    ),
-                    color=discord.Color.blue()
-                )
-
-            async def update_proposition_status(self, guild: discord.Guild, is_allowed: int):
-                """Update the proposition status in the database."""
-                if is_allowed == 1:
-                    async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as conn:
-                        await conn.execute(
-                            "UPDATE A_Audit_Prestige SET IsAllowed = ? WHERE Transaction_ID = ?",
-                            (is_allowed, self.proposition_id)
-                        )
-                        await conn.commit()
-                        await conn.execute(
-                            "UPDATE Player_Characters SET Prestige = Prestige - ? WHERE Character_Name = ?",
-                            (self.prestige_cost, self.character_name)
-                        )
-                        await conn.commit()
-                        await shared_functions.character_embed(character_name=self.character_name, guild=guild)
-                        character_changes = shared_functions.CharacterChange(character_name=self.character_name,
-                                                                             author=self.requester_name,
-                                                                             source=f'Prestige Request',
-                                                                             prestige=self.prestige_cost)
-                        await shared_functions.log_embed(character_changes, self.guild_id, self.logging_thread)
+    async def create_embed(self):
+        """Create the initial embed for the proposition."""
+        self.embed = discord.Embed(
+            title=f"{self.character_name} is sending {self.gold_change} GP to {self.recipient_name}",
+            description=self.reason,
+            color=discord.Color.blue()
+        )
+        self.embed.set_author(name=self.requester_name)
+        self.embed.set_footer(text="Please accept or reject this transaction before it expires.")
 
 
 logging.basicConfig(
@@ -2592,284 +3203,3 @@ logging.basicConfig(
     filename='application.log',  # Log to a file
     filemode='a'  # Append to the file
 )
-
-
-
-"""@gold.command()
-async def help(ctx: commands.Context):
-    "Help commands for the associated tree"
-    embed = discord.Embed(title=f"Gold Help", description=f'This is a list of Gold management commands', colour=discord.Colour.blurple())
-    embed.add_field(name=f'**Claim**', value=f'Claim gold that should be received through downtime!', inline=False)
-    embed.add_field(name=f'**Buy**', value=f'Buy items, or send your gold out into the open wide world.', inline=False)
-    embed.add_field(name=f'**Send**', value=f'Send gold to another player', inline=False)
-    await ctx.response.send_message(embed=embed)
-
-
-@gold.command()
-@app_commands.autocomplete(character_name=own_character_select_autocompletion)
-async def claim(ctx: commands.Context, character_name: str, amount: float, reason: str):
-    "Claim gold based on downtime activities, or through other interactions with NPCs"
-    character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
-    reason = str.replace(reason, ";", "")
-    guild_id = ctx.guild_id
-    guild = ctx.guild
-    author = ctx.user.name
-    author_id = ctx.user.id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    if amount <= 0:
-        await ctx.response.send_message(f"Little comrade! Please give yourself some credit! {amount} is too small to claim!")
-    elif amount > 0:
-        cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
-        player_info = cursor.fetchone()
-        if player_info is None:
-            await ctx.response.send_message(f"{author} does not have a character named {character_name}")
-        else:
-            gold_info = gold_calculation(player_info[7], player_info[6], player_info[13], player_info[14], player_info[15], amount)
-            await Event.gold_change(self, guild_id, author, author_id, character_name, gold_info[3], gold_info[3], amount, reason, 'Gold_Claim')
-            cursor.execute(f'SELECT MAX(Transaction_ID) FROM A_Audit_Gold Order By Transaction_ID DESC LIMIT 1')
-            transaction_id = cursor.fetchone()
-            cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-            accepted_bio_channel = cursor.fetchone()
-            bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5], player_info[6], player_info[7], player_info[8], player_info[9], player_info[10], player_info[11], player_info[12], player_info[13] + gold_info[3], player_info[14] + gold_info[3], player_info[16], player_info[17], player_info[18], player_info[19], player_info[20], player_info[21], player_info[22], player_info[23], player_info[27], player_info[28], player_info[30], player_info[31])
-            bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
-            bio_message = await bio_channel.fetch_message(player_info[24])
-            await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
-            source = f"Character has increased their wealth by {gold_info[3]} GP using a gold pouch from the shop, transaction_id: {transaction_id[0]}!"
-            logging_embed = log_embed(player_info[2], author, None, None, None, None, None, None, None, None, player_info[13] + gold_info[3], gold_info[3], player_info[14] + gold_info[3], transaction_id[0], None, None, None, None, None, None, None, None, None, None, None, source)
-            logging_thread = guild.get_thread(player_info[25])
-            cursor.close()
-            db.close()
-            await logging_thread.send(embed=logging_embed)
-            await ctx.response.send_message(f"{player_info[2]} has claimed {amount} gold, receiving {gold_info[3]} gold and now has {gold_info[0]} gold!.")
-
-
-
-@gold.command()
-@app_commands.describe(market_value="market value of the item regardless of crafting. Items crafted for other players have an expected value of 0.")
-@app_commands.autocomplete(character_name=own_character_select_autocompletion)
-async def buy(ctx: commands.Context, character_name: str, expenditure: float, market_value: float, reason: str):
-    "Buy items from NPCs for non-player trades and crafts. Expected Value is the MARKET price of what you are buying, not the price you are paying."
-    character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
-    reason = str.replace(reason, ";", "")
-    guild_id = ctx.guild_id
-    guild = ctx.guild
-    author = ctx.user.name
-    author_id = ctx.user.id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    if expenditure <= 0:
-        await ctx.response.send_message(f"Little comrade! Please buy something of actual value! {expenditure} is too small to purchase anything with!")
-    elif market_value < 0:
-        await ctx.response.send_message(f"Little comrade! You cannot have an expected value of: {market_value}, it is too little gold to work with!")
-    elif expenditure > 0:
-        cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Nickname = ?", (author, character_name, character_name))
-        player_info = cursor.fetchone()
-        if player_info[0] is None:
-            await ctx.response.send_message(f"{ctx.user.name} does not have a character named {character_name}")
-        else:
-            expenditure = -abs(expenditure)
-            print(player_info[13])
-            print(abs(expenditure))
-            if player_info[13] >= abs(expenditure):
-                market_value_adjusted = market_value + expenditure
-                remaining = round(expenditure + player_info[13], 2)
-                gold_value = player_info[14] + market_value_adjusted
-                if player_info[6] == 'Poverty':
-                    max_wealth = 80 * (player_info[7] ** 2)
-                    if gold_value > max_wealth:
-                        await ctx.response.send_message(f"{player_info[2]} has too much money and needs to give some to charitable causes by using the 'buy' command where they receive nothing in return!")
-                        return
-                elif player_info[6] == 'Absolute':
-                    max_wealth = 5 * player_info[7]
-                    if gold_value > max_wealth:
-                        await ctx.response.send_message(f"{player_info[2]} has too much money and needs to give some to charitable causes by using the 'buy' command where they receive nothing in return!")
-                        return
-                expenditure = round(expenditure, 2)
-                market_value_adjusted = round(market_value_adjusted, 2)
-                await Event.gold_change(self, guild_id, author, author_id, character_name, expenditure, market_value_adjusted, market_value_adjusted, reason, 'Gold_Buy')
-                cursor.execute(f'SELECT MAX(Transaction_ID) FROM A_Audit_Gold Order By Transaction_ID DESC LIMIT 1')
-                transaction_id = cursor.fetchone()
-                cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-                accepted_bio_channel = cursor.fetchone()
-                bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5], player_info[6], player_info[7], player_info[8], player_info[9], player_info[10], player_info[11], player_info[12], player_info[13] + expenditure, player_info[14] + market_value_adjusted, player_info[16], player_info[17], player_info[18], player_info[19], player_info[20], player_info[21], player_info[22], player_info[23], player_info[27], player_info[28], player_info[30], player_info[31])
-                bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
-                bio_message = await bio_channel.fetch_message(player_info[24])
-                await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
-                source = f"Character of {character_name} has spent {expenditure} GP in return for {market_value} GP using the buy command, transaction_id: {transaction_id[0]}!"
-                print(f"THIS IS {player_info[13] + expenditure} PLAYER INFO AND EXPENDITURE")
-                print(f"this is the raw {expenditure}")
-                logging_embed = log_embed(player_info[2], author, None, None, None, None, None, None, None, None, player_info[13] + expenditure, expenditure, round(player_info[14] + market_value_adjusted,2), transaction_id[0], None, None, None, None, None, None, None, None, None, None, None, source)
-                logging_thread = guild.get_thread(player_info[25])
-                print(expenditure)
-                await logging_thread.send(embed=logging_embed)
-                await ctx.response.send_message(f"{player_info[2]} has spent {abs(expenditure)} gold and has received {market_value_adjusted} in expected value return. Leaving them with {remaining} gold.")
-            else:
-                await ctx.response.send_message(f"{player_info[2]} does not have enough gold to make this purchase!")
-    cursor.close()
-    db.close()
-
-
-@gold.command()
-@app_commands.autocomplete(character_from=own_character_select_autocompletion)
-@app_commands.autocomplete(character_to=character_select_autocompletion)
-async def send(ctx: commands.Context, character_from: str, character_to: str, amount: float, expected_value: float, reason: str):
-    "Send gold to a crafter or other players for the purposes of their transactions. Expected Value is the MARKET price of what they will give you in return."
-    character_from = str.replace(str.title(character_from), ";", "")
-    character_to = str.replace(str.title(character_to), ";", "")
-    reason = str.replace(reason, ";", "")
-    guild_id = ctx.guild_id
-    guild = ctx.guild
-    author = ctx.user.name
-    author_id = ctx.user.id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    if amount <= 0:
-        await ctx.response.send_message(f"Little comrade! Please SEND something of actual value! {amount} is too small to claim!")
-    elif expected_value < 0:
-        await ctx.response.send_message(f"Expected Value cannot be less than 0!")
-    elif expected_value < amount:
-        await ctx.response.send_message(f"If they're charging you higher than the market value, go buy it from an NPC...")
-    else:
-        cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Player_Name = ? AND Character_Name = ? or Player_Name = ? AND Nickname = ?", (author, character_from, author, character_from))
-        player_info = cursor.fetchone()
-        if player_info[0] is None:
-            await ctx.response.send_message(f"{author} does not have a character named or nicknamed {character_from}")
-        else:
-            if player_info[13] < amount:
-                await ctx.response.send_message(f"Unlike America, you can't go into debt to resolve your debt. {player_info[1] - amount} leaves you too in debt.")
-            else:
-                cursor.execute(f"SELECT Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Flux, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Character_Name = ? or Nickname = ? ", (character_to, character_to))
-                send_info = cursor.fetchone()
-                if send_info is None:
-                    await ctx.response.send_message(f"Could not find a character named {character_to}!")
-                else:
-                    buttons = ["✅", "❌"]  # checkmark X symbol
-                    embed = discord.Embed(title=f"Are you sure you want {character_from} to send {amount} GP to {character_to}?", description=f"hit the checkmark to confirm", colour=discord.Colour.blurple())
-                    await ctx.response.send_message(embed=embed)
-                    msg = await ctx.original_response()
-                    for button in buttons:
-                        await msg.add_reaction(button)
-                    while True:
-                        try:
-                            reaction, user = await bot.wait_for('reaction_add', check=lambda reaction, user: user.id == ctx.user.id and reaction.emoji in buttons, timeout=60.0)
-                        except asyncio.TimeoutError:
-                            embed.set_footer(text="Request has timed out.")
-                            await msg.edit(embed=embed)
-                            await msg.clear_reactions()
-                            return print("timed out")
-                        else:
-                            if reaction.emoji == u"\u264C":
-                                embed = discord.Embed(title=f"You have thought better of freely giving your money", description=f"Savings!", colour=discord.Colour.blurple())
-                                await msg.edit(embed=embed)
-                                await msg.clear_reactions()
-                            if reaction.emoji == u"\u2705":
-                                embed = discord.Embed(title=f"{character_from} has given {amount} in GP to {character_to}", description=f"Hope it was worth it.", colour=discord.Colour.red())
-                                await msg.clear_reactions()
-                                expected_value_adjusted = expected_value + -abs(amount)
-                                print(-abs(amount))
-                                print(type(-abs(amount)))
-                                expected_value_adjusted = round(expected_value_adjusted, 2)
-                                amount = round(amount, 2)
-                                await Event.gold_change(self, guild_id, author, author_id, character_from, -abs(amount), expected_value_adjusted, expected_value_adjusted, reason, 'gold send')
-                                cursor.execute(f"Select MAX(Transaction_ID) from A_Audit_Gold order by Transaction_ID desc limit 1")
-                                transaction_id_from = cursor.fetchone()
-                                await Event.gold_change(self, guild_id, send_info[0], send_info[1], send_info[2], amount, amount, amount, reason, 'Gold_Buy')
-                                cursor.execute(f"Select MAX(Transaction_ID) from A_Audit_Gold order by Transaction_ID desc limit 1")
-                                transaction_id_to = cursor.fetchone()
-                                cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-                                accepted_bio_channel = cursor.fetchone()
-                                bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
-                                bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5], player_info[6], player_info[7], player_info[8], player_info[9], player_info[10], player_info[11], player_info[12], player_info[13] + -abs(amount), player_info[14] + expected_value_adjusted, player_info[16], player_info[17], player_info[18], player_info[19], player_info[20], player_info[21], player_info[22], player_info[23], player_info[27], player_info[28], player_info[30], player_info[31])
-                                bio_message = await bio_channel.fetch_message(player_info[24])
-                                await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
-                                source = f"Character of {character_from} has spent {amount} GP in return for {expected_value_adjusted} using the send command, transaction_id: {transaction_id_from[0]}!"
-                                logging_embed = log_embed(player_info[2], author, None, None, None, None, None, None, None, None, player_info[13] + -abs(amount), -abs(amount), player_info[14] + expected_value_adjusted, transaction_id_from[0], None, None, None, None, None, None, None, None, None, None, None, source)
-                                logging_thread = guild.get_thread(player_info[25])
-                                await logging_thread.send(embed=logging_embed)
-                                to_bio_embed = character_embed(send_info[0], send_info[1], send_info[2], send_info[4], send_info[5], send_info[6], send_info[7], send_info[8], send_info[9], send_info[10], send_info[11], send_info[12], send_info[13] + amount, send_info[14] + expected_value_adjusted, send_info[16], send_info[17], send_info[18], send_info[19], send_info[20], send_info[21], send_info[22], send_info[23], send_info[27], send_info[28], send_info[30], send_info[31])
-                                to_bio_message = await bio_channel.fetch_message(send_info[24])
-                                await to_bio_message.edit(content=to_bio_embed[1], embed=to_bio_embed[0])
-                                to_source = f"Character of {character_to} has received {amount} GP in return for services of {expected_value_adjusted} using the send command, transaction_id: {transaction_id_to[0]}!"
-                                to_logging_embed = log_embed(send_info[0], author, None, None, None, None, None, None, None, None, send_info[13] + amount, amount, send_info[14] + amount, transaction_id_to[0], None, None, None, None, None, None, None, None, None, None, None, to_source)
-                                to_logging_thread = guild.get_thread(send_info[25])
-                                await to_logging_thread.send(embed=to_logging_embed)
-                                await Event.gold_transact(self, transaction_id_from[0], transaction_id_to[0], guild_id)
-                                await Event.gold_transact(self, transaction_id_to[0], transaction_id_from[0], guild_id)
-                                embed.set_footer(text=f"Transaction ID was {transaction_id_from[0]}")
-                                await msg.edit(embed=embed)
-                                break
-    cursor.close()
-    db.close()
-
-
-@gold.command()
-@app_commands.autocomplete(character_name=own_character_select_autocompletion)
-async def history(ctx: commands.Context, character_name: str, current_page: int = 1):
-    "This command displays gold audit history."
-    character = str.replace(str.title(character_name), ";", "")
-    guild_id = ctx.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    sql = f"SELECT COUNT(Character_Name) FROM A_Audit_Gold where Character_Name = ?"
-    val = [character]
-    cursor.execute(sql, val)
-    leaders = cursor.fetchone()
-    max_page = math.ceil(leaders[0] / 8)
-    if current_page >= max_page:
-        current_page = max_page
-    buttons = ["⏪", "⬅", "➡", "⏩"]  # skip to start, left, right, skip to end
-    low = 0 + (8 * (current_page-1))
-    offset = 8
-    cursor.execute(f"Select Transaction_ID, Author_Name, Character_Name, Gold_Value, Effective_Gold_Value, Effective_Gold_Value_Max, Reason, Source_Command, Time from A_Audit_Gold WHERE Character_Name = ? LIMIT {low}, {offset}", (character,))
-    pull = cursor.fetchall()
-    embed = discord.Embed(title=f"{character} character page {current_page}", description=f"This is list of {character}'s transactions", colour=discord.Colour.red())
-    for result in pull:
-        embed.add_field(name=f'Transaction Information', value=f'**Date**: {result[8]}, **Source**: {result[7]}', inline=False)
-        embed.add_field(name=f'Changes:', value=f'{result[3]} Liquid GP {result[4]} Effective GP, {result[5]} Life Time GP')
-        embed.add_field(name=f'Transaction:', value=f'Transaction_ID: {result[0]}, Reason: {result[6]}', inline=False)
-    await ctx.response.send_message(embed=embed)
-    msg = await ctx.original_response()
-    for button in buttons:
-        await msg.add_reaction(button)
-    while True:
-        try:
-            reaction, user = await bot.wait_for('reaction_add', check=lambda reaction, user: user.id == ctx.user.id and reaction.emoji in buttons, timeout=60.0)
-        except asyncio.TimeoutError:
-            embed.set_footer(text="Request has timed out.")
-            await msg.edit(embed=embed)
-            await msg.clear_reactions()
-            cursor.close()
-            db.close()
-            return print("timed out")
-        else:
-            previous_page = current_page
-            if reaction.emoji == u"\u23EA":
-                current_page = 1
-                low = 0 + (8 * (current_page - 1))
-                offset = 8
-            elif reaction.emoji == u"\u2B05" and current_page > 1:
-                current_page -= 1
-                low = 0 + (8 * (current_page - 1))
-                offset = 8
-            elif reaction.emoji == u"\u27A1" and current_page < max_page:
-                current_page += 1
-                low = 0 + (8 * (current_page - 1))
-                offset = 8
-            elif reaction.emoji == u"\u23E9":
-                current_page = max_page
-                low = 0 + (8 * (current_page - 1))
-                offset = 8
-            for button in buttons:
-                await msg.remove_reaction(button, ctx.user)
-            if current_page != previous_page:
-                cursor.execute(f"Select Transaction_ID, Author_Name, Character_Name, Gold_Value, Effective_Gold_Value, Effective_Gold_Value_Max, Reason, Source_Command, Time from A_Audit_Gold WHERE Character_Name = ? LIMIT {low}, {offset}", (character,))
-                pull = cursor.fetchall()
-                embed = discord.Embed(title=f"{character} character page {current_page}", description=f"This is list of {character}'s transactions", colour=discord.Colour.red())
-                for result in pull:
-                    embed.add_field(name=f'Transaction Information', value=f'**Date**: {result[8]}, **Source**: {result[7]}', inline=False)
-                    embed.add_field(name=f'Changes:', value=f'{result[3]} Liquid GP {result[4]} Effective GP, {result[5]} Life Time GP')
-                    embed.add_field(name=f'Transaction:', value=f'Transaction_ID: {result[0]}, Reason: {result[6]}', inline=False)
-                await msg.edit(embed=embed)
-
-"""

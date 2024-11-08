@@ -444,6 +444,7 @@ class CharacterChange:
     trials_remaining: Optional[int] = None
     gold: Optional[Decimal] = None
     gold_change: Optional[Decimal] = None
+    gold_value: Optional[Decimal] = None
     effective_gold: Optional[Decimal] = None
     transaction_id: Optional[int] = None
     essence: Optional[int] = None
@@ -531,7 +532,7 @@ async def update_character(guild_id: int, change: UpdateCharacterData) -> str:
 
 
 # Function to create the embed
-async def log_embed(change: CharacterChange, guild, thread, bot) -> discord.Embed:
+async def log_embed(change: CharacterChange, guild: discord.Guild, thread: int, bot) -> discord.Embed:
     try:
         embed = discord.Embed(
             title=change.character_name,
@@ -1032,6 +1033,7 @@ def validate_worldanvil(url: str) -> Tuple[bool, str, int]:
         logging.error(f"Error validating World Anvil link '{url}': {e}")
         return False, "An error occurred during validation.", -1  # Exception case uses step indicator -1
 
+
 def ordinal(n):
     if 11 <= (n % 100) <= 13:
         suffix = "th"
@@ -1331,7 +1333,7 @@ class ShopView(discord.ui.View):
         self.limit = limit
         self.results = []
         self.embed = None
-
+        self.message = None
         # Initialize buttons
         self.first_page_button = discord.ui.Button(label='First Page', style=discord.ButtonStyle.primary)
         self.previous_page_button = discord.ui.Button(label='Previous Page', style=discord.ButtonStyle.primary)
@@ -1429,6 +1431,16 @@ class ShopView(discord.ui.View):
         self.previous_page_button.disabled = first_page
         self.next_page_button.disabled = last_page
         self.last_page_button.disabled = last_page
+
+    async def send_initial_message(self, interaction: discord.Interaction):
+        """Send the initial message with the view."""
+        await self.update_results()
+        await self.create_embed()
+        await self.update_buttons()
+        self.message = await interaction.response.send_message(
+            embed=self.embed,
+            view=self
+        )
 
     async def update_results(self):
         """Fetch the results for the current page. To be implemented in subclasses."""
