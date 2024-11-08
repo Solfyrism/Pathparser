@@ -22,377 +22,509 @@ import commands.character_commands as character_commands
 os.chdir("C:\\pathparser")
 
 
+async def register_character_embed(character_name: str, guild: discord.Guild) -> Union[
+    Tuple[discord.Embed, str, int, int], str]:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as conn:
+            conn.row_factory = aiosqlite.Row
+            cursor = await conn.cursor()
+
+            # Fetch channel ID
+            await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
+            channel_id_row = await cursor.fetchone()
+            if not channel_id_row:
+                return f"No channel found with Identifier 'Accepted_Bio_Channel' in Admin table."
+            channel_id = channel_id_row['Search']
+
+            # Fetch character info
+            await cursor.execute(
+                """
+                SELECT player_name, player_id, True_Character_Name, Title, Titles, Description, Oath, Level,
+                       Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value,
+                       Essence, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name,
+                       Tradition_Link, Template_Name, Template_Link, Article_Link, Message_ID
+                FROM Player_Characters WHERE Character_Name = ?
+                """, (character_name,))
+            character_info = await cursor.fetchone()
+            if not character_info:
+                return f"No character found with Character_Name '{character_name}'."
+
+        # Unpack character_info using column names
+        player_name = character_info['player_name']
+        player_id = character_info['player_id']
+        true_character_name = character_info['True_Character_Name']
+        title = character_info['Title']
+        titles = character_info['Titles']
+        description = character_info['Description']
+        oath = character_info['Oath']
+        level = character_info['Level']
+        tier = character_info['Tier']
+        milestones = character_info['Milestones']
+        milestones_required = character_info['Milestones_Required']
+        trials = character_info['Trials']
+        trials_required = character_info['Trials_Required']
+        gold = character_info['Gold']
+        gold_value = character_info['Gold_Value']
+        essence = character_info['Essence']
+        fame = character_info['Fame']
+        prestige = character_info['Prestige']
+        color = character_info['Color']
+        mythweavers = character_info['Mythweavers']
+        image_link = character_info['Image_Link']
+        tradition_name = character_info['Tradition_Name']
+        tradition_link = character_info['Tradition_Link']
+        template_name = character_info['Template_Name']
+        template_link = character_info['Template_Link']
+        article_link = character_info['Article_Link']
+        message_id = character_info['Message_ID']
+
+        # Convert color to integer
+        try:
+            int_color = int(color.lstrip('#'), 16)
+        except ValueError:
+            int_color = 0x000000  # Default color if invalid
+
+        # Build embed description
+        description_field = ""
+        if titles:
+            description_field += f"**Other Names**: {titles}\n"
+        if article_link:
+            description_field += f"[**Backstory**]({article_link})"
+
+        titled_character_name = true_character_name if not title else f"{title} {true_character_name}"
+
+        embed = discord.Embed(
+            title=titled_character_name,
+            url=mythweavers,
+            description=description_field,
+            color=int_color
+        )
+        embed.set_author(name=player_name)
+        embed.set_thumbnail(url=image_link)
+        embed.add_field(
+            name="Information",
+            value=f'**Level**: {level}, **Mythic Tier**: {tier}\n**Fame**: {fame}, **Prestige**: {prestige}',
+            inline=False
+        )
+        embed.add_field(
+            name="Experience",
+            value=f'**Milestones**: {milestones}, **Remaining**: {milestones_required}'
+        )
+        embed.add_field(
+            name="Mythic",
+            value=f'**Trials**: {trials}, **Remaining**: {trials_required}'
+        )
+        embed.add_field(
+            name="Current Wealth",
+            value=f'**GP**: {Decimal(gold)}, **Effective**: {Decimal(gold_value)} GP',
+            inline=False
+        )
+        embed.add_field(
+            name="Current Essence",
+            value=f'**Essence**: {essence}'
+        )
+
+        # Additional Info
+        linkage = ""
+        if tradition_name:
+            linkage += f"**Tradition**: [{tradition_name}]({tradition_link})"
+        if template_name:
+            if tradition_name:
+                linkage += " "
+            linkage += f"**Template**: [{template_name}]({template_link})"
+        if linkage:
+            embed.add_field(name='Additional Info', value=linkage, inline=False)
+
+        # Footer with Oath
+        oath_icons = {
+            'Offerings': 'https://i.imgur.com/dSuLyJd.png',
+            'Poverty': 'https://i.imgur.com/4Fr9ZnZ.png',
+            'Absolute': 'https://i.imgur.com/ibE5vSY.png'
+        }
+        icon_url = oath_icons.get(oath)
+        embed.set_footer(text=description, icon_url=icon_url)
+
+        message_content = f"<@{player_id}>"
+
+        # Fetch the bio channel
+        bio_channel = guild.get_channel(channel_id)
+        if bio_channel is None:
+            bio_channel = await guild.fetch_channel(channel_id)
+        if bio_channel is None:
+            return f"Channel with ID {channel_id} not found."
+
+        # Fetch and edit the message
+        try:
+            bio_message = await bio_channel.send(content=message_content, embed=embed,
+                                                 allowed_mentions=discord.AllowedMentions(users=True))
+        except discord.Forbidden:
+            return "Bot lacks permissions to send the message."
+        except discord.HTTPException as e:
+            logging.exception(f"Discord error while sending message: {e}")
+            return "An error occurred while sending the message."
+
+        return embed, message_content, channel_id, bio_message.id
+
+    except aiosqlite.Error as e:
+        logging.exception(f"Database error: {e}")
+        return f"An error occurred with the database."
+    except Exception as e:
+        logging.exception(f"An unexpected error occurred: {e}")
+        return f"An unexpected error occurred while building character embed for '{character_name}'."
+
+
 class ReviewerCommands(commands.Cog, name='Reviewer'):
     def __init__(self, bot):
         self.bot = bot
 
+    reviewer_group = discord.app_commands.Group(
+        name='reviewer',
+        description='Reviewer Roots commands.'
+    )
+
     registration_group = discord.app_commands.Group(
         name='registration',
-        description='Commands related to accepting or rejecting registrations for new characters.'
+        description='Commands related to registration.',
+        parent=reviewer_group
     )
 
     @registration_group.command()
     @app_commands.describe(player_wipe="if yes, remove all inactive players!")
     @app_commands.choices(
-        player_wipe=[discord.app_commands.Choice(name='No!', value=1),
-                     discord.app_commands.Choice(name='Yes!', value=2)])
-    async def wipe(interaction: discord.Interaction, player: typing.Optional[discord.Member],
-                               player_id: typing.Optional[int], player_wipe: discord.app_commands.Choice[int] = 1):
-        """Clean out the entire playerbase or clean out a specific player's character by mentioning them or using their role!"""
-        if player_wipe == 1:
-            player_wipe = 1
-        else:
-            player_wipe = player_wipe.value
-        if player_wipe == 1 and player_id is None and player is None:
-            await interaction.followup.send(f"Pick Something that lets me end someone! Please?", ephemeral=True)
-        else:
-            guild_id = interaction.guild_id
-            db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-            cursor = db.cursor()
-            author = interaction.user.name
-            overall_wipe_list = []
-            embed = discord.Embed(title=f"The Following Players will have their characters removed:",
-                                  description=f"hit the checkmark to confirm", colour=discord.Colour.blurple())
-            if player_id is not None:
-                cursor.execute(
-                    "Select distinct(Player_Name), count(Character_Name) from Player_Characters where Player_ID = {player_id}")
-                player_id_info = cursor.fetchone()
-                if player_id_info is not None:
-                    overall_wipe_list.append(player_id)
-                    embed.add_field(name=f"{player_id_info[0]}'s characters will be removed",
-                                    value=f"this player had {player_id_info[1]} characters!")
-                else:
-                    embed.add_field(name=f"{player_id} could not be found in the database.",
-                                    value=f"This ID had no characters associated with it..")
-            if player is not None:
-                cursor.execute(
-                    "Select distinct(Player_Name), count(Character_Name) from Player_Characters where Player_ID = {player.id}")
-                player_id_info = cursor.fetchone()
-                if player_id_info is not None:
-                    embed.add_field(name=f"{player_id_info}'s characters will be removed",
-                                    value=f"This player had {player_id_info[2]} characters who will be removed.")
-                    overall_wipe_list.append(player.id)
-                else:
-                    embed.add_field(name=f"{player.name} could not be found in the database.",
-                                    value=f"This user had no characters associated with it..")
-            if player_wipe == 2:
-                guild = interaction.guild
-                cursor.execute("Select distinct(Player_ID), count(Character_Name) from Player_Characters")
-                player_id_info = cursor.fetchall()
-                wipe_tuple = None
-                x = 0
-                for inactive_player in player_id_info:
-                    member = guild.get_member(inactive_player[0])
-                    if member is None:
-                        x += 1
-                        overall_wipe_list.append(inactive_player[0])
-                        if x <= 20:
-                            embed.add_field(name=f"{player_id_info[0]}'s characters will be removed",
-                                            value=f"this player had {player_id_info[1]} characters!")
-                    else:
-                        x = x
-                        wipe_tuple = wipe_tuple
-                embed.set_footer(text=f"{x} Total Players were inactive and are being removed!")
+        remove=[discord.app_commands.Choice(name='No!', value=1),
+                discord.app_commands.Choice(name='Yes!', value=2)])
+    async def wipe(self, interaction: discord.Interaction, cleanse: str, remove: discord.app_commands.Choice[int]):
+        """Clean out the entire stging base or clean out a specific player's character by mentioning them or using their role!"""
+        await interaction.followup.defer(thinking=True)
+        try:
+            if cleanse.endswith('D'):
+                cleanse = cleanse.replace('D', '')
+                cleanse_in_days = int(cleanse)
+            elif cleanse.endswith('W'):
+                cleanse = cleanse.replace('W', '')
+                cleanse_in_days = int(cleanse) * 7
             else:
-                embed.add_field(name=f"No Player Characters could be found in the database.",
-                                value=f"This ID had no characters associated with it..")
+                cleanse_in_days = int(cleanse)
             guild_id = interaction.guild_id
-            buttons = ["✅", "❌"]  # checkmark X symbol
-            await interaction.followup.send(embed=embed)
-            msg = await interaction.original_response()
-            for button in buttons:
-                await msg.add_reaction(button)
-            while True:
-                try:
-                    reaction, user = await bot.wait_for('reaction_add', check=lambda reaction,
-                                                                                     user: user.id == interaction.user.id and reaction.emoji in buttons,
-                                                        timeout=60.0)
-                except asyncio.TimeoutError:
-                    embed.set_footer(text="Request has timed out.")
-                    await msg.edit(embed=embed)
-                    await msg.clear_reactions()
-                    cursor.close()
-                    db.close()
-                    return print("timed out")
-                else:
-                    if reaction.emoji == u"\u264C":
-                        embed = discord.Embed(title=f"You have thought better of freely giving your money",
-                                              description=f"Savings!", colour=discord.Colour.blurple())
-                        await msg.edit(embed=embed)
-                        await msg.clear_reactions()
-                    if reaction.emoji == u"\u2705":
-                        embed = discord.Embed(title=f"Database Reset has occurred!",
-                                              description=f"Say Farewell to a world you used to know.",
-                                              colour=discord.Colour.red())
-                        await msg.clear_reactions()
-                        await msg.edit(embed=embed)
-                        for wiped in overall_wipe_list:
-                            await Event.wipe_unapproved(self, wiped[0], guild_id, author)
+            # Create and send the view with the results
+            view = CleanOldRegistrationView(
+                days=cleanse_in_days,
+                guild_id=guild_id,
+            )
+            await view.create_embed()
+            await interaction.followup.send(embed=view.embed, view=view)
+
+
+        except (AttributeError, TypeError) as e:
+            logging.exception(f"Error in cleanse. {cleanse} was not valid. {e}")
+            await interaction.followup.send(f"Error in cleanse. {cleanse} was not valid.", ephemeral=True)
 
     @registration_group.command()
-    @app_commands.autocomplete(character_name=stg_character_select_autocompletion)
-    @app_commands.describe(
-        cleanse="Optional: supply a number ending with D or W to remove users who have not been accepted within that period!")
+    @app_commands.autocomplete(character_name=shared_functions.stg_character_select_autocompletion)
     @app_commands.describe(status="Accepted players are moved into active and posted underneath!")
     @app_commands.choices(status=[discord.app_commands.Choice(name='Accepted!', value=1),
                                   discord.app_commands.Choice(name='Rejected!', value=2)])
-    async def manage(self, interaction: discord.Interaction, character_name: str, player_id: typing.Optional[int],
-                     status: discord.app_commands.Choice[int] = 1, cleanse: str = None):
-        "accept a player into your accepted bios, or clean out the stage tables!"
+    async def manage(self, interaction: discord.Interaction, character_name: str,
+                     status: discord.app_commands.Choice[int]):
+        """accept a player into your accepted bios, or Remove them."""
         guild = interaction.guild
         guild_id = interaction.guild_id
-        if status == 1:
-            status = 1
-        else:
-            status = status.value
-        if character_name is None and cleanse is None:
-            await interaction.followup.send(f"NOTHING COMPLETED, RUN DURATION: 1 BAJILLION Eternities?", ephemeral=True)
-        elif cleanse is not None or character_name is not None and status == 2 or player_id is not None and status == 2:
-            db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-            cursor = db.cursor()
-            author = interaction.user.name
-            if status == 2:
-                overall_wipe_list = []
-                character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
-                embed = discord.Embed(title=f"The Following Players will have their staged characters removed:",
-                                      description=f"hit the checkmark to confirm", colour=discord.Colour.blurple())
-                if character_name is not None:
-                    cursor.execute(
-                        "Select distinct(Player_Name), count(Character_Name) from A_STG_Player_Characters where character_name = ?",
-                        (character_name,))
-                    player_id_info = cursor.fetchone()
-                    if player_id_info is not None:
-                        overall_wipe_list.append(character_name)
-                        embed.add_field(name=f"{player_id_info[0]}'s character will be removed from stage",
-                                        value=f"The character of {character_name} will be removed!")
-                    else:
-                        embed.add_field(name=f"{character_name} could not be found in the database.",
-                                        value=f"This character name had no characters associated with it.")
-                if cleanse is not None:
-                    if cleanse.endswith('D'):
-                        cleanse = cleanse.replace('D', '')
-                        cursor.execute(
-                            "Select distinct(Player_Name), count(Character_Name) from A_STG_Player_Characters where Created_Date <= date('now', '-{cleanse} days')")
-                        player_id_info = cursor.fetchall()
-                        x = 0
-                        for inactive_player in player_id_info:
-                            x += 1
-                            overall_wipe_list.append(inactive_player[0])
-                            if x <= 20:
-                                embed.add_field(name=f"{player_id_info[0]}'s characters will be removed",
-                                                value=f"this player had {player_id_info[1]} characters!")
-                        embed.set_footer(text=f"{x} Total Players were inactive and are being removed!")
-                    elif cleanse.endswith('W'):
-                        cleanse = cleanse.replace('W', '')
-                        cursor.execute(
-                            "Select distinct(Player_Name), count(Character_Name) from A_STG_Player_Characters where Created_Date <= date('now', '-{cleanse} weeks')")
-                        player_id_info = cursor.fetchall()
-                        x = 0
-                        for inactive_player in player_id_info:
-                            x += 1
-                            overall_wipe_list.append(inactive_player[0])
-                            if x <= 20:
-                                embed.add_field(name=f"{player_id_info[0]}'s characters will be removed",
-                                                value=f"this player had {player_id_info[1]} characters!")
-                        embed.set_footer(text=f"{x} Total Players were inactive and are being removed!")
-                    else:
-                        embed.add_field(name=f"Invalid Duration",
-                                        value=f"Please use a number ending in D for days or W for weeks.")
-                buttons = ["✅", "❌"]  # checkmark X symbol
-                await interaction.followup.send(embed=embed)
-                msg = await interaction.original_response()
-                for button in buttons:
-                    await msg.add_reaction(button)
-                while True:
-                    try:
-                        reaction, user = await bot.wait_for('reaction_add', check=lambda reaction,
-                                                                                         user: user.id == interaction.user.id and reaction.emoji in buttons,
-                                                            timeout=60.0)
-                    except asyncio.TimeoutError:
-                        embed.set_footer(text="Request has timed out.")
-                        await msg.edit(embed=embed)
-                        await msg.clear_reactions()
-                        cursor.close()
-                        db.close()
-                        return print("timed out")
-                    else:
-                        if reaction.emoji == "❌":
-                            embed = discord.Embed(title=f"you have reconsidered wiping a character",
-                                                  description=f"life is a kindness, do not waste it!",
-                                                  colour=discord.Colour.blurple())
-                            await msg.edit(embed=embed)
-                            await msg.clear_reactions()
-                        if reaction.emoji == u"\u2705":
-                            embed = discord.Embed(title=f"Character wipe has been approved!",
-                                                  description=f"Getting rid of outdated characters.",
-                                                  colour=discord.Colour.red())
-                            await msg.clear_reactions()
-                            await msg.edit(embed=embed)
-                            print(overall_wipe_list)
-                            print(type(overall_wipe_list))
-                            for wiped in overall_wipe_list:
-                                await Event.wipe_unapproved(self, wiped, guild_id, author)
-        else:
-            e = None
-            try:
-                await interaction.response.defer(thinking=True, ephemeral=True)
-            except Exception as e:
-                print(e)
-                pass
-            guild_id = interaction.guild_id
-            db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-            cursor = db.cursor()
-            author = interaction.user.name
-            character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
-            cursor.execute("Select True_Character_Name, tmp_bio from A_STG_Player_Characters where character_name = ?",
-                           (character_name,))
-            player_id_info = cursor.fetchone()
-            if player_id_info is not None:
-                try:
-                    e = None
-                    await Event.create_bio(self, guild_id, player_id_info[0], player_id_info[1])
-                except Exception as e:
-                    print(e)
-                    pass
-                await Event.create_character(self, guild_id, author, player_id_info[0])
-                cursor.execute("Select Search FROM Admin WHERE Identifier = 'Approved_Character'")
-                approved_character = cursor.fetchone()
-                cursor.execute("Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-                accepted_bio_channel = cursor.fetchone()
-                cursor.execute("Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
-                character_log_channel_id = cursor.fetchone()
-                cursor.execute(
-                    "Select Player_Name, True_Character_Name, Titles, Description, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_Value_Max, Mythweavers, Image_Link, Color, Essence, Player_ID, Oath, Article_Link FROM Player_Characters WHERE Character_Name = ?",
-                    (character_name,))
-                character_info = cursor.fetchone()
-                member = await guild.fetch_member(character_info[17])
-                role1 = guild.get_role(int(approved_character[0]))
-                await member.add_roles(role1)
-                color = character_info[15]
-                int_color = int(color[1:], 16)
-                mentions = f'<@{character_info[17]}>'
-                description_field = f" "
-                print(character_info[19])
-                if character_info[2] is not None:
-                    description_field += f"**Other Names**: {character_info[2]}\r\n"
-                if character_info[19] is not None:
-                    description_field += f"[Backstory](<{character_info[19]}>)"
-                embed = discord.Embed(title=f"{character_info[1]}", url=f'{character_info[13]}',
-                                      description=f"{description_field}", color=int_color)
-                embed.set_author(name=f'{character_info[0]}')
-                embed.set_thumbnail(url=f'{character_info[14]}')
-                embed.add_field(name="Information", value=f'**Level**: 3, **Mythic Tier**: 0, **Fame**: 0',
-                                inline=False)
-                embed.add_field(name="Experience", value=f'**Milestones**: 0, **Remaining**: 3')
-                embed.add_field(name="Mythic", value=f'**Trials**: 0, **Remaining**: 0')
-                embed.add_field(name="Current Wealth", value=f'**GP**: {character_info[10]}', inline=False)
-                embed.add_field(name="Current Essence", value=f'**Essence**: 0')
-                print(character_info[18])
-                if character_info[18] == 'Offerings':
-                    embed.set_footer(text=f'{character_info[3]}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
-                elif character_info[18] == 'Poverty':
-                    embed.set_footer(text=f'{character_info[3]}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
-                elif character_info[18] == 'Absolute':
-                    embed.set_footer(text=f'{character_info[3]}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
-                else:
-                    embed.set_footer(text=f'{character_info[3]}')
-                bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
-                bio_message = await bio_channel.send(content=mentions, embed=embed,
-                                                     allowed_mentions=discord.AllowedMentions(users=True))
-                embed = discord.Embed(title=f"{character_info[1]}", url=f'{character_info[13]}',
-                                      description=f"Other Names: {character_info[2]}", color=int_color)
-                embed.set_author(name=f'{character_info[0]}')
-                embed.set_thumbnail(url=f'{character_info[14]}')
-                character_log_channel = await bot.fetch_channel(character_log_channel_id[0])
-                character_log_message = await character_log_channel.send(content=mentions, embed=embed,
-                                                                         allowed_mentions=discord.AllowedMentions(
-                                                                             users=True))
-                thread = await character_log_message.create_thread(name=f'{character_info[1]}')
-                await Event.log_character(self, guild_id, character_name, bio_message.id, character_log_message.id,
-                                          thread.id)
-                if e is None:
-                    await interaction.followup.send(content=f"{character_name} has been accepted into the server!")
-                else:
-                    interaction.send(f"{character_name} has been accepted into the server!")
+        async with aiosqlite.connect(f"C:/pathparser/pathparser_{guild_id}.sqlite") as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.cursor()
+            _, character_name = name_fix(character_name)
+            await cursor.execute(
+                """Select Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, 
+                Oath, Tier, Trials, Trials_Required,
+                 Essence, Color, Mythweavers, Image_Link, tmp_bio
+                 FROM A_STG_Player_Characters where Character_Name = ?""",
+                (character_name,))
+            player_info = await cursor.fetchone()
+            if not player_info:
+                await interaction.followup.send(
+                    f"no character with the Name or Nickname of {character_name} could be found!",
+                    ephemeral=True)
             else:
-                if e is None:
-                    await interaction.followup.send(f"{character_name} could not be found in the database.",
+                if status.value == 2:
+                    await cursor.execute("DELETE FROM A_STG_Player_Characters WHERE Character_Name = ?",
+                                         (character_name,))
+                    await db.commit()
+                    await interaction.followup.send(f"{character_name} has been removed from the STG database.",
                                                     ephemeral=True)
                 else:
-                    interaction.send(f"{character_name} has been accepted into the server!")
+                    info_player_name = player_info['player_name']
+                    info_player_id = player_info['player_id']
+                    info_true_character_name = player_info['True_Character_Name']
+                    info_character_name = player_info['character_name']
+                    info_nickname = player_info['nickname']
+                    info_titles = player_info['titles']
+                    info_description = player_info['description']
+                    info_oath = player_info['oath']
+                    info_tier = player_info['tier']
+                    info_trials = player_info['trials']
+                    info_trials_required = player_info['trials_required']
+                    info_essence = player_info['essence']
+                    info_color = player_info['color']
+                    info_mythweavers = player_info['mythweavers']
+                    info_image_link = player_info['image_link']
+                    info_tmp_bio = player_info['tmp_bio']
+                    await cursor.execute("Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
+                    character_log_channel_id = await cursor.fetchone()
+                    await cursor.execute("SELECT search from admin where identifier = 'WA_Backstory_Category'")
+                    backstory_category = await cursor.fetchone()
+                    await cursor.execute("SELECT search from admin where identifier = 'Starting_Level'")
+                    starting_level = await cursor.fetchone()
+                    await cursor.execute(
+                        "SELECT Minimum_Milestones, Milestones_to_level, WPL FROM Milestone_System where level = ?",
+                        (starting_level[0],))
+                    starting_level_info = await cursor.fetchone()
+                    if not starting_level_info:
+                        await interaction.followup.send(
+                            f"Starting Level not found! Ask your Admin to check server settings!",
+                            ephemeral=True)
+                    else:
+                        (info_minimum_milestones, info_milestones_to_level, info_wpl) = starting_level_info
+                        gold_calculation = character_commands.gold_calculation(
+                            guild_id=guild_id,
+                            level=starting_level[0],
+                            author_name=interaction.user.name,
+                            author_id=interaction.user.id,
+                            character_name=info_character_name,
+                            oath=info_oath,
+                            gold=Decimal(0),
+                            gold_value=Decimal(0),
+                            gold_value_max=Decimal(0),
+                            gold_change=Decimal(3000),
+                            gold_value_change=Decimal(0),
+                            gold_value_max_change=Decimal(0),
+                            reason="Character Registration",
+                            source="Character Registration")
+                    if isinstance(gold_calculation, tuple):
+                        (gold_difference, gold_total, gold_value_total, gold_value_max_total,
+                         transaction_id) = gold_calculation
+                    await cursor.execute(
+                        """INSERT INTO Player_Characters (Player_Name, Player_ID, True_Character_Name, Character_Name, 
+                        Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, 
+                        Gold, Gold_Value, Gold_value_Max, Essence, Color, Mythweavers, Image_Link, Fame) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (info_player_name, info_player_id, info_true_character_name, info_character_name,
+                         info_nickname, info_titles, info_description, info_oath, starting_level[0], info_tier,
+                         info_minimum_milestones, info_milestones_to_level, info_trials, info_trials_required,
+                         gold_total, gold_value_total, gold_value_max_total, info_essence, info_color, info_mythweavers,
+                         info_image_link, 0))
+                    await db.commit()
+                    await cursor.execute("DELETE FROM A_STG_Player_Characters WHERE Character_Name = ?",
+                                         (character_name,))
+                    await db.commit()
 
-    @registration_group.command()
-    @app_commands.autocomplete(character_name=character_select_autocompletion)
+                    character_embed_info = await register_character_embed(character_name, guild)
+                    embed = discord.Embed(title=f"{info_character_name}", url=f'{info_mythweavers}',
+                                          description=f"Other Names: {info_titles}", color=int(info_color[1:], 16))
+                    embed.set_author(name=f'{info_player_name}')
+                    embed.set_thumbnail(url=f'{info_image_link}')
+                    character_log_channel = await interaction.guild.get_channel(character_log_channel_id[0])
+                    if not character_log_channel:
+                        character_log_channel = await self.bot.fetch_channel(character_log_channel_id[0])
+                    character_log_message = await character_log_channel.send(content=f'<@{info_player_id}>',
+                                                                             embed=embed,
+                                                                             allowed_mentions=discord.AllowedMentions(
+                                                                                 users=True))
+                    thread = await character_log_message.create_thread(name=f'{info_true_character_name}')
+                    article = await shared_functions.put_wa_article(guild_id=interaction.guild.id, template='Person',
+                                                                    title=info_true_character_name,
+                                                                    category=backstory_category[0],
+                                                                    overview=info_tmp_bio)
+                    await cursor.execute(
+                        "UPDATE Player_Characters SET Article_Link = ?, Article_ID = ?, Message_ID = ?, Logging_ID, Thread_ID = ? WHERE Character_Name = ?",
+                        (
+                            article['url'], article['id'], character_embed_info[3], character_log_message.id, thread.id,
+                            info_character_name))
+                    await db.commit()
+                    await interaction.followup.send(f"{character_name} has been moved to the accepted bios.",
+                                                    ephemeral=True)
+
+    customize_group = discord.app_commands.Group(
+        name='customize',
+        description='Commands related to costumizing a character.',
+        parent=reviewer_group
+    )
+
+    customize_group.command()
+
+    @app_commands.autocomplete(character_name=shared_functions.character_select_autocompletion)
     @app_commands.describe(
         destination="Shorthand for determining whether you are looking for a character name or nickname")
-    @app_commands.choices(destination=[discord.app_commands.Choice(name='Tradition', value=1),
-                                       discord.app_commands.Choice(name='Template', value=2)])
     @app_commands.describe(customized_name="For the name of the template or tradition")
-    async def customize(interaction: discord.Interaction, character_name: str,
-                        destination: discord.app_commands.Choice[int],
-                        customized_name: str, link: str, essence_cost: int = 0):
-        "Administrative: set a character's template or tradition!"
+    async def apply_tradition(self, interaction: discord.Interaction, character_name: str,
+                              tradition_name: str, link: str, essence_cost: int):
+        """Administrative: set a character's tradition!"""
         character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
         guild_id = interaction.guild_id
         guild = interaction.guild
-        if destination == 1:
-            destination = 1
-        else:
-            destination = destination.value
-        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-        cursor = db.cursor()
-        author = interaction.user.name
-        cursor.execute(
-            "Select Player_Name, Player_ID, True_Character_Name, Character_Name, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value, Gold_value_Max, Essence, Color, Mythweavers, Image_Link, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Message_ID, Logging_ID, Thread_ID, Fame, Title, Personal_Cap, Prestige, Article_Link FROM Player_Characters where Character_Name = ?",
-            (character_name,))
-        player_info = cursor.fetchone()
+        shared_functions.extract_document_id(link)
+        if not shared_functions:
+            await interaction.followup.send("Invalid link provided!", ephemeral=True)
+            return
 
-        if player_info is None:
-            await interaction.followup.send(
-                f"no character with the Name or Nickname of {character_name} could be found!",
-                ephemeral=True)
-        else:
-            destination_name = 'Tradition_Name' if destination == 1 else 'Template_Name'
-            destination_link = 'Tradition_Link' if destination == 1 else 'Template_Link'
-            destination_name_pretty = 'Tradition Name' if destination == 1 else 'Template Name'
-            tradition_name = customized_name if destination == 1 else None
-            tradition_link = link if destination == 1 else None
-            template_name = customized_name if destination == 2 else None
-            template_link = link if destination == 2 else None
-            essence_remaining = player_info[16] - essence_cost
-            await Event.customize_characters(self, guild_id, author, player_info[3], destination_name, destination_link,
-                                             customized_name, link, essence_remaining, essence_cost)
-            embed = discord.Embed(title=f"{destination_name_pretty} change for {player_info[3]}",
-                                  description=f"<@{player_info[1]}>'s {player_info[3]} has spent {essence_cost} essence leaving them with {player_info[16] - essence_cost} essence!",
-                                  colour=discord.Colour.blurple())
-            embed.add_field(name=f'**{destination_name_pretty} Information:**', value=f'[{customized_name}](<{link}>)',
-                            inline=False)
-            cursor.execute("Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-            accepted_bio_channel = cursor.fetchone()
-            cursor.execute("Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
-            character_log_channel_id = cursor.fetchone()
-            cursor.close()
-            db.close()
-            bio_embed = character_embed(player_info[0], player_info[1], player_info[2], player_info[4], player_info[5],
-                                        player_info[6], player_info[7], player_info[8], player_info[9], player_info[10],
-                                        player_info[11], player_info[12], player_info[13], player_info[14],
-                                        player_info[16] + essence_cost, player_info[17], player_info[18],
-                                        player_info[19],
-                                        player_info[20], player_info[21], player_info[22], player_info[23],
-                                        player_info[27],
-                                        player_info[28], player_info[30], player_info[31])
-            bio_channel = await bot.fetch_channel(accepted_bio_channel[0])
-            bio_message = await bio_channel.fetch_message(player_info[24])
-            await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
-            source = f"changed a template or tradition for {character_name}"
-            logging_embed = log_embed(player_info[2], author, None, None, None, None, None, None, None, None, None,
-                                      None,
-                                      None, None, player_info[16] - essence_cost, essence_cost, tradition_name,
-                                      tradition_link,
-                                      template_name, template_link, None, None, None, None, None, source)
-            logging_thread = guild.get_thread(player_info[25])
-            await logging_thread.send(embed=logging_embed)
-            await interaction.followup.send(embed=embed, allowed_mentions=discord.AllowedMentions(users=True))
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            author = interaction.user.name
+            await cursor.execute(
+                "Select Character_Name, Essence, Thread_ID, FROM Player_Characters where Character_Name = ?",
+                (character_name,))
+            player_info = await cursor.fetchone()
+
+            if player_info is None:
+                await interaction.followup.send(
+                    f"no character with the Name of {character_name} could be found!",
+                    ephemeral=True)
+            else:
+                (character_name, essence, logging_thread) = player_info
+                essence_calculation = character_commands.calculate_essence(
+                    character_name=character_name,
+                    essence=essence,
+                    essence_change=-abs(essence_cost),
+                    accepted_date=None
+                )  # Calculate the new essence
+                if isinstance(essence_calculation, tuple):
+                    (essence_total, essence_change) = essence_calculation
+                    character_updates = shared_functions.UpdateCharacterData(
+                        character_name=character_name,
+                        essence=essence_total)
+                    await cursor.execute(
+                        "UPDATE Player_Characters SET Essence = ?, Tradition_Name, Tradition_Link WHERE Character_Name = ?",
+                        (essence_total, tradition_name, link, character_name))
+                    await db.commit()
+                    log_character = shared_functions.CharacterChange(
+                        character_name=character_name,
+                        author=author,
+                        essence_change=essence_change,
+                        tradition_name=tradition_name,
+                        tradition_link=link,
+                        source="Apply Tradition"
+                    )
+                    log_embed = shared_functions.log_embed(
+                        change=log_character,
+                        guild=guild,
+                        thread=logging_thread,
+                        bot=self.bot
+                    )
+                    await shared_functions.character_embed(character_name=character_name, guild=guild)
+                    await interaction.followup.send(embed=log_embed)
+                else:
+                    await interaction.followup.send(essence_calculation, ephemeral=True)
+                    return
+
+    @app_commands.autocomplete(character_name=shared_functions.character_select_autocompletion)
+    @app_commands.describe(
+        destination="Shorthand for determining whether you are looking for a character name or nickname")
+    @app_commands.describe(customized_name="For the name of the template or tradition")
+    async def apply_template(self, interaction: discord.Interaction, character_name: str,
+                             template_name: str, link: str, essence_cost: int):
+        """Administrative: set a character's tradition!"""
+        character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
+        guild_id = interaction.guild_id
+        guild = interaction.guild
+        shared_functions.extract_document_id(link)
+        if not shared_functions:
+            await interaction.followup.send("Invalid link provided!", ephemeral=True)
+            return
+
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            author = interaction.user.name
+            await cursor.execute(
+                "Select Character_Name, Essence, Thread_ID, FROM Player_Characters where Character_Name = ?",
+                (character_name,))
+            player_info = await cursor.fetchone()
+
+            if player_info is None:
+                await interaction.followup.send(
+                    f"no character with the Name of {character_name} could be found!",
+                    ephemeral=True)
+            else:
+                (character_name, essence, logging_thread) = player_info
+                essence_calculation = character_commands.calculate_essence(
+                    character_name=character_name,
+                    essence=essence,
+                    essence_change=-abs(essence_cost),
+                    accepted_date=None
+                )  # Calculate the new essence
+                if isinstance(essence_calculation, tuple):
+                    (essence_total, essence_change) = essence_calculation
+                    character_updates = shared_functions.UpdateCharacterData(
+                        character_name=character_name,
+                        essence=essence_total)
+                    await cursor.execute(
+                        "UPDATE Player_Characters SET Essence = ?, template_name, template_Link WHERE Character_Name = ?",
+                        (essence_total, template_name, link, character_name))
+                    await db.commit()
+                    log_character = shared_functions.CharacterChange(
+                        character_name=character_name,
+                        author=author,
+                        essence_change=essence_change,
+                        template_name=template_name,
+                        template_link=link,
+                        source="Apply Tradition"
+                    )
+                    log_embed = shared_functions.log_embed(
+                        change=log_character,
+                        guild=guild,
+                        thread=logging_thread,
+                        bot=self.bot
+                    )
+                    await shared_functions.character_embed(character_name=character_name, guild=guild)
+                    await interaction.followup.send(embed=log_embed)
+                else:
+                    await interaction.followup.send(essence_calculation, ephemeral=True)
+                    return
+
+
+class CleanOldRegistrationView(shared_functions.SelfAcknowledgementView):
+    def __init__(self, guild_id: int, days: int):
+        super().__init__()
+        self.embed = None
+        self.guild_id = guild_id
+        self.days = days
+        self.remove_character = []
+
+    async def accepted(self, interaction: discord.Interaction):
+        """Handle the approval logic."""
+
+        self.embed = discord.Embed(
+            title="Cleanse of dated characters Successful",
+            description=f"{interaction.user.name} has cleaned house.",
+            color=discord.Color.green()
+        )
+        async with aiosqlite.connect(f"C:/pathparser/pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            for player in self.remove_character:
+                await cursor.execute("DELETE FROM A_STG_Player_Characters WHERE True_Character_Name = ?", (player,))
+                await db.commit()
+
+        # Additional logic such as notifying the requester
+
+    async def rejected(self, interaction: discord.Interaction):
+        """Handle the rejection logic."""
+        # Update the database to mark the proposition as rejected
+        await self.update_proposition_status(is_allowed=-1)
+        self.embed = discord.Embed(
+            title="Database Reset Rejected",
+            description=f"{interaction.user.name} has decided to keep me around. :)",
+            color=discord.Color.red()
+        )
+        # Additional logic such as notifying the requester
+
+    async def create_embed(self):
+        """Create the initial embed for the cleanse."""
+        async with aiosqlite.connect(f"C:/pathparser/pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute(
+                "SELECT Player_Name, True_Character_Name, Created_Date FROM A_STG_Player_Characters where Created_Date <= date('now', '-? days')",
+                (self.days,))
+            players = await cursor.fetchall()
+            for player in players:
+                self.embed.add_field(name=player[0], value=f"{player[1]} Registered on {player[2]}", inline=False)
+                self.remove_character.append(player[1])
 
 
 logging.basicConfig(

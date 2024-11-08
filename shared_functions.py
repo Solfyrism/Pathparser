@@ -977,25 +977,60 @@ def extract_document_id(url: str) -> Optional[str]:
         return None
 
 
-def validate_mythweavers(url: str) -> Tuple[bool, str]:
+def validate_mythweavers(url: str) -> Tuple[bool, str, int]:
     try:
         parsed_url = urlparse(url)
         if parsed_url.scheme != 'https':
-            return False, "URL must start with 'https://'"
+            return False, "URL must start with 'https://'", 0
         if parsed_url.netloc != 'www.myth-weavers.com':
-            return False, "URL must be from 'www.myth-weavers.com'"
+            return False, "URL must be from 'www.myth-weavers.com'", 1
         if parsed_url.path != '/sheet.html':
-            return False, "URL path must be '/sheet.html'"
+            return False, "URL path must be '/sheet.html'", 2
         query_params = parse_qs(parsed_url.query)
         fragment_params = parse_qs(parsed_url.fragment)
         id_param = query_params.get('id') or fragment_params.get('id')
         if not id_param or not id_param[0].isdigit():
-            return False, "URL must contain a valid 'id' parameter"
-        return True, ""
+            return False, "URL must contain a valid 'id' parameter", 3
+        return True, "", -1
     except Exception as e:
         logging.error(f"Error validating Myth-Weavers link '{url}': {e}")
-        return False, "An error occurred during validation"
+        return False, "An error occurred during validation", -1
 
+
+def validate_worldanvil(url: str) -> Tuple[bool, str, int]:
+    """
+    Validates a World Anvil character sheet URL.
+
+    Args:
+        url (str): The URL to validate.
+
+    Returns:
+        Tuple[bool, str, int]: A tuple containing a boolean indicating validity, an error message if invalid, and a step indicator.
+    """
+    try:
+        parsed_url = urlparse(url)
+
+        # Check the URL scheme
+        if parsed_url.scheme != 'https':
+            return False, "URL must start with 'https://'.", 0
+
+        # Check the netloc (domain)
+        if parsed_url.netloc not in ('www.worldanvil.com', 'worldanvil.com'):
+            return False, "URL must be from 'www.worldanvil.com' or 'worldanvil.com'.", 1
+
+        # Check that the path starts with '/hero/'
+        if not parsed_url.path.startswith('/hero/'):
+            return False, "URL path must start with '/hero/'.", 2
+
+        # Extract the character ID from the path
+        path_parts = parsed_url.path.strip('/').split('/')
+        if len(path_parts) < 2 or path_parts[0] != 'hero' or not path_parts[1].isdigit():
+            return False, "URL must contain a valid character ID after '/hero/'.", 3
+
+        return True, "", -1  # Success case includes step indicator -1
+    except Exception as e:
+        logging.error(f"Error validating World Anvil link '{url}': {e}")
+        return False, "An error occurred during validation.", -1  # Exception case uses step indicator -1
 
 def ordinal(n):
     if 11 <= (n % 100) <= 13:

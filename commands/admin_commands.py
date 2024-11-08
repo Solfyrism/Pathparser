@@ -337,6 +337,7 @@ async def session_reward_calculation(interaction: discord.Interaction, session_i
                     awarded_total_milestones = None
                 if isinstance(return_mythic, tuple):
                     (new_tier, total_trials, trials_required, trial_change) = return_mythic
+                    new_tier = 1 if new_tier == 0 else new_tier
                     character_updates.trial_package = (new_tier, total_trials, trials_required)
                     character_changes.tier = new_tier
                     character_changes.trials = total_trials
@@ -577,7 +578,67 @@ class AdminCommands(commands.Cog, name='admin'):
                             character_name=character_name,
                             guild=guild)
                         await interaction.followup.send(embed=character_log,
-                                                        content=f"Essence changes for {character_name} have been made.")
+                                                        content=f"Essence changes for {character_name} have been made: {essence_change}.")
+            except (aiosqlite.Error, TypeError, ValueError, character_commands.CalculationAidFunctionError) as e:
+                logging.exception(
+                    f"an error occurred for {interaction.user.name} whilst adjusting essence for {character_name}': {e}")
+                await interaction.followup.send(
+                    f"An error occurred whilst adjusting essence for '{character_name}' Error: {e}.", ephemeral=True)
+
+    @character_group.command(name="fame",
+                             description="commands for adding or removing fame from a character")
+    @app_commands.autocomplete(character_name=shared_functions.character_select_autocompletion)
+    async def fame(self, interaction: discord.Interaction, character_name: str, fame: int, prestige: int):
+        """Adjust the essence a PC has"""
+        _, unidecode_name = name_fix(character_name)
+        guild_id = interaction.guild_id
+        guild = interaction.guild
+        await interaction.response.defer(thinking=True)
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            try:
+                await cursor.execute(
+                    "Select True_Character_Name, Character_Name, Fame, Prestige, Thread_ID FROM Player_Characters where Character_Name = ? OR Nickname = ?",
+                    (unidecode_name, unidecode_name))
+                player_info = await cursor.fetchone()
+                if fame == 0 and prestige == 0:
+                    await interaction.followup.send(f"No changes to fame or prestige required.")
+                else:
+                    if not player_info:
+                        await interaction.followup.send(
+                            f"there is no {character_name} registered.")
+                    else:
+                        (info_true_character_name, info_character_name, info_fame, info_prestige,
+                         info_thread_id) = player_info
+                        fame_adjustment = character_commands.calculate_fame(
+                            character_name=character_name,
+                            fame=info_fame,
+                            fame_change=fame,
+                            prestige=info_prestige,
+                            prestige_change=prestige
+                        )
+                        (Fame, fame_change, prestige, prestige_change) = essence_adjustment
+                        character_updates = shared_functions.UpdateCharacterData(
+                            character_name=character_name,
+                            fame_package=(Fame, prestige))
+                        await shared_functions.update_character(
+                            guild_id=guild.id,
+                            change=character_updates)
+                        character_changes = shared_functions.CharacterChange(
+                            character_name=character_name,
+                            author=interaction.user.name,
+                            fame=fame_change,
+                            total_fame=fame,
+                            prestige=prestige_change,
+                            total_prestige=prestige,
+                            source=f"admin adjusted fame by {fame_change} and prestige by {prestige_change} for {character_name}")
+                        character_log = await shared_functions.log_embed(change=character_changes, guild=guild,
+                                                                         thread=thread_id, bot=self.bot)
+                        await shared_functions.character_embed(
+                            character_name=character_name,
+                            guild=guild)
+                        await interaction.followup.send(embed=character_log,
+                                                        content=f"Fame changes for {character_name} have been made fame has been changed by {fame_change} and prestige by {prestige_change}.")
             except (aiosqlite.Error, TypeError, ValueError, character_commands.CalculationAidFunctionError) as e:
                 logging.exception(
                     f"an error occurred for {interaction.user.name} whilst adjusting essence for {character_name}': {e}")
@@ -1030,12 +1091,16 @@ class AdminCommands(commands.Cog, name='admin'):
                             if not channel:
                                 await interaction.followup.send("Error: Could not find the requested channel.")
                                 return
-                        elif information[2] == 'level':
-                            await cursor.execute("SELECT Max(Level) from Milestone_System")
+                        elif information[1] == 'Level':
+                            await cursor.execute("SELECT Max(Level), Min(Level) from Milestone_System")
                             max_level = await cursor.fetchone()
                             if int(revision) > max_level[0]:
                                 await interaction.followup.send(
                                     f"Your server does not have a milestone system for above level {max_level[0]}")
+                                return
+                            elif int(revision) < max_level[1]:
+                                await interaction.followup.send(
+                                    f"Your server does not have a milestone system for below level {max_level[1]}")
                                 return
                         elif information[2] == 'Tier':
                             await cursor.execute("SELECT Max(Tier) from AA_Trials")
@@ -1091,7 +1156,7 @@ class AdminCommands(commands.Cog, name='admin'):
     @app_commands.choices(
         modify=[discord.app_commands.Choice(name='Add/Edit', value=1),
                 discord.app_commands.Choice(name='Remove', value=2)])
-    async def Store_Fame(self, interaction: discord.Interaction, name: str, fame_required: typing.Optional[int],
+    async def store_fame(self, interaction: discord.Interaction, name: str, fame_required: typing.Optional[int],
                          prestige_cost: typing.Optional[int], effect: typing.Optional[str], limit: typing.Optional[int],
                          modify: discord.app_commands.Choice[int]):
         """Add, edit, or remove items from the fame store."""
@@ -1238,8 +1303,8 @@ class AdminCommands(commands.Cog, name='admin'):
         parent=admin_group
     )
 
-    @level_group.command(name="adjust_milestones",
-                         description="commands for adding or removing milestones from a character")
+    @character_group.command(name="milestones",
+                             description="commands for adding or removing milestones from a character")
     @app_commands.autocomplete(character_name=shared_functions.character_select_autocompletion)
     @app_commands.describe(job='What kind of job you are adding')
     @app_commands.choices(
@@ -1465,6 +1530,17 @@ class AdminCommands(commands.Cog, name='admin'):
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
             cursor = await conn.cursor()
             try:
+                await cursor.execute("SELECT MIN(LEVEL), MAX(LEVEL) from Milestone_System")
+                level_minmax = await cursor.fetchone()
+                if level < level_minmax[0] - 1:
+                    await interaction.followup.send(
+                        f"Your minimum server level was {level_minmax[0]} You cannot add levels which break the sequence!")
+                    return
+                elif level > level_minmax[1] + 1:
+                    await interaction.followup.send(
+                        f"Your maximum server level was {level_minmax[1]}! You cannot add numbers which break the sequence!")
+                    return
+
                 await cursor.execute(
                     "SELECT level, minimum_milestones, wpl, wpl_heroic FROM Milestone_System WHERE Level = ?",
                     (level - 1,))
@@ -1488,6 +1564,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     await cursor.execute("UPDATE Milestone_System SET milestones_required = ? WHERE Level = ?",
                                          (lower_milestones_required, lower_level_info[0]))
                     await conn.commit()
+
                 if higher_level_info:
                     (higher_level, higher_milestones) = higher_level_info
                     if minimum_milestones > higher_milestones:
@@ -1500,6 +1577,15 @@ class AdminCommands(commands.Cog, name='admin'):
                 if center_level_info:
                     if minimum_milestones == -1:
                         await cursor.execute("DELETE FROM Milestone_System WHERE Level = ?", (level,))
+                        await conn.commit()
+                        if level > 0:
+                            await cursor.execute("UPDATE Milestones_System SET level = level - 1 where level > ?",
+                                                 (level,))
+                        else:
+                            await cursor.execute("UPDATE Milestones_System SET level = level + 1 where level < ?",
+                                                 (level,))
+                        await conn.commit()
+
                         await interaction.followup.send(f"Level of {level} removed from milestone system.")
                     else:
                         await cursor.execute("UPDATE Milestone_System SET milestones_required = ? WHERE Level = ?",
@@ -1719,8 +1805,8 @@ class AdminCommands(commands.Cog, name='admin'):
         parent=admin_group
     )
 
-    @mythic_group.command(name="adjust",
-                          description="commands for adding or removing mythic trials from a character")
+    @character_group.command(name="trials",
+                             description="commands for adding or removing mythic trials from a character")
     @app_commands.autocomplete(character_name=shared_functions.character_select_autocompletion)
     async def trial_adjustment(self, interaction: discord.Interaction, character_name: str, amount: int):
         """Adjust the number of Mythic Trials a character possesses"""
@@ -1783,10 +1869,10 @@ class AdminCommands(commands.Cog, name='admin'):
                 tier_minmax = await cursor.fetchone()
                 if new_tier < tier_minmax[0]:
                     await interaction.followup.send(
-                        f"Your server does not have a milestone system for below tier {tier_minmax[0]}")
+                        f"Your server does not have a trial system for below tier {tier_minmax[0]}")
                 elif new_tier > tier_minmax[1]:
                     await interaction.followup.send(
-                        f"Your server does not have a milestone system for above tier {tier_minmax[1]}")
+                        f"Your server does not have a trial system for above tier {tier_minmax[1]}")
                 else:
                     await cursor.execute("Select Trials FROM AA_Trials where Tier = ?", (tier_minmax,))
                     new_tier_info = await cursor.fetchone()
@@ -1869,6 +1955,16 @@ class AdminCommands(commands.Cog, name='admin'):
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
             cursor = await conn.cursor()
             try:
+                await cursor.execute("SELECT MIN(Tier), MAX(Tier) from AA_Trials")
+                tier_minmax = await cursor.fetchone()
+                if tier < tier_minmax[0] - 1:
+                    await interaction.followup.send(
+                        f"Your server does not have a trial system for below tier {tier_minmax[0]}")
+                    return
+                elif tier > tier_minmax[1] + 1:
+                    await interaction.followup.send(
+                        f"Your server does not have a trial system for above tier {tier_minmax[1]}")
+                    return
                 await cursor.execute("SELECT Trials FROM AA_Trials WHERE Tier = ?", (tier - 1,))
                 low_tier_info = await cursor.fetchone()
                 await cursor.execute("SELECT Trials FROM AA_Trials WHERE Tier = ?", (tier,))
@@ -1934,6 +2030,12 @@ class AdminCommands(commands.Cog, name='admin'):
                 if center_tier_info:
                     if trials == -1:
                         await cursor.execute("DELETE FROM AA_Trials WHERE Tier = ?", (tier,))
+                        await conn.commit()
+                        if tier > 0:
+                            await cursor.execute("UPDATE AA_Trials SET Tier = Tier - 1 where Tier > ?", (tier,))
+                        else:
+                            await cursor.execute("UPDATE AA_Trials SET Tier = Tier + 1 where Tier < ?",
+                                                 (tier,))
                         await interaction.followup.send(f"Tier of {tier} removed from trial system.")
                     else:
                         await cursor.execute("UPDATE AA_Trials SET Trials = ?, Trials_Required = ? WHERE Tier = ?",
@@ -2072,6 +2174,7 @@ class AdminCommands(commands.Cog, name='admin'):
         confirmation=[discord.app_commands.Choice(name='No!', value=1),
                       discord.app_commands.Choice(name='Yes!', value=2)])
     async def archive_inactive(self, interaction: discord.Interaction, player_name: typing.Optional[str],
+                               character_name: typing.Optional[str],
                                confirmation: discord.app_commands.Choice[int]):
         """Archive inactive players."""
         guild_id = interaction.guild_id
@@ -2087,16 +2190,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     )
                     return
                 else:
-                    if player_name and not character_name:
-                        await cursor.execute(
-                            "SELECT player_id, player_name, character_name FROM Player_Characters WHERE Player_Name = ?",
-                            (player_name,))
-                        player_info = await cursor.fetchone()
-                        retirement_type = 1
-                        if not player_info:
-                            await interaction.followup.send("No player found with that name to archive.")
-                            return
-                    elif character_name:
+                    if character_name:
                         await cursor.execute(
                             "SELECT player_id, player_name, character_name FROM Player_Characters WHERE Character_Name = ?",
                             (character_name,))
@@ -2105,12 +2199,26 @@ class AdminCommands(commands.Cog, name='admin'):
                         if not player_info:
                             await interaction.followup.send("No character found with that name to archive.")
                             return
+
+                    elif player_name:
+                        await cursor.execute(
+                            "SELECT player_id, player_name, character_name FROM Player_Characters WHERE Player_Name = ?",
+                            (player_name,))
+                        player_info = await cursor.fetchone()
+                        retirement_type = 1
+                        if not player_info:
+                            await interaction.followup.send("No player found with that name to archive.")
+                            return
                     else:
                         retirement_type = 3
                     await cursor.execute("SELECT Search From Admin WHERE Identifier = 'Accepted_Bio_Channel'")
                     bio_channel = await cursor.fetchone()
                     accepted_bio_channel = bio_channel[0]
-                    view = ArchiveCharactersView(retirement_view=retirement_view, player_name=player_name,
+                    if not accepted_bio_channel:
+                        await interaction.followup.send(
+                            "No accepted bio channel found. Please set an accepted bio channel to continue.")
+                        return
+                    view = ArchiveCharactersView(retirement_type=retirement_type, player_name=player_name,
                                                  character_name=character_name, guild=guild,
                                                  accepted_bio_channel=accepted_bio_channel)
                     await view.create_embed()
@@ -2432,11 +2540,11 @@ class ResetDatabaseView(shared_functions.SelfAcknowledgementView):
 
 
 class ArchiveCharactersView(shared_functions.SelfAcknowledgementView):
-    def __init__(self, retirement_view, player_name: typing.Optional[str], character_name: typing.Optional[str],
+    def __init__(self, retirement_type, player_name: typing.Optional[str], character_name: typing.Optional[str],
                  guild: discord.Guild, accepted_bio_channel: int):
         super().__init__()
         self.embed = None
-        self.retirement_view = retirement_view
+        self.retirement_type = retirement_type
         self.player_name = player_name
         self.character_name = character_name
         self.guild = guild
@@ -2467,10 +2575,13 @@ class ArchiveCharactersView(shared_functions.SelfAcknowledgementView):
             bio_channel = self.guild.get_channel(self.accepted_bio_channel)
             if not bio_channel:
                 bio_channel = await self.guild.fetch_channel(self.accepted_bio_channel)
-
             for item in self.items_to_be_deleted:
-                message = await bio_channel.fetch_message(item)
+                message = await bio_channel.fetch_message(item[0])
                 await message.delete()
+                logging_thread = self.guild.get_channel(item[1])
+                if not logging_thread:
+                    logging_thread = await self.guild.fetch_channel(item[1])
+                await logging_thread.send("Character has been archived.")
         # Additional logic such as notifying the requester
 
     async def rejected(self, interaction: discord.Interaction):
@@ -2494,22 +2605,22 @@ class ArchiveCharactersView(shared_functions.SelfAcknowledgementView):
         async with aiosqlite.connect(f"Pathparser_{self.guild.id}.sqlite") as conn:
             cursor = await conn.cursor()
             try:
-                if self.retirement_view == 1:
+                if self.retirement_type == 1:
                     await cursor.execute(
-                        "SELECT True_Character_Name, Message_ID  FROM Player_Characters WHERE Player_Name = ?",
+                        "SELECT True_Character_Name, Message_ID, Thread_ID  FROM Player_Characters WHERE Player_Name = ?",
                         (self.player_name,))
                     results = await cursor.fetchall()
                     for result in results:
                         self.items_to_be_archived.append(result[0])
-                        self.items_to_be_deleted.append(result[1])
+                        self.items_to_be_deleted.append((result[1], result[2]))
                         self.embed.add_field(name=f'{result[0]}', value=f'**Player**: {self.player_name}')
-                elif self.retirement_view == 2:
+                elif self.retirement_type == 2:
                     await cursor.execute(
-                        "SELECT True_Character_Name, Message_ID  FROM Player_Characters WHERE Character_Name = ?",
+                        "SELECT True_Character_Name, Message_ID, Thread_ID  FROM Player_Characters WHERE Character_Name = ?",
                         (self.character_name,))
                     results = await cursor.fetchone()
                     self.items_to_be_archived.append(results[0])
-                    self.items_to_be_deleted.append(results[1])
+                    self.items_to_be_deleted.append((results[1], results[2]))
                     self.embed.add_field(name=f'{results[0]}', value=f'**Player**: {self.player_name}')
                 else:
                     await cursor.execute("SELECT DISTINCT(Player_ID)  FROM Player_Characters")
@@ -2519,17 +2630,17 @@ class ArchiveCharactersView(shared_functions.SelfAcknowledgementView):
                         if not find_player:
                             character_list = ''
                             await cursor.execute(
-                                "SELECT True_Character_Name, Message_ID  FROM Player_Characters WHERE Player_ID = ?",
+                                "SELECT True_Character_Name, Message_ID, Thread_ID  FROM Player_Characters WHERE Player_ID = ?",
                                 (player_id[0],))
                             results = await cursor.fetchall()
                             for result in results:
                                 self.items_to_be_archived.append(result[0])
-                                self.items_to_be_deleted.append(result[1])
+                                self.items_to_be_deleted.append((result[1], result[2]))
                                 character_list += f'{result[0]}\r\n'
                             self.embed.add_field(name=f'**Player**: {find_player.name}', value=character_list)
-            except (aiosqlite.Error, TypeError, ValueError) as e:
+            except (aiosqlite.Error, TypeError, ValueError, NameError) as e:
                 logging.exception(
-                    f"An error occurred whilst archiving characters! ViewType: {self.retirement_view} input values of player_name: {self.player_name}, character_name: {self.character_name}': {e}"
+                    f"An error occurred whilst archiving characters! ViewType: {self.retirement_type} input values of player_name: {self.player_name}, character_name: {self.character_name}': {e}"
                 )
                 self.embed = discord.Embed(title='Error', description=
                 f"An error occurred whilst archiving characters. Please try again later.",

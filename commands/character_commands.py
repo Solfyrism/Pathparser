@@ -255,6 +255,7 @@ async def mythic_calculation(
         character_name: str,
         level: int, trials: int,
         trial_change: int,
+        tier: int,
         guild_id: int) -> Tuple[int, int, int, int]:
     try:
         logging.info(
@@ -314,19 +315,19 @@ async def mythic_calculation(
             new_mythic_information = await cursor.fetchone()
 
             if new_mythic_information:
-                tier, trials_minimum, trials_required = new_mythic_information
+                new_tier, trials_minimum, trials_required = new_mythic_information
                 trials_needed_for_next_tier = trials_minimum + trials_required
                 trials_remaining = trials_needed_for_next_tier - trial_total
             else:
                 logging.warning(f"No mythic information found for trial_total={trial_total}, tier_max={tier_max}")
-                tier = 0
+                new_tier = 0
                 trials_remaining = 0
 
             # Ensure trials_remaining is not negative
             trials_remaining = max(trials_remaining, 0)
-
+            new_tier = 0 if tier == 0 and trial_change == 0 else new_tier
             # Return mythic tier, total trials, trials remaining, and trial change
-            return tier, trial_total, trials_remaining, trial_change
+            return new_tier, trial_total, trials_remaining, trial_change
 
     except (aiosqlite.Error, TypeError, ValueError, ZeroDivisionError) as e:
         logging.exception(f"Error in mythic calculation for {character_name}: {e}")
@@ -619,10 +620,18 @@ class CharacterCommands(commands.Cog, name='character'):
                 if description is not None:
                     description = str.replace(description, ";", "")
                 if mythweavers is not None:
-                    mythweavers = str.replace(str.replace(str.lower(mythweavers), ";", ""), ")", "")
-                    mythweavers_valid = str.lower(mythweavers[0:5])
-                    if mythweavers_valid != 'https':
-                        await interaction.response.send_message(f"Mythweavers link is missing HTTPS:", ephemeral=True)
+                    validate_mythweavers = shared_functions.validate_mythweavers(mythweavers)
+                    validate_worldanvil = shared_functions.validate_worldanvil(mythweavers)
+                    if not validate_mythweavers[0] and not validate_worldanvil[0]:
+                        # Handle exceptions and compare step indicators
+                        if validate_mythweavers[2] == -1 and validate_worldanvil[2] != -1:
+                            await interaction.followup.send(validate_worldanvil[1])
+                        elif validate_worldanvil[2] == -1 and validate_mythweavers[2] != -1:
+                            await interaction.followup.send(validate_mythweavers[1])
+                        elif validate_mythweavers[2] >= validate_worldanvil[2]:
+                            await interaction.followup.send(validate_mythweavers[1])
+                        else:
+                            await interaction.followup.send(validate_worldanvil[1])
                         return
                 else:
                     await interaction.response.send_message(f"Mythweavers link is required", ephemeral=True)
@@ -649,10 +658,17 @@ class CharacterCommands(commands.Cog, name='character'):
                     results2 = cursor.fetchone()
                     if results is None and results2 is None:
                         try:
+                            await cursor.execute("SELECT search from admin where identifier = 'Starting_Level'")
+                            starting_level = await cursor.fetchone()
+                            await cursor.execute(
+                                "SELECT Minimum_Milestones, Milestones_to_level, WPL FROM Milestone_System where level = ?",
+                                (starting_level[0],))
+                            starting_level_info = await cursor.fetchone()
+                            (base, milestones_to_level, wpl) = starting_level_info
                             sql = "insert into A_STG_Player_Characters (Player_Name, Player_ID, Character_Name, True_Character_Name, Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Essence, Color, Mythweavers, Image_Link, Backstory, Date_Created) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
                             val = (
                                 author, author_id, character_name, true_character_name, nickname, titles, description,
-                                oath_name, 3, 0, 0, 3, 0, 0, 0, color, mythweavers, image_link, backstory, time)
+                                oath_name, starting_level[0], 0, base, milestones_to_level, 0, 0, 0, color, mythweavers, image_link, backstory, time)
                             await cursor.execute(sql, val)
                             await conn.commit()
                             embed = await stg_character_embed(cursor, character_name)
@@ -737,13 +753,19 @@ class CharacterCommands(commands.Cog, name='character'):
                         else:
                             description = results[3]
                         if mythweavers is not None:
-                            mythweavers = str.replace(str.replace(str.lower(mythweavers), ";", ""), ")", "")
-                            mythweavers_valid = str.lower(mythweavers[0:5])
-                            if mythweavers_valid != 'https':
-                                await interaction.response.send_message(f"Mythweavers link is missing HTTPS:")
+                            validate_mythweavers = shared_functions.validate_mythweavers(mythweavers)
+                            validate_worldanvil = shared_functions.validate_worldanvil(mythweavers)
+                            if not validate_mythweavers[0] and not validate_worldanvil[0]:
+                                # Handle exceptions and compare step indicators
+                                if validate_mythweavers[2] == -1 and validate_worldanvil[2] != -1:
+                                    await interaction.followup.send(validate_worldanvil[1])
+                                elif validate_worldanvil[2] == -1 and validate_mythweavers[2] != -1:
+                                    await interaction.followup.send(validate_mythweavers[1])
+                                elif validate_mythweavers[2] >= validate_worldanvil[2]:
+                                    await interaction.followup.send(validate_mythweavers[1])
+                                else:
+                                    await interaction.followup.send(validate_worldanvil[1])
                                 return
-                        else:
-                            mythweavers = results[4]
                         if image_link is not None:
                             image_link = str.replace(str.replace(image_link, ";", ""), ")", "")
                             image_link_valid = str.lower(image_link[0:5])
@@ -810,11 +832,18 @@ class CharacterCommands(commands.Cog, name='character'):
                     else:
                         description = info_description
                     if mythweavers is not None:
-                        mythweavers = str.replace(str.replace(mythweavers, ";", ""), ")", "")
-                        mythweavers_valid = str.lower(mythweavers[0:5])
-                        character_changes.mythweavers = mythweavers
-                        if mythweavers_valid != 'https':
-                            await interaction.followup.send(f"Mythweavers link is missing HTTPS:")
+                        validate_mythweavers = shared_functions.validate_mythweavers(mythweavers)
+                        validate_worldanvil = shared_functions.validate_worldanvil(mythweavers)
+                        if not validate_mythweavers[0] and not validate_worldanvil[0]:
+                            # Handle exceptions and compare step indicators
+                            if validate_mythweavers[2] == -1 and validate_worldanvil[2] != -1:
+                                await interaction.followup.send(validate_worldanvil[1])
+                            elif validate_worldanvil[2] == -1 and validate_mythweavers[2] != -1:
+                                await interaction.followup.send(validate_mythweavers[1])
+                            elif validate_mythweavers[2] >= validate_worldanvil[2]:
+                                await interaction.followup.send(validate_mythweavers[1])
+                            else:
+                                await interaction.followup.send(validate_worldanvil[1])
                             return
                     else:
                         mythweavers = info_mythweavers
@@ -1001,7 +1030,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                     base = new_level_info[1]
                                 client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
                                 await client.delete_inventory_item(guild_id, author_id, item_id[0], used)
-                                mythic_results = await mythic_calculation(
+                                mythic_results = awaitlculation(
                                     character_name=character_name,
                                     level=level,
                                     trials=trials,
@@ -1453,7 +1482,7 @@ class CharacterCommands(commands.Cog, name='character'):
                 f"An error occurred whilst displaying the store options. Error: {e}.")
 
     @prestige_group.command(
-        name='request',
+        name='prestige',
         description='Request something of a GM using your prestige as a resource.'
     )
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
@@ -1593,11 +1622,30 @@ class CharacterCommands(commands.Cog, name='character'):
                     f"{approver.mention}, {author_name} is requesting '{name}' with proposition ID {proposition_id}.\n"
                     "Do you accept or reject this proposition?"
                 )
+                await cursor.execute("SELECT Search From Admin Where Identifier = 'Character_Transaction_Channel'")
+                character_transaction_channel_id = await cursor.fetchone()
+                if character_transaction_channel_id is None:
+                   await interaction.followup.send(
+                        content=content,
+                        embed=view.embed,
+                        view=view,
+                        allowed_mentions=discord.AllowedMentions(users=True)
+                    )
+                else:
+                    character_transaction_channel = interaction.guild.get_channel(character_transaction_channel_id[0])
+                    if not character_transaction_channel:
+                        character_transaction_channel = interaction.guild.get_channel(character_transaction_channel_id[0])
+                    if not character_transaction_channel:
+                        await interaction.followup.send(f"Character Transaction Channel not found. Please notify your admin! it is set to <#{character_transaction_channel_id[0]}>")
+                    else:
+                        sent_message = await character_transaction_channel.send(
+                            content=content,
+                            embed=view.embed,
+                            view=view,
+                            allowed_mentions=discord.AllowedMentions(users=True)
+                        )
                 await interaction.followup.send(
-                    content=content,
-                    embed=view.embed,
-                    view=view,
-                    allowed_mentions=discord.AllowedMentions(users=True)
+                    content=f"Your proposition request has been sent {sent_message}.",
                 )
 
         except (aiosqlite.Error, TypeError, ValueError) as e:
@@ -1687,20 +1735,18 @@ class CharacterCommands(commands.Cog, name='character'):
 
             # Defer the response to allow for processing time
             await interaction.response.defer(thinking=True)
-
-            # Validate level_cap input
-            if not 1 <= level_cap <= 20:
-                await interaction.followup.send(
-                    f"Level cap must be between 1 and 20. You provided: {level_cap}",
-                    ephemeral=True
-                )
-                return
-
             # Connect to the database
-            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            async with (aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn):
                 cursor = await conn.cursor()
-
-                # Fetch character information
+                await cursor.execute("SELECT MAX(level), MIN(level) from Milestone_System")
+                level_range = await cursor.fetchone()
+                if not level_range[0] <= level_cap <= level_range[1]:
+                    await interaction.followup.send(
+                        f"Level cap must be between {level_range[0]} and {level_range[1]}. You provided: {level_cap}",
+                        ephemeral=True
+                    )
+                    return
+                    # Fetch character information
                 await cursor.execute(
                     """
                     SELECT Character_Name, Milestones, Level, Trials, Thread_ID
@@ -1823,7 +1869,7 @@ class CharacterCommands(commands.Cog, name='character'):
         parent=character_group
     )
 
-    @display_group.command(name='display',
+    @display_group.command(name='character',
                            description='display all character information or specific character information')
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def display_info(self, interaction: discord.Interaction, player_name: typing.Optional[discord.Member],
