@@ -1051,10 +1051,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     offset=offset,
                     view_type=view_type
                 )
-                await view.update_results()
-                await view.create_embed()
-                await interaction.followup.send(embed=view.embed, view=view)
-
+                await view.send_initial_message()
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
                 f"An error occurred whilst fetching data! input values of player_name: {player_name}, character_name: {character_name}': {e}"
@@ -1138,9 +1135,10 @@ class AdminCommands(commands.Cog, name='admin'):
         interaction.response.defer(thinking=True)
         if certainty_value == 1:
             # Create and send the PropositionView
-            view = ResetDatabaseView()
-            await view.create_embed()
             content = "You gotta be like so sure about this. Super Sure. Super Duper Sure."
+            view = ResetDatabaseView(content=content, interaction=interaction)
+            await view.create_embed()
+
             await interaction.followup.send(
                 content=content,
                 embed=view.embed,
@@ -2218,16 +2216,12 @@ class AdminCommands(commands.Cog, name='admin'):
                         await interaction.followup.send(
                             "No accepted bio channel found. Please set an accepted bio channel to continue.")
                         return
+                    content = "These player characters will be moved to an Archived table and their Character Bios cleared from the server."
                     view = ArchiveCharactersView(retirement_type=retirement_type, player_name=player_name,
                                                  character_name=character_name, guild=guild,
-                                                 accepted_bio_channel=accepted_bio_channel)
-                    await view.create_embed()
-                    content = "These player characters will be moved to an Archived table and their Character Bios cleared from the server."
-                    await interaction.followup.send(
-                        content=content,
-                        embed=view.embed,
-                        view=view
-                    )
+                                                 accepted_bio_channel=accepted_bio_channel,
+                                                 content=content, interaction=interaction)
+                    await view.send_initial_message()
 
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(
@@ -2499,8 +2493,8 @@ class SettingDisplayView(shared_functions.DualView):
 
 
 class ResetDatabaseView(shared_functions.SelfAcknowledgementView):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, content: str, interaction: discord.Interaction):
+        super().__init__(content=content, interaction=interaction)
         self.embed = None
 
     async def accepted(self, interaction: discord.Interaction):
@@ -2522,7 +2516,6 @@ class ResetDatabaseView(shared_functions.SelfAcknowledgementView):
     async def rejected(self, interaction: discord.Interaction):
         """Handle the rejection logic."""
         # Update the database to mark the proposition as rejected
-        await self.update_proposition_status(is_allowed=-1)
         self.embed = discord.Embed(
             title="Database Reset Rejected",
             description=f"{interaction.user.name} has decided to keep me around. :)",
@@ -2541,8 +2534,8 @@ class ResetDatabaseView(shared_functions.SelfAcknowledgementView):
 
 class ArchiveCharactersView(shared_functions.SelfAcknowledgementView):
     def __init__(self, retirement_type, player_name: typing.Optional[str], character_name: typing.Optional[str],
-                 guild: discord.Guild, accepted_bio_channel: int):
-        super().__init__()
+                 guild: discord.Guild, accepted_bio_channel: int, content: str, interaction: discord.Interaction):
+        super().__init__(content=content, interaction=interaction)
         self.embed = None
         self.retirement_type = retirement_type
         self.player_name = player_name
@@ -2587,7 +2580,6 @@ class ArchiveCharactersView(shared_functions.SelfAcknowledgementView):
     async def rejected(self, interaction: discord.Interaction):
         """Handle the rejection logic."""
         # Update the database to mark the proposition as rejected
-        await self.update_proposition_status(is_allowed=-1)
         self.embed = discord.Embed(
             title="Database Reset Rejected",
             description=f"{interaction.user.name} has decided to keep me around. :)",

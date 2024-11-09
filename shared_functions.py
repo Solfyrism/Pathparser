@@ -25,28 +25,30 @@ from googleapiclient.discovery import build
 from urllib.parse import urlparse, parse_qs
 from decimal import Decimal, ROUND_HALF_UP
 
+import shared_functions
+
 load_dotenv()
 # CALL ME MR MONEYBAGS BECAUSE HERE IS MY CASH
 timezone_cache = sorted(available_timezones())
 
 
 # *** AUTOCOMPLETION COMMANDS *** #
+@dataclass
+class
+
 async def character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
     app_commands.Choice[str]]:
     data = []
-    guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    current = unidecode(str.title(current))
-    cursor.execute(
-        "SELECT True_Character_Name, Character_Name from Player_Characters where Character_Name LIKE ? OR Nickname LIKE ? LIMIT 5",
-        (f"%{current}%", f"%{current}%"))
-    character_list = cursor.fetchall()
-    for characters in character_list:
-        if current in characters[1]:
-            data.append(app_commands.Choice(name=characters[1], value=characters[1]))
-    cursor.close()
-    db.close()
+    async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as conn:
+        cursor = await conn.cursor()
+        _, current = shared_functions.name_fix(current)
+        await cursor.execute(
+            "SELECT True_Character_Name, Character_Name from Player_Characters where Character_Name LIKE ? OR Nickname LIKE ? LIMIT 5",
+            (f"%{current}%", f"%{current}%"))
+        character_list = await cursor.fetchall()
+        for characters in character_list:
+            if current in characters[1]:
+                data.append(app_commands.Choice(name=characters[1], value=characters[1]))
     return data
 
 
@@ -1325,14 +1327,19 @@ def drive_word_document(overview: str) -> Optional[str]:
 class ShopView(discord.ui.View):
     """Base class for shop views with pagination."""
 
-    def __init__(self, user_id, guild_id, offset, limit):
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, interaction: discord.Interaction,
+                 content: typing.Optional[str]):
         super().__init__(timeout=180)
         self.user_id = user_id
+        self.content = content
+        self.message = None
+        self.interaction = interaction
         self.guild_id = guild_id
         self.offset = offset
         self.limit = limit
         self.results = []
         self.embed = None
+
         self.message = None
         # Initialize buttons
         self.first_page_button = discord.ui.Button(label='First Page', style=discord.ButtonStyle.primary)
@@ -1432,15 +1439,31 @@ class ShopView(discord.ui.View):
         self.next_page_button.disabled = last_page
         self.last_page_button.disabled = last_page
 
-    async def send_initial_message(self, interaction: discord.Interaction):
+    async def send_initial_message(self):
         """Send the initial message with the view."""
-        await self.update_results()
-        await self.create_embed()
-        await self.update_buttons()
-        self.message = await interaction.response.send_message(
-            embed=self.embed,
-            view=self
-        )
+        try:
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await self.interaction.followup.send(
+                content=self.content,
+                embed=self.embed,
+                view=self
+            )
+            self.message = self.interaction.original_response()
+        except (discord.HTTPException, AttributeError) as e:
+            logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
+
+
+    async def on_timeout(self):
+        """Disable buttons when the view times out."""
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(content=self.content, embed=self.embed, view=self)
+            except discord.HTTPException as e:
+                logging.error(f"Failed to edit message on timeout: {e}")
 
     async def update_results(self):
         """Fetch the results for the current page. To be implemented in subclasses."""
@@ -1458,11 +1481,13 @@ class ShopView(discord.ui.View):
 class RecipientAcknowledgementView(discord.ui.View):
     """Base class for views requiring acknowledgment."""
 
-    def __init__(self, allowed_user_id: int):
+    def __init__(self, allowed_user_id: int, content: typing.Optional, interaction: discord.Interaction):
         super().__init__(timeout=180)
         self.allowed_user_id = allowed_user_id
         self.embed = None
-
+        self.content = content
+        self.message = None
+        self.interaction = interaction
         # Initialize buttons
         self.accept_button = discord.ui.Button(label='Accept', style=discord.ButtonStyle.primary)
         self.reject_button = discord.ui.Button(label='Reject', style=discord.ButtonStyle.danger)
@@ -1499,6 +1524,44 @@ class RecipientAcknowledgementView(discord.ui.View):
             view=None
         )
 
+    async def send_initial_message(self):
+        """Send the initial message with the view."""
+        await self.create_embed()
+        try:
+            async with aiosqlite.connect(f"Pathparser_{self.interaction.guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+                await cursor.execute("SELECT Search From Admin WHERE identifier = 'Character_Transaction_Channel")
+                channel_id = await cursor.fetchone()
+                channel = self.interaction.guild.get_channel(channel_id[0])
+                if not channel:
+                    channel = await self.interaction.guild.fetch_channel(channel_id[0])
+                if channel:
+                    send_message = await channel.send(
+                        content=self.content,
+                        embed=self.embed,
+                        view=self
+                    )
+                    await self.interaction.followup.send(
+                        f"Message sent to the Character Transaction Channel. {send_message.jump_url}")
+                else:
+                    await self.interaction.followup.send(
+                        content=self.content,
+                        embed=self.embed,
+                        view=self
+                    )
+        except (discord.HTTPException, AttributeError, aiosqlite.Error) as e:
+            logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
+
+    async def on_timeout(self):
+        """Disable buttons when the view times out."""
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(content=self.content, embed=self.embed, view=self)
+            except discord.HTTPException as e:
+                logging.error(f"Failed to edit message on timeout: {e}")
+
     async def accepted(self, interaction: discord.Interaction):
         """To be implemented in subclasses."""
         raise NotImplementedError
@@ -1515,9 +1578,14 @@ class RecipientAcknowledgementView(discord.ui.View):
 class SelfAcknowledgementView(discord.ui.View):
     """Base class for views requiring acknowledgment."""
 
-    def __init__(self):
+    def __init__(self, content: typing.Optional, interaction: discord.Interaction):
         super().__init__(timeout=180)
         self.embed = None
+        self.message = None
+        self.content = content
+        self.message = None
+        self.interaction = interaction
+        self.user_id = interaction.user.id
 
         # Initialize buttons
         self.accept_button = discord.ui.Button(label='Accept', style=discord.ButtonStyle.primary)
@@ -1538,6 +1606,31 @@ class SelfAcknowledgementView(discord.ui.View):
             )
             return False
         return True
+
+    async def send_initial_message(self):
+        """Send the initial message with the view."""
+        await self.create_embed()
+        try:
+            await self.interaction.followup.send(
+                content=self.content,
+                embed=self.embed,
+                view=self
+            )
+            self.message = self.interaction.original_response()
+        except (discord.HTTPException, AttributeError) as e:
+            logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
+
+
+
+    async def on_timeout(self):
+        """Disable buttons when the view times out."""
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(content=self.content, embed=self.embed, view=self)
+            except (discord.HTTPException, AttributeError) as e:
+                logging.error(f"Failed to edit message on timeout for user {self.user_id} in guild {self.interaction.guild.id}: {e}")
 
     async def accept(self, interaction: discord.Interaction):
         """Handle the accept action."""
@@ -1571,12 +1664,16 @@ class SelfAcknowledgementView(discord.ui.View):
 class DualView(discord.ui.View):
     """Base class for shop views with pagination."""
 
-    def __init__(self, user_id, guild_id, offset, limit, view_type):
+    def __init__(self, user_id, guild_id, offset, limit, view_type, content: typing.Optional,
+                 interaction: discord.Interaction):
         super().__init__(timeout=180)
         self.user_id = user_id
         self.guild_id = guild_id
         self.offset = offset
         self.limit = limit
+        self.content = content
+        self.message = None
+        self.interaction = interaction
         self.results = []
         self.embed = None
         self.view_type = view_type
@@ -1639,6 +1736,31 @@ class DualView(discord.ui.View):
             )
         else:
             await interaction.response.send_message("You are on the first page.", ephemeral=True)
+
+    async def send_initial_message(self):
+        """Send the initial message with the view."""
+        try:
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await self.interaction.followup.send(
+                content=self.content,
+                embed=self.embed,
+                view=self
+            )
+            self.message = self.interaction.original_response()
+        except (discord.HTTPException, AttributeError) as e:
+            logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
+
+    async def on_timeout(self):
+        """Disable buttons when the view times out."""
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(content=self.content, embed=self.embed, view=self)
+            except discord.HTTPException as e:
+                logging.error(f"Failed to edit message on timeout: {e}")
 
     async def change_view(self, interaction: discord.Interaction):
         """Change the viewtype."""

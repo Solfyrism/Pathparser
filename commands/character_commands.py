@@ -562,6 +562,57 @@ async def stg_character_embed(cursor, character_name) -> (Union[Tuple[discord.Em
     return return_message
 
 
+async def update_character_name(guild_id: int, character_name: str, new_character_name: str) -> tuple[bool, str]:
+    try:
+        return_string = f"Updating character name for '{character_name}' to '{new_character_name}' turbo failed."
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            return_string = f"Updating character name for '{character_name}' to '{new_character_name}' for Sessions_Archive"
+            await cursor.execute(
+                "UPDATE Sessions_Archive SET Character_Name = ? WHERE Character_Name = ?",
+                (new_character_name, character_name))
+            await conn.commit()
+            return_string = f"Updating character name for '{character_name}' to '{new_character_name}' for Sessions_Group"
+            await cursor.execute(
+                "UPDATE Sessions_Group SET Host = ? WHERE Character_Name = ?",
+                (new_character_name, character_name))
+            await conn.commit()
+            return_string = f"Updating character name for '{character_name}' to '{new_character_name}' for Sessions_Participants"
+            await cursor.execute(
+                "UPDATE Sessions_Participants SET Character_Name = ? WHERE Character_Name = ?",
+                (new_character_name, character_name))
+            await conn.commit()
+            return_string = f"Updating character name for '{character_name}' to '{new_character_name}' for Sessions_Presign"
+            await cursor.execute(
+                "UPDATE Sessions_Presign SET Character_Name = ? WHERE Character_Name = ?",
+                (new_character_name, character_name))
+            await conn.commit()
+            return_string = f"Updating character name for '{character_name}' to '{new_character_name}' for A_Audit_All"
+            await cursor.execute(
+                "UPDATE A_Audit_All SET Character_Name = ? WHERE Character_Name = ?",
+                (new_character_name, character_name))
+            await conn.commit()
+            return_string = f"Updating character name for '{character_name}' to '{new_character_name}' for A_Audit_Gold"
+            await cursor.execute(
+                "UPDATE A_Audit_Gold SET Character_Name = ? WHERE Character_Name = ?",
+                (new_character_name, character_name))
+            await conn.commit()
+            return_string = f"Updating character name for '{character_name}' to '{new_character_name}' for A_Audit_Prestige"
+            await cursor.execute(
+                "UPDATE A_Audit_Prestige SET Character_Name = ? WHERE Character_Name = ?",
+                (new_character_name, character_name))
+            await conn.commit()
+            return_string = f"Updating character name for '{character_name}' to '{new_character_name}' for Leadership"
+            await cursor.execute(
+                "UPDATE Leadership SET Character_Name = ? WHERE Character_Name = ?",
+                (new_character_name, character_name))
+            await conn.commit()
+            return_string = f"Update {character_name} to {new_character_name} is successful"
+            return True, return_string
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred whilst updating character name for '{character_name}': {e}")
+            return False, return_string
+
 # noinspection PyUnresolvedReferences
 class CharacterCommands(commands.Cog, name='character'):
     def __init__(self, bot):
@@ -939,6 +990,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                     mythweavers,
                                     image_link, oath_name, color, name))
                             await conn.commit()
+                            validate_update = await update_character_name(guild_id, name, new_character_name)
                             await character_embed(character_name=new_character_name, guild=guild)
                             log_embed = await shared_functions.log_embed(
                                 change=character_changes,
@@ -946,7 +998,10 @@ class CharacterCommands(commands.Cog, name='character'):
                                 guild=guild,
                                 thread=thread
                             )
-                            await interaction.followup.send(embed=log_embed)
+                            if validate_update[0]:
+                                await interaction.followup.send(embed=log_embed)
+                            else:
+                                await interaction.followup.send(f"An error occurred whilst updating character name for '{character_name}' \r\n failed at: {validate_update[1]}.")
                     else:
                         await interaction.followup.send(f"Invalid Hex Color Code!")
             except (aiosqlite.Error, TypeError, ValueError) as e:
@@ -979,8 +1034,10 @@ class CharacterCommands(commands.Cog, name='character'):
                         ephemeral=True
                     )
                 else:
-                    view = RetirementView(character_name, interaction.user.id, guild_id)
-                    await interaction.followup.send(content='You are retiring me?! But you love me!', view=view)
+                    content = 'You are retiring me?! But you love me!'
+                    view = RetirementView(character_name=character_name, user_id=interaction.user.id, guild_id=guild_id,
+                                          interaction=interaction, content=content)
+                    await view.send_initial_message()
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(f"An error occurred in the retire command whilst looking for '{character_name}': {e}")
                 await interaction.followup.send(
@@ -1304,11 +1361,9 @@ class CharacterCommands(commands.Cog, name='character'):
         try:
             offset = 1
             limit = 20
-            view = TitleShopView(interaction.user.id, guild_id, offset, limit)
-            await view.update_results()
-            await view.create_embed()
-            await view.update_buttons()
-            await interaction.followup.send(embed=view.embed, view=view)
+            view = TitleShopView(user_id=interaction.user.id, guild_id=guild_id, offset=offset, limit=limit,
+                                 interaction=interaction)
+            await view.send_initial_message()
         except (TypeError, ValueError) as e:
             logging.exception(f"An error occurred in the retire command whilst looking for '{character_name}': {e}")
             await interaction.followup.send(
@@ -1491,11 +1546,9 @@ class CharacterCommands(commands.Cog, name='character'):
         try:
             offset = 1
             limit = 20
-            view = FameShopView(interaction.user.id, guild_id, offset, limit)
-            await view.update_results()
-            await view.create_embed()
-            await view.update_buttons()
-            await interaction.followup.send(embed=view.embed, view=view)
+            view = PrestigeShopView(user_id=interaction.user.id, guild_id=guild_id, offset=offset, limit=limit,
+                                    interaction=interaction)
+            await view.send_initial_message()
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"Couldn't display the store options: {e}")
             await interaction.followup.send(
@@ -1622,9 +1675,12 @@ class CharacterCommands(commands.Cog, name='character'):
                         ephemeral=True
                     )
                     return
-
+                content = (
+                    f"{approver.mention}, {author_name} is requesting '{name}' with proposition ID {proposition_id}.\n"
+                    "Do you accept or reject this proposition?"
+                )
                 # Create and send the PropositionView
-                view = PropositionView(
+                view = PropositionViewRecipient(
                     allowed_user_id=approver.id,
                     requester_name=author_name,
                     character_name=character_name,
@@ -1634,38 +1690,11 @@ class CharacterCommands(commands.Cog, name='character'):
                     proposition_id=proposition_id,
                     bot=self.bot,
                     prestige=prestige,
-                    logging_thread=logging_thread
+                    logging_thread=logging_thread,
+                    interaction=interaction,
+                    content=content
                 )
-                await view.create_embed()
-
-                content = (
-                    f"{approver.mention}, {author_name} is requesting '{name}' with proposition ID {proposition_id}.\n"
-                    "Do you accept or reject this proposition?"
-                )
-                await cursor.execute("SELECT Search From Admin Where Identifier = 'Character_Transaction_Channel'")
-                character_transaction_channel_id = await cursor.fetchone()
-                if character_transaction_channel_id is None:
-                    await interaction.followup.send(
-                        content=content,
-                        embed=view.embed,
-                        view=view,
-                        allowed_mentions=discord.AllowedMentions(users=True)
-                    )
-                else:
-                    character_transaction_channel = interaction.guild.get_channel(character_transaction_channel_id[0])
-                    if not character_transaction_channel:
-                        character_transaction_channel = interaction.guild.get_channel(
-                            character_transaction_channel_id[0])
-                    if not character_transaction_channel:
-                        await interaction.followup.send(
-                            f"Character Transaction Channel not found. Please notify your admin! it is set to <#{character_transaction_channel_id[0]}>")
-                    else:
-                        sent_message = await character_transaction_channel.send(
-                            content=content,
-                            embed=view.embed,
-                            view=view,
-                            allowed_mentions=discord.AllowedMentions(users=True)
-                        )
+                await view.send_initial_message()
                 await interaction.followup.send(
                     content=f"Your proposition request has been sent {sent_message}.",
                 )
@@ -1728,11 +1757,10 @@ class CharacterCommands(commands.Cog, name='character'):
                     character_name=character_name,
                     item_name=name,
                     limit=items_per_page,
-                    offset=offset
+                    offset=offset,
+                    interaction=interaction
                 )
-                await view.update_results()
-                await view.create_embed()
-                await interaction.followup.send(embed=view.embed, view=view)
+                await view.send_initial_message()
 
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
@@ -1953,11 +1981,10 @@ class CharacterCommands(commands.Cog, name='character'):
                     character_name=character_name,
                     limit=items_per_page,
                     offset=offset,
-                    view_type=view_type
+                    view_type=view_type,
+                    interaction=interaction
                 )
-                await view.update_results()
-                await view.create_embed()
-                await interaction.followup.send(embed=view.embed, view=view)
+                await view.send_initial_message()
 
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
@@ -2008,11 +2035,10 @@ class CharacterCommands(commands.Cog, name='character'):
                     level_range_max=level_range_max,
                     limit=items_per_page,
                     offset=offset,
-                    view_type=view_type
+                    view_type=view_type,
+                    interaction=interaction
                 )
-                await view.update_results()
-                await view.create_embed()
-                await interaction.followup.send(embed=view.embed, view=view)
+                await view.send_initial_message()
 
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
@@ -2263,9 +2289,9 @@ class CharacterCommands(commands.Cog, name='character'):
                                         guild_id=guild_id,
                                         source_logging_thread=source_logging_thread_id,
                                         recipient_logging_thread=target_logging_thread_id,
-                                        reason=reason)
-                                    await view.create_embed()
-                                    await interaction.response.send_message(embed=view.embed, view=view)
+                                        reason=reason,
+                                        interaction=interaction)
+                                    await view.send_initial_message()
                                 else:
                                     embed = discord.Embed(title="Gold Send Failed!", description=gold_results)
                                     await interaction.response.send_message(embed=embed)
@@ -2308,11 +2334,10 @@ class CharacterCommands(commands.Cog, name='character'):
                     guild_id=guild_id,
                     character_name=character_name,
                     limit=items_per_page,
-                    offset=offset
+                    offset=offset,
+                    interaction=interaction
                 )
-                await view.update_results()
-                await view.create_embed()
-                await interaction.followup.send(embed=view.embed, view=view)
+                await view.send_initial_message()
 
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
@@ -2460,28 +2485,18 @@ class CharacterCommands(commands.Cog, name='character'):
 
 
 # Modified RetirementView with character deletion
-class RetirementView(discord.ui.View):
+class RetirementView(shared_functions.SelfAcknowledgementView):
     """A view that allows a user to confirm or cancel the retirement of their character."""
 
-    def __init__(self, character_name, user_id, guild_id):
-        super().__init__(timeout=180)
+    def __init__(self, character_name: str, user_id: int, guild_id: int, interaction: discord.Interaction,
+                 content: str):
+        super().__init__(content=content, interaction=interaction)
         self.character_name = character_name
         self.user_id = user_id
         self.guild_id = guild_id
         self.message = None  # Will be set when the view is sent
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        """Ensure that only the user who initiated the retirement can interact with the buttons."""
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "You cannot interact with this button.",
-                ephemeral=True
-            )
-            return False
-        return True
-
-    @discord.ui.button(label='Confirm Retirement', style=discord.ButtonStyle.danger)
-    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def accepted(self, interaction: discord.Interaction):
         """Handle the confirmation of character retirement."""
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as conn:
             cursor = await conn.cursor()
@@ -2518,29 +2533,18 @@ class RetirementView(discord.ui.View):
                     ephemeral=True
                 )
 
-    @discord.ui.button(label='Cancel')
-    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def rejected(self, interaction: discord.Interaction):
         """Handle the cancellation of character retirement."""
         await interaction.response.edit_message(
             content="Character retirement cancelled.",
             view=None
         )
 
-    async def on_timeout(self):
-        """Disable buttons when the view times out."""
-        for child in self.children:
-            child.disabled = True
-        if self.message:
-            try:
-                await self.message.edit(view=self)
-            except discord.HTTPException as e:
-                logging.error(f"Failed to edit message on timeout: {e}")
-
 
 # Modified ShopView with additional logic
 class TitleShopView(shared_functions.ShopView):
-    def __init__(self, user_id, guild_id, offset, limit):
-        super().__init__(user_id, guild_id, offset, limit)
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, interaction: discord.Interaction):
+        super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction)
         self.max_items = None  # Cache total number of items
 
     async def update_results(self):
@@ -2577,8 +2581,8 @@ class TitleShopView(shared_functions.ShopView):
 
 
 class PrestigeShopView(shared_functions.ShopView):
-    def __init__(self, user_id, guild_id, offset, limit):
-        super().__init__(user_id, guild_id, offset, limit)
+    def __init__(self, user_id, guild_id: int, offset: int, limit: int, interaction: discord.Interaction):
+        super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction)
         self.max_items = None  # Cache total number of items
 
     async def update_results(self):
@@ -2614,8 +2618,9 @@ class PrestigeShopView(shared_functions.ShopView):
 
 
 class PrestigeHistoryView(shared_functions.ShopView):
-    def __init__(self, user_id, guild_id, offset, limit, character_name, item_name):
-        super().__init__(user_id, guild_id, offset, limit)
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, character_name: str, item_name: str,
+                 interaction: discord.Interaction):
+        super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction)
         self.max_items = None  # Cache total number of items
         self.character_name = character_name
         self.item_name = item_name
@@ -2671,8 +2676,9 @@ class PrestigeHistoryView(shared_functions.ShopView):
 
 
 class GoldHistoryView(shared_functions.ShopView):
-    def __init__(self, user_id, guild_id, offset, limit, character_name):
-        super().__init__(user_id, guild_id, offset, limit)
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, character_name: str,
+                 interaction: discord.Interaction):
+        super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction)
         self.max_items = None  # Cache total number of items
         self.character_name = character_name
 
@@ -2717,8 +2723,10 @@ class GoldHistoryView(shared_functions.ShopView):
 
 # Dual View Type Views
 class CharacterDisplayView(shared_functions.DualView):
-    def __init__(self, user_id, guild_id, offset, limit, player_name, character_name, view_type):
-        super().__init__(user_id, guild_id, offset, limit, view_type)
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, player_name: str, character_name: str,
+                 view_type: int, interaction: discord.Interaction):
+        super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, view_type=view_type,
+                         interaction=interaction)
         self.max_items = None  # Cache total number of items
         self.character_name = character_name
         self.view_type = view_type
@@ -2839,8 +2847,10 @@ class CharacterDisplayView(shared_functions.DualView):
 
 
 class LevelRangeDisplayView(shared_functions.DualView):
-    def __init__(self, user_id, guild_id, offset, limit, level_range_min, level_range_max, view_type):
-        super().__init__(user_id, guild_id, offset, limit, view_type)
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, level_range_min: int, level_range_max: int,
+                 view_type: int, interaction: discord.Interaction):
+        super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, view_type=view_type,
+                         interaction=interaction)
         self.max_items = None  # Cache total number of items
         self.view_type = view_type
         self.level_range_max = level_range_max
@@ -2955,9 +2965,11 @@ class PropositionViewRecipient(shared_functions.RecipientAcknowledgementView):
             bot: commands.Bot,
             guild_id: int,
             prestige: int,
-            logging_thread: int
+            logging_thread: int,
+            interaction: discord.Interaction,
+            content: str
     ):
-        super().__init__(allowed_user_id)
+        super().__init__(allowed_user_id=allowed_user_id, interaction=interaction, content=content)
         self.guild_id = guild_id
         self.requester_name = requester_name
         self.character_name = character_name
@@ -3048,9 +3060,10 @@ class GoldSendView(shared_functions.RecipientAcknowledgementView):
             guild_id: int,
             source_logging_thread: int,
             recipient_logging_thread: int,
-            reason: str
+            reason: str,
+            interaction: discord.Interaction
     ):
-        super().__init__(allowed_user_id)
+        super().__init__(allowed_user_id=allowed_user_id, interaction=interaction)
         self.guild_id = guild_id
         self.requester_name = requester_name
         self.requester_id = requester_id

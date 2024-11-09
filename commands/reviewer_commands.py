@@ -38,13 +38,13 @@ async def register_character_embed(character_name: str, guild: discord.Guild) ->
 
             # Fetch character info
             await cursor.execute(
-                """
+                "
                 SELECT player_name, player_id, True_Character_Name, Title, Titles, Description, Oath, Level,
                        Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value,
                        Essence, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name,
                        Tradition_Link, Template_Name, Template_Link, Article_Link, Message_ID
                 FROM Player_Characters WHERE Character_Name = ?
-                """, (character_name,))
+                ", (character_name,))
             character_info = await cursor.fetchone()
             if not character_info:
                 return f"No character found with Character_Name '{character_name}'."
@@ -194,7 +194,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
         remove=[discord.app_commands.Choice(name='No!', value=1),
                 discord.app_commands.Choice(name='Yes!', value=2)])
     async def wipe(self, interaction: discord.Interaction, cleanse: str, remove: discord.app_commands.Choice[int]):
-        """Clean out the entire stging base or clean out a specific player's character by mentioning them or using their role!"""
+        "Clean out the entire stging base or clean out a specific player's character by mentioning them or using their role!"
         await interaction.followup.defer(thinking=True)
         try:
             if cleanse.endswith('D'):
@@ -226,7 +226,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                                   discord.app_commands.Choice(name='Rejected!', value=2)])
     async def manage(self, interaction: discord.Interaction, character_name: str,
                      status: discord.app_commands.Choice[int]):
-        """accept a player into your accepted bios, or Remove them."""
+        "accept a player into your accepted bios, or Remove them."
         guild = interaction.guild
         guild_id = interaction.guild_id
         async with aiosqlite.connect(f"C:/pathparser/pathparser_{guild_id}.sqlite") as db:
@@ -234,10 +234,10 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
             cursor = await db.cursor()
             _, character_name = name_fix(character_name)
             await cursor.execute(
-                """Select Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, 
+                "Select Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description,
                 Oath, Tier, Trials, Trials_Required,
                  Essence, Color, Mythweavers, Image_Link, tmp_bio
-                 FROM A_STG_Player_Characters where Character_Name = ?""",
+                 FROM A_STG_Player_Characters where Character_Name = ?",
                 (character_name,))
             player_info = await cursor.fetchone()
             if not player_info:
@@ -303,9 +303,9 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                         (gold_difference, gold_total, gold_value_total, gold_value_max_total,
                          transaction_id) = gold_calculation
                     await cursor.execute(
-                        """INSERT INTO Player_Characters (Player_Name, Player_ID, True_Character_Name, Character_Name, 
-                        Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, 
-                        Gold, Gold_Value, Gold_value_Max, Essence, Color, Mythweavers, Image_Link, Fame) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        "INSERT INTO Player_Characters (Player_Name, Player_ID, True_Character_Name, Character_Name,
+                        Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required,
+                        Gold, Gold_Value, Gold_value_Max, Essence, Color, Mythweavers, Image_Link, Fame) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (info_player_name, info_player_id, info_true_character_name, info_character_name,
                          info_nickname, info_titles, info_description, info_oath, starting_level[0], info_tier,
                          info_minimum_milestones, info_milestones_to_level, info_trials, info_trials_required,
@@ -356,7 +356,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
     @app_commands.describe(customized_name="For the name of the template or tradition")
     async def apply_tradition(self, interaction: discord.Interaction, character_name: str,
                               tradition_name: str, link: str, essence_cost: int):
-        """Administrative: set a character's tradition!"""
+        "Administrative: set a character's tradition!"
         character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
         guild_id = interaction.guild_id
         guild = interaction.guild
@@ -420,7 +420,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
     @app_commands.describe(customized_name="For the name of the template or tradition")
     async def apply_template(self, interaction: discord.Interaction, character_name: str,
                              template_name: str, link: str, essence_cost: int):
-        """Administrative: set a character's tradition!"""
+        "Administrative: set a character's tradition!"
         character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
         guild_id = interaction.guild_id
         guild = interaction.guild
@@ -488,7 +488,7 @@ class CleanOldRegistrationView(shared_functions.SelfAcknowledgementView):
         self.remove_character = []
 
     async def accepted(self, interaction: discord.Interaction):
-        """Handle the approval logic."""
+        "Handle the approval logic."
 
         self.embed = discord.Embed(
             title="Cleanse of dated characters Successful",
@@ -504,7 +504,7 @@ class CleanOldRegistrationView(shared_functions.SelfAcknowledgementView):
         # Additional logic such as notifying the requester
 
     async def rejected(self, interaction: discord.Interaction):
-        """Handle the rejection logic."""
+        "Handle the rejection logic."
         # Update the database to mark the proposition as rejected
         await self.update_proposition_status(is_allowed=-1)
         self.embed = discord.Embed(
@@ -515,7 +515,7 @@ class CleanOldRegistrationView(shared_functions.SelfAcknowledgementView):
         # Additional logic such as notifying the requester
 
     async def create_embed(self):
-        """Create the initial embed for the cleanse."""
+        "Create the initial embed for the cleanse."
         async with aiosqlite.connect(f"C:/pathparser/pathparser_{self.guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(

@@ -1,32 +1,137 @@
-import datetime
-import re
-import shutil
+import logging
 import typing
-import discord
-import sqlite3
-import os
-from discord import app_commands
-from discord.ext import commands
-from Event_List import Event
-from unbelievaboat import Client
-import unbelievaboat
-import asyncio
-import math
-import random
 from math import floor
-from dotenv import load_dotenv; load_dotenv()
+from typing import List, Optional, Tuple, Union
+import discord
+import re
+import unbelievaboat
 from unidecode import unidecode
+from discord.ext import commands
+from discord import app_commands
+import datetime
+import os
 from pywaclient.api import BoromirApiClient as WaClient
+import aiosqlite
+import shared_functions
+import character_commands
+from shared_functions import name_fix
+from decimal import Decimal, ROUND_HALF_UP
+
+# *** GLOBAL VARIABLES *** #
 os.chdir("C:\\pathparser")
 
 
+class GamemasterCommands(commands.Cog, name='Gamemaster'):
+    def __init__(self, bot):
+        self.bot = bot
 
+    gamemaster_group = discord.app_commands.Group(
+        name='gamemaster',
+        description='Commands related to gamemastering'
+    )
 
+    fame_group = discord.app_commands.Group(
+        name='fame',
+        description='Commands related to games mastering fame.'
+    )
 
+    @fame_group.command()
+    @app_commands.choices(acceptance=[discord.app_commands.Choice(name='accept', value=1),
+                                      discord.app_commands.Choice(name='rejectance', value=2)])
+    async def requests(self, interaction: discord.Interaction, proposition_id: int, reason: typing.Optional[str],
+                       acceptance: discord.app_commands.Choice[int] = 1):
+        """Accept or reject a proposition!"""
+        guild_id = interaction.guild_id
+        author = interaction.user.name
+        guild = interaction.guild
+        acceptance = 1 if acceptance == 1 else acceptance.value
+        author_id = interaction.user.id
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute(
+                f"SELECT Character_Name, Prestige_Cost, Item_Name from A_Audit_Prestige Where Proposition_ID = ?",
+                (proposition_id,))
+            item_id = await cursor.fetchone()
+            if item_id is not None:
+                (item_character_name, item_prestige_cost, item_name) = item_id
+                await cursor.execute(
+                    f"Select Thread_ID, Fame, Prestige from Player_Characters where Character_Name = ?",
+                    (item_character_name,))
+                player_info = await cursor.fetchone()
+                if player_info is not None:
+                    (thread_id, fame, prestige) = player_info
+                    if acceptance == 1:
+                        update_reason = f"Item {item_name} has been accepted by {author}!"
+                        update_reason += f"\r\n Reason: {reason}" if reason is not None else ""
+                        calculated_fame = character_commands.calculate_fame(character_name=item_character_name,
+                                                                            fame=fame, prestige=prestige, fame_change=0,
+                                                                            prestige_change=-abs(item_prestige_cost))
+                        (fame_total, fame_change, prestige_total, final_prestige_change) = calculated_fame
+                        character_updates = shared_functions.UpdateCharacterData(character_name=item_id[0],
+                                                                                 fame_package=(
+                                                                                     fame_total, prestige_total))
+                        await shared_functions.update_character(guild_id=guild_id, change=character_updates)
+                        reason = "item "
+                        character_changes = shared_functions.CharacterChange(character_name=item_id[0],
+                                                                             author=interaction.user.name,
+                                                                             total_fame=fame, total_prestige=fame,
+                                                                             fame=fame_change,
+                                                                             prestige=final_prestige_change,
+                                                                             source=reason)
+                        log_update = shared_functions.log_embed(guild=guild, thread=thread_id, change=character_changes,
+                                                                bot=self.bot)
+                        await shared_functions.character_embed(character_name=item_character_name, guild=guild)
+                    else:
+                        update_reason = f"Item {item_name} has been rejected by {author}!"
+                        update_reason += f"\r\n Reason: {reason}" if reason is not None else ""
+                        character_changes = shared_functions.CharacterChange(character_name=item_id[0],
+                                                                             author=interaction.user.name,
+                                                                             source=reason)
+                        log_update = shared_functions.log_embed(guild=guild, thread=thread_id, change=character_changes,
+                                                                bot=self.bot)
+                    await interaction.followup.send(embed=log_update)
+
+                else:
+                    await interaction.response.send_message(
+                        f"Character {item_id[0]} does not exist! Could not complete transaction!")
+
+    @fame_group.command()
+    @app_commands.autocomplete(character=shared_functions.character_select_autocompletion)
+    async def manage(self, interaction: discord.Interaction, character: str, fame: int, prestige: int,
+                     reason: typing.Optional[str]):
+        "Add or remove from a player's fame and prestige!"
+        guild_id = interaction.guild_id
+        author = interaction.user.name
+        guild = interaction.guild
+        acceptance = 1 if acceptance == 1 else acceptance.value
+        author_id = interaction.user.id
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        cursor.execute(f"SELECT Character_Name from A_Audit_Prestige Where Proposition_ID = ?", (proposition_id,))
+        item_id = cursor.fetchone()
+        reason = "N/A" if reason is None else reason
+        cursor.execute(f"Select Thread_ID, Fame, Prestige from Player_Characters where Character_Name = ?",
+                       (item_id[0],))
+        player_info = cursor.fetchone()
+        if player_info is not None:
+            logging_embed = discord.Embed(title=f"{author} has adjusted your fame or prestige!",
+                                          description=f"**changed fame**: {fame} **changed prestige**: {prestige}",
+                                          color=discord.Colour.red())
+            embed.add_field(name=f'New Totals:',
+                            value=f'**fame**: {fame + player_info[1]}, **prestige**: {prestige + player_info[2]} ',
+                            inline=False)
+            logging_thread = guild.get_thread(player_info[0])
+            await logging_thread.send(embed=logging_embed)
+            await Event.glorify(self, guild_id, author, character, fame + player_info[1], prestige + player_info[2],
+                                reason)
+        else:
+            await interaction.response.send_message(f"Character {character} does not exist!")
+        cursor.close()
+        db.close()
 
 
 """@gamemaster.command()
-async def help(ctx: commands.Context):
+async def help(interaction: discord.Interaction):
     "Help commands for the associated tree"
     embed = discord.Embed(title=f"Gamemaster Help", description=f'This is a list of GM administrative commands', colour=discord.Colour.blurple())
     embed.add_field(name=f'**Create**', value=f'**GAMEMASTER**: Create a session and post an announcement!', inline=False)
@@ -39,78 +144,7 @@ async def help(ctx: commands.Context):
     embed.add_field(name=f'**Notify**', value=f'**GAMEMASTER**: Notify Players of a quest!', inline=False)
     embed.add_field(name=f'**Proposition**', value=f'**GAMEMASTER**: Accept or Reject A Proposition based on the ID!', inline=False)
     embed.add_field(name=f'**Glorify**', value=f'**GAMEMASTER**: Increase or decrease characters fame and prestige!', inline=False)
-    await ctx.response.send_message(embed=embed)
-
-@player.command()
-async def help(ctx: commands.Context):
-    "Help commands for the associated tree"
-    embed = discord.Embed(title=f"Player Help", description=f'This is a list of Playerside commands', colour=discord.Colour.blurple())
-    embed.add_field(name=f'**Join**', value=f'**PLAYER**: join a session using one your characters!', inline=False)
-    embed.add_field(name=f'**Leave**', value=f'**PLAYER**: Leave a session that you have joined!', inline=False)
-    embed.add_field(name=f'**Display**', value=f'**ALL**: Display the details of a session.', inline=False)
-    await ctx.response.send_message(embed=embed)
-
-
-@gamemaster.command()
-@app_commands.choices(acceptance=[discord.app_commands.Choice(name='accept', value=1), discord.app_commands.Choice(name='rejectance', value=2)])
-async def proposition(ctx: commands.Context, proposition_id: int, reason: typing.Optional[str], acceptance: discord.app_commands.Choice[int] = 1):
-    "Accept or reject a proposition!"
-    guild_id = ctx.guild_id
-    author = ctx.user.name
-    guild = ctx.guild
-    acceptance = 1 if acceptance == 1 else acceptance.value
-    author_id = ctx.user.id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(f"SELECT Character_Name from A_Audit_Prestige Where Proposition_ID = ?", (proposition_id, ))
-    item_id = cursor.fetchone()
-    reason = "N/A" if reason is None else reason
-    if item_id is not None:
-        if acceptance == 1:
-            cursor.execute(f"Select Thread_ID from Player_Characters where Character_Name = ?", (item_id[0],))
-            player_info = cursor.fetchone()
-            logging_embed = discord.Embed(title=f"{author} has accepted the proposition!", description=f"Proposition ID: {proposition_id}", color=discord.Colour.red())
-            embed.add_field(name=f'Reason:', value=f'{reason}', inline=False)
-            logging_thread = guild.get_thread(player_info[0])
-            await logging_thread.send(embed=logging_embed)
-        else:
-            cursor.execute(f"Select Thread_ID from Player_Characters where Character_Name = ?", (item_id[0],))
-            player_info = cursor.fetchone()
-            logging_embed = discord.Embed(title=f"{author} has rejected the proposition!", description=f"Proposition ID: {proposition_id}", color=discord.Colour.red())
-            embed.add_field(name=f'Reason:', value=f'{reason}', inline=False)
-            logging_thread = guild.get_thread(player_info[0])
-            await logging_thread.send(embed=logging_embed)
-            await Event.proposition_reject(self, guild_id, author, proposition_id, reason, source)
-    cursor.close()
-    db.close()
-
-
-@gamemaster.command()
-@app_commands.autocomplete(character=character_select_autocompletion)
-async def glorify(ctx: commands.Context, character: str, fame: int, prestige: int, reason: typing.Optional[str]):
-    "Add or remove from a player's fame and prestige!"
-    guild_id = ctx.guild_id
-    author = ctx.user.name
-    guild = ctx.guild
-    acceptance = 1 if acceptance == 1 else acceptance.value
-    author_id = ctx.user.id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(f"SELECT Character_Name from A_Audit_Prestige Where Proposition_ID = ?", (proposition_id, ))
-    item_id = cursor.fetchone()
-    reason = "N/A" if reason is None else reason
-    cursor.execute(f"Select Thread_ID, Fame, Prestige from Player_Characters where Character_Name = ?", (item_id[0],))
-    player_info = cursor.fetchone()
-    if player_info is not None:
-        logging_embed = discord.Embed(title=f"{author} has adjusted your fame or prestige!", description=f"**changed fame**: {fame} **changed prestige**: {prestige}", color=discord.Colour.red())
-        embed.add_field(name=f'New Totals:', value=f'**fame**: {fame + player_info[1]}, **prestige**: {prestige + player_info[2]} ', inline=False)
-        logging_thread = guild.get_thread(player_info[0])
-        await logging_thread.send(embed=logging_embed)
-        await Event.glorify(self, guild_id, author, character, fame + player_info[1], prestige + player_info[2], reason)
-    else:
-        await ctx.response.send_message(f"Character {character} does not exist!")
-    cursor.close()
-    db.close()
+    await interaction.response.send_message(embed=embed)
 
 
 
@@ -1223,9 +1257,9 @@ async def notify(interaction: discord.Interaction, session_id: int, message: str
 @gamemaster.command()
 @app_commands.describe(group="Displaying All Participants & Signups, Active Participants Only, or Potential Sign-ups Only for a session")
 @app_commands.choices(group=[discord.app_commands.Choice(name='All', value=1), discord.app_commands.Choice(name='Participants', value=2), discord.app_commands.Choice(name='Sign-ups', value=3)])
-async def display(ctx: commands.Context, session_id: int, group: discord.app_commands.Choice[int] = 1):
+async def display(interaction: discord.Interaction, session_id: int, group: discord.app_commands.Choice[int] = 1):
     "ALL: THIS COMMAND DISPLAYS SESSION INFORMATION"
-    guild_id = ctx.guild.id
+    guild_id = interaction.guild.id
     db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
     cursor = db.cursor()
     cursor.execute(f"SELECT GM_Name, Session_Name, Session_Range, Play_location, Play_Time, Overview, Description, Message, IsActive FROM Sessions WHERE Session_ID = {session_id}")
@@ -1274,7 +1308,7 @@ async def display(ctx: commands.Context, session_id: int, group: discord.app_com
                         embed.add_field(name=f"Field Limit reached", value=f'{total_participants[0] - 20} remaining Sign-ups')
                         break
                 embed.set_footer(text=f"Session ID: {session_id}")
-            await ctx.response.send_message(embed=embed)
+            await interaction.response.send_message(embed=embed)
         else:
             cursor.execute(f"SELECT Gold, Flux, Easy, Medium, Hard, Deadly, Trials FROM Sessions WHERE Session_ID = {session_id}")
             session_reward_info = cursor.fetchone()
@@ -1296,10 +1330,17 @@ async def display(ctx: commands.Context, session_id: int, group: discord.app_com
                                     value=f'{total_participants[0] - 20} remaining Participants')
                     break
             embed.set_footer(text=f"Session ID: {session_id}")
-            await ctx.response.send_message(embed=embed)
+            await interaction.response.send_message(embed=embed)
     else:
         embed = discord.Embed(title=f"Display Command Failed", description=f'{session_id} could not be found in current or archived sessions!', colour=discord.Colour.red())
-        await ctx.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed)
     cursor.close()
     db.close()
 """
+
+logging.basicConfig(
+    level=logging.INFO,  # Set the minimum logging level
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    filename='application.log',  # Log to a file
+    filemode='a'  # Append to the file
+)
