@@ -6,19 +6,20 @@ import sqlite3
 from dateutil import parser
 from discord import app_commands
 import pytz
+import asyncio
 from math import floor
 from dotenv import load_dotenv
 from unidecode import unidecode
 from pywaclient.api import BoromirApiClient as WaClient
 import numpy as np
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Dict
 import matplotlib.pyplot as plt
 from zoneinfo import available_timezones, ZoneInfo
 import os
 from datetime import datetime
 import aiosqlite
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -33,23 +34,6 @@ timezone_cache = sorted(available_timezones())
 
 
 # *** AUTOCOMPLETION COMMANDS *** #
-@dataclass
-class
-
-async def character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
-    data = []
-    async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as conn:
-        cursor = await conn.cursor()
-        _, current = shared_functions.name_fix(current)
-        await cursor.execute(
-            "SELECT True_Character_Name, Character_Name from Player_Characters where Character_Name LIKE ? OR Nickname LIKE ? LIMIT 5",
-            (f"%{current}%", f"%{current}%"))
-        character_list = await cursor.fetchall()
-        for characters in character_list:
-            if current in characters[1]:
-                data.append(app_commands.Choice(name=characters[1], value=characters[1]))
-    return data
 
 
 async def stg_character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
@@ -71,23 +55,116 @@ async def stg_character_select_autocompletion(interaction: discord.Interaction, 
     return data
 
 
-async def own_character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+async def clear_autocomplete_cache():
+    while True:
+        await asyncio.sleep(300)  # Wait for 5 minutes
+        async with autocomplete_cache.lock:
+            autocomplete_cache.cache.clear()
+
+
+async def invalidate_user_cache(user_id: int):
+    async with autocomplete_cache.lock:
+        keys_to_delete = [key for key in autocomplete_cache.cache if key[0] == user_id]
+        for key in keys_to_delete:
+            del autocomplete_cache.cache[key]
+
+
+@dataclass
+class AutocompleteCache:
+    cache: Dict[Tuple[int, str], List[Tuple[str, str]]] = field(default_factory=dict)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+autocomplete_cache = AutocompleteCache()
+
+MAX_CACHE_SIZE = 100
+
+
+async def own_character_select_autocompletion(
+        interaction: discord.Interaction, current: str
+) -> List[app_commands.Choice[str]]:
     data = []
+    user_id = interaction.user.id
     guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    current = unidecode(str.title(current))
-    cursor.execute(
-        "SELECT True_Character_Name, Character_Name from Player_Characters where Player_Name = ? AND Character_Name LIKE ? OR Player_Name = ? AND Nickname LIKE ?",
-        (interaction.user.name, f"%{current}%", interaction.user.name, f"%{current}%"))
-    character_list = cursor.fetchall()
-    for characters in character_list:
-        if current in characters[1]:
-            data.append(app_commands.Choice(name=characters[1], value=characters[1]))
-    cursor.close()
-    db.close()
+    _, current_fixed = shared_functions.name_fix(current)
+    current_prefix = current_fixed.lower()
+    cache_key = (user_id, current_prefix)
+
+    async with autocomplete_cache.lock:
+        cached_result = autocomplete_cache.cache.get(cache_key)
+
+    async with autocomplete_cache.lock:
+        if len(autocomplete_cache.cache) >= MAX_CACHE_SIZE:
+            # Remove the oldest entry
+            autocomplete_cache.cache.pop(next(iter(autocomplete_cache.cache)))
+    if cached_result is not None:
+        character_list = cached_result
+    else:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            await cursor.execute(
+                """
+                SELECT True_Character_Name, Character_Name
+                FROM Player_Characters
+                WHERE Player_Name = ?
+                AND (LOWER(Character_Name) LIKE ? OR LOWER(Nickname) LIKE ?)
+                LIMIT 5
+                """,
+                (interaction.user.name, f"{current_prefix}%", f"{current_prefix}%")
+            )
+            character_list = await cursor.fetchall()
+            # Cache the result
+            async with autocomplete_cache.lock:
+                autocomplete_cache.cache[cache_key] = character_list
+
+    for character in character_list:
+        if current_prefix in character[1].lower():
+            data.append(app_commands.Choice(name=character[1], value=character[1]))
     return data
+
+
+async def character_select_autocompletion(interaction: discord.Interaction, current: str
+                                          ) -> List[app_commands.Choice[str]]:
+    data = []
+    user_id = interaction.user.id
+    guild_id = interaction.guild_id
+    _, current_fixed = shared_functions.name_fix(current)
+    current_prefix = current_fixed.lower()
+    cache_key = (user_id, current_prefix)
+
+    async with autocomplete_cache.lock:
+        cached_result = autocomplete_cache.cache.get(cache_key)
+
+    if cached_result is not None:
+        character_list = cached_result
+    else:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            await cursor.execute(
+                """
+                SELECT True_Character_Name, Character_Name
+                FROM Player_Characters
+                WHERE LOWER(Character_Name) LIKE ? OR LOWER(Nickname) LIKE ?
+                LIMIT 5
+                """,
+                (interaction.user.name, f"{current_prefix}%", f"{current_prefix}%")
+            )
+            character_list = await cursor.fetchall()
+            # Cache the result
+            async with autocomplete_cache.lock:
+                autocomplete_cache.cache[cache_key] = character_list
+
+    for character in character_list:
+        if current_prefix in character[1].lower():
+            data.append(app_commands.Choice(name=character[1], value=character[1]))
+    return data
+
+
+async def clear_autocomplete_cache():
+    while True:
+        await asyncio.sleep(300)  # Wait for 5 minutes
+        async with autocomplete_cache.lock:
+            autocomplete_cache.cache.clear()
 
 
 async def get_plots_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
@@ -1036,6 +1113,45 @@ def validate_worldanvil(url: str) -> Tuple[bool, str, int]:
         return False, "An error occurred during validation.", -1  # Exception case uses step indicator -1
 
 
+def validate_vtt(url: str) -> Tuple[bool, str, int]:
+    """
+    Validates a World Anvil character sheet URL.
+
+    Args:
+        url (str): The URL to validate.
+
+    Returns:
+        Tuple[bool, str, int]: A tuple containing a boolean indicating validity, an error message if invalid, and a step indicator.
+    """
+    try:
+        parsed_url = urlparse(url)
+
+        # Check the URL scheme
+        if parsed_url.scheme != 'https':
+            return False, "URL must start with 'https://'.", 0
+
+        # Check the netloc (domain)
+        if parsed_url.netloc not in ('roll20.net', 'app.roll20.net', 'forge-vtt.com'):
+            return False, "URL must be from roll20 or forge.", 1
+
+        return True, "", -1  # Success case includes step indicator -1
+    except Exception as e:
+        logging.error(f"Error validating World Anvil link '{url}': {e}")
+        return False, "An error occurred during validation.", -1  # Exception case uses step indicator -1
+
+
+def validate_hammertime(hammertime: str) -> Union[tuple[bool, tuple[str, str, str, str]], tuple[bool, str]]:
+    try:
+        if len(hammertime) == 10 or len(hammertime) == 16:
+            hammertime = hammertime if len(hammertime) == 10 else hammertime[3:13]
+            date = "<t:" + hammertime + ":D>"
+            hour = "<t:" + hammertime + ":t>"
+            arrival = "<t:" + hammertime + ":R>"
+            return True, (date, hour, arrival, hammertime)
+        else:
+            return False, "Invalid timestamp format. Please provide a valid timestamp."
+    except (ValueError, IndexError) as e:
+        return False, "Invalid timestamp format. Please provide a valid timestamp."
 def ordinal(n):
     if 11 <= (n % 100) <= 13:
         suffix = "th"
@@ -1454,7 +1570,6 @@ class ShopView(discord.ui.View):
         except (discord.HTTPException, AttributeError) as e:
             logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
 
-
     async def on_timeout(self):
         """Disable buttons when the view times out."""
         for child in self.children:
@@ -1530,11 +1645,17 @@ class RecipientAcknowledgementView(discord.ui.View):
         try:
             async with aiosqlite.connect(f"Pathparser_{self.interaction.guild_id}.sqlite") as conn:
                 cursor = await conn.cursor()
-                await cursor.execute("SELECT Search From Admin WHERE identifier = 'Character_Transaction_Channel")
+                await cursor.execute("SELECT Search FROM Admin WHERE identifier = 'Character_Transaction_Channel'")
                 channel_id = await cursor.fetchone()
-                channel = self.interaction.guild.get_channel(channel_id[0])
+                if channel_id is None:
+                    await self.interaction.followup.send(
+                        "Character Transaction Channel not found in the database.",
+                        ephemeral=True
+                    )
+                    return
+                channel = self.interaction.guild.get_channel(int(channel_id[0]))
                 if not channel:
-                    channel = await self.interaction.guild.fetch_channel(channel_id[0])
+                    channel = await self.interaction.guild.fetch_channel(int(channel_id[0]))
                 if channel:
                     send_message = await channel.send(
                         content=self.content,
@@ -1542,7 +1663,9 @@ class RecipientAcknowledgementView(discord.ui.View):
                         view=self
                     )
                     await self.interaction.followup.send(
-                        f"Message sent to the Character Transaction Channel. {send_message.jump_url}")
+                        f"Message sent to the Character Transaction Channel. {send_message.jump_url}",
+                        ephemeral=True
+                    )
                 else:
                     await self.interaction.followup.send(
                         content=self.content,
@@ -1551,6 +1674,10 @@ class RecipientAcknowledgementView(discord.ui.View):
                     )
         except (discord.HTTPException, AttributeError, aiosqlite.Error) as e:
             logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
+            await self.interaction.followup.send(
+                "An error occurred while trying to send the message. Please try again later.",
+                ephemeral=True
+            )
 
     async def on_timeout(self):
         """Disable buttons when the view times out."""
@@ -1620,8 +1747,6 @@ class SelfAcknowledgementView(discord.ui.View):
         except (discord.HTTPException, AttributeError) as e:
             logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
 
-
-
     async def on_timeout(self):
         """Disable buttons when the view times out."""
         for child in self.children:
@@ -1630,7 +1755,8 @@ class SelfAcknowledgementView(discord.ui.View):
             try:
                 await self.message.edit(content=self.content, embed=self.embed, view=self)
             except (discord.HTTPException, AttributeError) as e:
-                logging.error(f"Failed to edit message on timeout for user {self.user_id} in guild {self.interaction.guild.id}: {e}")
+                logging.error(
+                    f"Failed to edit message on timeout for user {self.user_id} in guild {self.interaction.guild.id}: {e}")
 
     async def accept(self, interaction: discord.Interaction):
         """Handle the accept action."""

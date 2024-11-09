@@ -6,6 +6,7 @@ from test_functions import TestCommands
 from commands.character_commands import CharacterCommands
 from commands.admin_commands import AdminCommands
 import logging
+import shared_functions
 intents = discord.Intents.default()
 intents.typing = True
 intents.message_content = True
@@ -31,7 +32,7 @@ async def on_disconnect():
     print("Bot is disconnecting.")
 
 bot.run(os.getenv("DISCORD_TOKEN_V2"))
-
+bot.loop.create_task(shared_functions.clear_autocomplete_cache())
 
 
 logging.basicConfig(

@@ -21,6 +21,122 @@ from decimal import Decimal, ROUND_HALF_UP
 os.chdir("C:\\pathparser")
 
 
+async def create_session(
+        source_info: tuple[str, int], # Author, guild_id
+        session_name: str, # Name of the session
+        session_range_package: tuple[str, int], # Name of the session range, ID of the session range
+        player_limit: int, # Player limit
+        play_time: str, # HammerTime
+        plot: str, # WorldAnvil Plot
+        play_location_package: tuple[str, str], # Play location, game link
+        information_package: tuple[str, str]) -> int: # Overview, description
+    try:
+        author, guild_id = source_info
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            session_range_name, session_range_id = session_range_package
+            play_location, game_link = play_location_package
+            overview, description = information_package
+            await cursor.execute(
+                f"INSERT INTO Sessions (GM_Name, Session_Name, Session_Range, Session_Range_ID, Play_Location, Play_Time, game_link, Overview, Description, Player_Limit, Plot, IsActive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (author, session_name, session_range_name, session_range_id, play_location, play_time, game_link, overview, description, player_limit, plot, 1))
+            await db.commit()
+            await cursor.execute(f"SELECT Session_ID from Sessions WHERE Session_Name = ? AND GM_Name = ? ORDER BY Session_ID Desc Limit 1",
+                                 (session_name, author))
+            session_id = await cursor.fetchone()
+            return session_id[0]
+    except (aiosqlite, TypeError, ValueError) as e:
+        logging.exception(f"An error occurred whilst creating a session: {e}")
+        return 0
+
+async def edit_session(
+        source_info: tuple[str, int],  # Author, guild_id
+        session_name: str,  # Name of the session
+        session_range_package: tuple[str, int],  # Name of the session range, ID of the session range
+        player_limit: int,  # Player limit
+        play_time: str,  # HammerTime
+        plot: str, # WorldAnvil Plot
+        play_location_package: tuple[str, str],  # Play location, game link
+        information_package: tuple[str, str]) -> int:  # Overview, description
+    try:
+        author, guild_id = source_info
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            session_range_name, session_range_id = session_range_package
+            play_location, game_link = play_location_package
+            overview, description = information_package
+            await cursor.execute(
+                f"UPDATE Sessions SET Session_Name = ?, Session_Range = ?, Session_Range_ID = ?, Play_Location = ?, Play_Time = ?, game_link = ?, Overview = ?, Description = ?, Player_Limit = ?, plot = ?) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (session_name, session_range_name, session_range_id, play_location, play_time, game_link, overview, description, player_limit, plot))
+            await db.commit()
+            await cursor.execute(
+                f"SELECT Session_ID from Sessions WHERE Session_Name = ? AND GM_Name = ? ORDER BY Session_ID Desc Limit 1",
+                (session_name, author))
+            session_id = await cursor.fetchone()
+            return session_id[0]
+    except (aiosqlite, TypeError, ValueError) as e:
+        logging.exception(f"An error occurred whilst creating a session: {e}")
+        return 0
+
+
+async def delete_session(
+        session_id: int,
+        guild_id: int) -> None:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute(f"UPDATE Sessions SET IsActive = 0 WHERE Session_ID = ?", (session_id,))
+            await db.commit()
+
+    except (aiosqlite, TypeError, ValueError) as e:
+        logging.exception(f"An error occurred whilst deleting a session: {e}")
+        raise e
+
+async def validate_level_range(guild: discord.Guild,
+        session_range_id: int,
+        overflow: int) -> Union[discord.Role, None]:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
+            cursor = await db.cursor()
+            # overflow 1 is current range only, 2 is include next level bracket, 3 is include lower level bracket, 4 is ignore role requirements
+            if overflow == 1:
+                return None
+            elif overflow == 2:
+                await cursor.execute(f"SELECT min(level), max(level) FROM Milestone_System WHERE Role_ID = ?", (session_range_id,))
+                session_range_info = await cursor.fetchone()
+                if session_range_info is not None:
+                    await cursor.execute(f"SELECT Role_ID FROM Level_Range WHERE level = ?", (session_range_info[1] + 1,))
+                    overflow_range_id = await cursor.fetchone()
+                    session_range = guild.get_role(overflow_range_id[0])
+                    if session_range is not None:
+                        return session_range
+                    else:
+                        return None
+                else:
+                    return None
+            elif overflow == 3:
+                await cursor.execute(f"SELECT min(level), max(level) FROM Level_Range WHERE Role_ID = ?", (session_range_id,))
+                session_range_info = cursor.fetchone()
+                if session_range_info is not None:
+                    await cursor.execute(f"SELECT Role_ID FROM Level_Range WHERE level = ?", (session_range_info[0] - 1,))
+                    overflow_range_id = await cursor.fetchone()
+                    session_range = guild.get_role(overflow_range_id[0])
+                    if session_range is not None:
+                        return session_range
+                    else:
+                        return None
+                else:
+                    return None
+            else:
+                return None
+    except (TypeError, ValueError) as e:
+        logging.exception(f"An error occurred whilst validating a level range: {e}")
+        return None
+    except discord.DiscordException as e:
+        logging.exception(f"An error occurred whilst attempting to fetch the level range: {e}")
+
+
+
 class GamemasterCommands(commands.Cog, name='Gamemaster'):
     def __init__(self, bot):
         self.bot = bot
@@ -35,6 +151,11 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
         description='Commands related to games mastering fame.'
     )
 
+    session_group = discord.app_commands.Group(
+        name='session',
+        description='Commands related to games mastering sessions.'
+    )
+
     @fame_group.command()
     @app_commands.choices(acceptance=[discord.app_commands.Choice(name='accept', value=1),
                                       discord.app_commands.Choice(name='rejectance', value=2)])
@@ -46,7 +167,8 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
         guild = interaction.guild
         acceptance = 1 if acceptance == 1 else acceptance.value
         author_id = interaction.user.id
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        try:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
                 f"SELECT Character_Name, Prestige_Cost, Item_Name from A_Audit_Prestige Where Proposition_ID = ?",
@@ -94,40 +216,209 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                 else:
                     await interaction.response.send_message(
                         f"Character {item_id[0]} does not exist! Could not complete transaction!")
+        except (aiosqlite, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred whilst managing a proposition: {e}")
+            await interaction.response.send_message(
+                f"An error occurred whilst managing a proposition. Please try again later.")
 
     @fame_group.command()
     @app_commands.autocomplete(character=shared_functions.character_select_autocompletion)
-    async def manage(self, interaction: discord.Interaction, character: str, fame: int, prestige: int,
-                     reason: typing.Optional[str]):
-        "Add or remove from a player's fame and prestige!"
+    async def manage(self, interaction: discord.Interaction, character: str, reason: typing.Optional[str], fame: int = 0, prestige: int = 0,
+                     ):
+        """Add or remove from a player's fame and prestige!"""
         guild_id = interaction.guild_id
         author = interaction.user.name
         guild = interaction.guild
-        acceptance = 1 if acceptance == 1 else acceptance.value
+        author_id = interaction.user.id
+        try:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute(f"Select Thread_ID, Fame, Prestige from Player_Characters where Character_Name = ?",
+                                    (character,))
+                player_info = await cursor.fetchone()
+                if player_info is not None:
+                    (thread_id, current_fame, current_prestige) = player_info
+                    calculated_fame = character_commands.calculate_fame(character_name=character, fame=current_fame,
+                                                                        prestige=current_prestige, fame_change=fame,
+                                                                        prestige_change=prestige)
+                    (fame_total, fame_change, prestige_total, final_prestige_change) = calculated_fame
+                    character_updates = shared_functions.UpdateCharacterData(character_name=character,
+                                                                             fame_package=(fame_total, prestige_total))
+                    await shared_functions.update_character(guild_id=guild_id, change=character_updates)
+                    reason =  f"fame and prestige change by {interaction.user.name}.\r\n" + reason if reason is not None else f"fame and prestige change by {interaction.user.name}."
+
+                    character_changes = shared_functions.CharacterChange(character_name=character, author=interaction.user.name,
+                                                                         total_fame=current_fame, total_prestige=current_prestige,
+                                                                         fame=fame_change, prestige=final_prestige_change,
+                                                                         source=reason)
+                    log_update = shared_functions.log_embed(guild=guild, thread=thread_id, change=character_changes,
+                                                            bot=self.bot)
+                    await interaction.followup.send(embed=log_update)
+                else:
+                    await interaction.response.send_message(
+                        f"Character {character} does not exist! Could not complete transaction!")
+        except (aiosqlite, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred whilst updating a character's fame & prestige: {e}")
+            await interaction.response.send_message(
+                f"An error occurred whilst managing a proposition. Please try again later.")
+
+    @session_group.command()
+    @app_commands.describe(hammer_time="Please use the plain code hammer time provides that appears like </>, ")
+    @app_commands.describe(overflow="Allow for adjust role ranges!")
+    @app_commands.choices(overflow=[
+        discord.app_commands.Choice(name='current range only!', value=1),
+        discord.app_commands.Choice(name='include next level bracket!', value=2),
+        discord.app_commands.Choice(name='include lower level bracket!', value=3),
+        discord.app_commands.Choice(name='ignore role requirements!', value=4)])
+    async def create(self, interaction: discord.Interaction,
+                     session_name: str,
+                     session_range: discord.Role,
+                     player_limit: int,
+                     play_location: str,
+                     game_link: typing.Optional[str],
+                     group_id: typing.Optional[int],
+                     hammer_time: str,
+                     overview: str,
+                     description: str,
+                     plot: str = '9762aebb-43ae-47d5-8c7b-30c34a55b9e5',
+                     overflow: discord.app_commands.Choice[int] = 1):
+        """Create a new session."""
+        if plot is not None:
+            plot = str.replace(
+                str.replace(str.replace(str.replace(str.replace(str.title(plot), ";", ""), "(", ""), ")", ""), "[", ""),
+                "]", "")
+            if ' ' in plot:
+                plot = await shared_functions.get_precreated_plots(interaction, plot)
+                plot = plot[1]
+        guild_id = interaction.guild_id
+        author = interaction.user.name
         author_id = interaction.user.id
         db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
         cursor = db.cursor()
-        cursor.execute(f"SELECT Character_Name from A_Audit_Prestige Where Proposition_ID = ?", (proposition_id,))
-        item_id = cursor.fetchone()
-        reason = "N/A" if reason is None else reason
-        cursor.execute(f"Select Thread_ID, Fame, Prestige from Player_Characters where Character_Name = ?",
-                       (item_id[0],))
-        player_info = cursor.fetchone()
-        if player_info is not None:
-            logging_embed = discord.Embed(title=f"{author} has adjusted your fame or prestige!",
-                                          description=f"**changed fame**: {fame} **changed prestige**: {prestige}",
-                                          color=discord.Colour.red())
-            embed.add_field(name=f'New Totals:',
-                            value=f'**fame**: {fame + player_info[1]}, **prestige**: {prestige + player_info[2]} ',
-                            inline=False)
-            logging_thread = guild.get_thread(player_info[0])
-            await logging_thread.send(embed=logging_embed)
-            await Event.glorify(self, guild_id, author, character, fame + player_info[1], prestige + player_info[2],
-                                reason)
+        overflow = 1 if overflow == 1 else overflow.value
+        session_range_name = session_range.name
+        session_range_id = session_range.id
+        if game_link is not None:
+            game_link_valid = str.lower(game_link[0:4])
+            if game_link_valid == 'http':
+                embed = discord.Embed(title=f"{session_name}", url=f'{game_link}',
+                                      description=f"Play Location: {play_location}", color=discord.Colour.red())
+            else:
+                game_link = 'HTTPS://' + game_link
+                embed = discord.Embed(title=f"{session_name}", url=f'{game_link}',
+                                      description=f"Play Location: {play_location}", color=discord.Colour.red())
         else:
-            await interaction.response.send_message(f"Character {character} does not exist!")
-        cursor.close()
-        db.close()
+            embed = discord.Embed(title=f"{session_name}", description=f"Session Range: {session_range}",
+                                  color=discord.Colour.red())
+
+
+        await EventCommand.create_session(self, author, session_name, session_range_name, session_range_id,
+                                          play_location, timing, game_link, guild_id, author, overview, description,
+                                          player_limit, overflow, plot)
+        sql = f"SELECT Session_ID from Sessions WHERE Session_Name = ? AND GM_Name = ? ORDER BY Session_ID Desc Limit 1"
+        val = (session_name, author)
+        cursor.execute(sql, val)
+        info = cursor.fetchone()
+        print(overflow)
+        if overflow == 1:
+            footer_text = f'Session ID: {info[0]}.'
+            session_ranges = f'<@&{session_range_id}>'
+        elif overflow == 2:
+            cursor.execute(f"SELECT min(level), max(level) FROM Level_Range WHERE Role_ID = ?", (session_range_id,))
+            session_range_info = cursor.fetchone()
+            footer_text = f'Session ID: {info[0]}.'
+            if session_range_info is not None and session_range_info[1] + 1 < 20:
+                cursor.execute(f"SELECT Role_ID FROM Level_Range WHERE level = ?", (session_range_info[1] + 1,))
+                overflow_range_id = cursor.fetchone()
+                session_ranges = f'<@&{session_range_id}> AND <@&{overflow_range_id[0]}>'
+            else:
+                session_ranges = f'<@&{session_range_id}>'
+        elif overflow == 3:
+            footer_text = f'Session ID: {info[0]}.'
+            cursor.execute(f"SELECT min(level), max(level) FROM Level_Range WHERE Role_ID = ?", (session_range_id,))
+            session_range_info = cursor.fetchone()
+            if session_range_info is not None and session_range_info[0] - 1 > 3:
+                cursor.execute(f"SELECT Role_ID FROM Level_Range WHERE level = ?", (session_range_info[0] - 1,))
+                overflow_range_id = cursor.fetchone()
+                session_ranges = f'<@&{session_range_id}> AND <@&{overflow_range_id[0]}>'
+            else:
+                session_ranges = f'<@&{session_range_id}>'
+        else:
+            session_ranges = f'<@&{session_range_id}>'
+            footer_text = f'Session ID: {info[0]}. Any level can join.'
+        try:
+            embed.set_author(name=f'{author}')
+            embed.add_field(name="Session Range", value=session_ranges)
+            embed.add_field(name="Player Limit", value=f'{player_limit}')
+            embed.add_field(name="Date & Time:", value=f'{date} at {hour} which is {arrival}', inline=False)
+            embed.add_field(name="Overview:", value=f'{overview}', inline=False)
+            embed.add_field(name="Description:", value=f'{description}', inline=False)
+            embed.set_footer(text=footer_text)
+            cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
+            sessions_channel = cursor.fetchone()
+            session_channel = await bot.fetch_channel(sessions_channel[0])
+            session_text = f'<@{interaction.user.id}> is running a session.\r\n{session_ranges}'
+            if group_id is not None:
+                print(f"{group_id} group id A was not None")
+                cursor.execute(
+                    f"Select SG.Group_Name, SP.Group_ID, SP.Player_Name, PC.Player_ID  from Sessions_Presign SP left join Player_Characters PC on SP.Player_Name =  PC.Player_Name left join Sessions_group SG on SP.group_id = SG.group_id where SP.Group_ID = ? group by player_id",
+                    (group_id,))
+                group_base = cursor.fetchall()
+                group_name = group_base[0]
+                group_name = group_name[0]
+                if group_base is not None:
+                    print(f"{group_id} group base B was not None")
+                    session_text = f'<@{interaction.user.id}> is running a session for party **{group_name}** \r\nParty Members: '
+                    await EventCommand.clear_group(self, guild_id, group_id)
+                    for player in group_base:
+                        session_text += f'<@{player[3]}>'
+            msg = await session_channel.send(content=session_text, embed=embed,
+                                             allowed_mentions=discord.AllowedMentions(roles=True))
+            message = msg.id
+            thread = await msg.create_thread(name=f"{info[0]}: {session_name}", auto_archive_duration=10080,
+                                             reason=f"{description}")
+            await EventCommand.create_session_message(self, info[0], message, thread.id, guild_id)
+            await interaction.response.send_message(f"Session created! Session ID: {info[0]}.", ephemeral=True)
+            cursor.close()
+            db.close()
+        except discord.app_commands.errors.CommandInvokeError:
+            embed = discord.Embed(title=f"{session_name}", description=f"Session Range: {session_range}",
+                                  color=discord.Colour.red())
+            embed.set_author(name=f'{author}')
+            embed.add_field(name="Play Location", value=f'{play_location}')
+            embed.add_field(name="Player Limit", value=f'{player_limit}')
+            embed.add_field(name="Date & Time:", value=f'{date} at {hour} which is {arrival}', inline=False)
+            embed.add_field(name="Overview:", value=f'{overview}', inline=False)
+            embed.add_field(name="Description:", value=f'{description}', inline=False)
+            embed.set_footer(text=footer_text)
+            cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
+            sessions_channel = cursor.fetchone()
+            session_channel = await bot.fetch_channel(sessions_channel[0])
+            session_text = f'<@{interaction.user.id}> is running a session.\r\n{session_ranges}'
+            if group_id is not None:
+                print(f"{group_id} group id B was not None")
+                cursor.execute(
+                    f"Select SG.Group_Name, SP.Group_ID, SP.Player_Name, PC.Player_ID  from Sessions_Presign SP left join Player_Characters PC on SP.Player_Name =  PC.Player_Name left join Sessions_group SG on SP.group_id = SG.group_id where SP.Group_ID = ? group by player_id",
+                    (group_id,))
+                group_base = cursor.fetchall()
+                group_name = group_base[0]
+                group_name = group_name[0]
+                if group_base is not None:
+                    print(f"{group_id} group base B was not None")
+                    session_text += f'<@{interaction.user.id}> is running a session for party **{group_name}** \r\nParty Members: '
+                    await EventCommand.clear_group(self, guild_id, group_id)
+                    for player in group_base:
+                        session_text += f'<@{player[3]}>'
+            msg = await session_channel.send(content=session_text, embed=embed,
+                                             allowed_mentions=discord.AllowedMentions(roles=True))
+            thread = await msg.create_thread(name=f"Session name: {session_name} Session ID: {info[0]}",
+                                             auto_archive_duration=10080, reason=f"{description}")
+            message = msg.id
+            await interaction.response.send_message(f"Session created! Session ID: {info[0]}.", ephemeral=True)
+            await EventCommand.create_session_message(self, {info[0]}, message, thread.id, guild_id)
+            cursor.close()
+            db.close()
+
 
 
 """@gamemaster.command()
@@ -147,113 +438,6 @@ async def help(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-
-@gamemaster.command()
-@app_commands.describe(hammer_time="Please use the plain code hammer time provides that appears like </>, ")
-@app_commands.describe(overflow="Allow for adjust role ranges!")
-@app_commands.choices(overflow=[discord.app_commands.Choice(name='current range only!', value=1), discord.app_commands.Choice(name='include next level bracket!', value=2), discord.app_commands.Choice(name='include lower level bracket!', value=3),discord.app_commands.Choice(name='ignore role requirements!', value=4)])
-async def create(interaction: discord.Interaction, session_name: str, session_range: discord.Role, player_limit: int, play_location: str, game_link: typing.Optional[str], hammer_time: str, overview: str, description: str, overflow: discord.app_commands.Choice[int] = 1):
-    "Create a new session."
-    guild_id = interaction.guild_id
-    author = interaction.user.name
-    author_id = interaction.user.id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    overflow = 1 if overflow == 1 else overflow.value
-    session_range_name = session_range.name
-    session_range_id = session_range.id
-    if game_link is not None:
-        game_link_valid = str.lower(game_link[0:4])
-        if game_link_valid == 'http':
-            embed = discord.Embed(title=f"{session_name}", url=f'{game_link}', description=f"Play Location: {play_location}", color=discord.Colour.red())
-        else:
-            game_link = 'HTTPS://' + game_link
-            embed = discord.Embed(title=f"{session_name}", url=f'{game_link}', description=f"Play Location: {play_location}", color=discord.Colour.red())
-    else:
-        embed = discord.Embed(title=f"{session_name}", description=f"Session Range: {session_range}", color=discord.Colour.red())
-
-    hammer_timing = hammer_time[0:3]
-    if hammer_timing == "<t:":
-        timing = hammer_time[3:13]
-        date = "<t:" + timing + ":D>"
-        hour = "<t:" + timing + ":t>"
-        arrival = "<t:" + timing + ":R>"
-    else:
-        timing = hammer_time
-        date = "<t:" + timing + ":D>"
-        hour = "<t:" + timing + ":t>"
-        arrival = "<t:" + timing + ":R>"
-    await Event.create_session(self, author, session_name, session_range_name, session_range_id, play_location, timing, game_link, guild_id, author, overview, description, player_limit, overflow)
-    sql = f"SELECT Session_ID from Sessions WHERE Session_Name = ? AND GM_Name = ? ORDER BY Session_ID Desc Limit 1"
-    val = (session_name, author)
-    cursor.execute(sql, val)
-    info = cursor.fetchone()
-    print(overflow)
-    if overflow == 1:
-        footer_text = f'Session ID: {info[0]}.'
-        session_ranges = f'<@&{session_range_id}>'
-    elif overflow == 2:
-        cursor.execute(f"SELECT min(level), max(level) FROM Level_Range WHERE Role_ID = ?", (session_range_id,))
-        session_range_info = cursor.fetchone()
-        footer_text = f'Session ID: {info[0]}.'
-        if session_range_info is not None and session_range_info[1] + 1 < 20:
-            cursor.execute(f"SELECT Role_ID FROM Level_Range WHERE level = ?", (session_range_info[1] + 1, ))
-            overflow_range_id = cursor.fetchone()
-            session_ranges = f'<@&{session_range_id}> AND <@&{overflow_range_id[0]}>'
-        else:
-            session_ranges = f'<@&{session_range_id}>'
-    elif overflow == 3:
-        footer_text = f'Session ID: {info[0]}.'
-        cursor.execute(f"SELECT min(level), max(level) FROM Level_Range WHERE Role_ID = ?", (session_range_id,))
-        session_range_info = cursor.fetchone()
-        if session_range_info is not None and session_range_info[0] - 1 > 3:
-            cursor.execute(f"SELECT Role_ID FROM Level_Range WHERE level = ?", (session_range_info[0] - 1,))
-            overflow_range_id = cursor.fetchone()
-            session_ranges = f'<@&{session_range_id}> AND <@&{overflow_range_id[0]}>'
-        else:
-            session_ranges = f'<@&{session_range_id}>'
-    else:
-        session_ranges = f'<@&{session_range_id}>'
-        footer_text = f'Session ID: {info[0]}. Any level can join.'
-    try:
-        embed.set_author(name=f'{author}')
-        embed.add_field(name="Session Range", value=session_ranges)
-        embed.add_field(name="Player Limit", value=f'{player_limit}')
-        embed.add_field(name="Date & Time:", value=f'{date} at {hour} which is {arrival}', inline=False)
-        embed.add_field(name="Overview:", value=f'{overview}', inline=False)
-        embed.add_field(name="Description:", value=f'{description}', inline=False)
-        embed.set_footer(text=footer_text)
-        cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
-        sessions_channel = cursor.fetchone()
-        session_channel = await bot.fetch_channel(sessions_channel[0])
-        session_text = f'<@{interaction.user.id}> is running a session.\r\n{session_ranges}'
-        msg = await session_channel.send(content=session_text, embed=embed, allowed_mentions=discord.AllowedMentions(roles=True))
-        message = msg.id
-        thread = await msg.create_thread(name=f"{info[0]}: {session_name}", auto_archive_duration=60, reason=f"{description}")
-        await Event.create_session_message(self, info[0], message, thread.id, guild_id)
-        await interaction.response.send_message(f"Session created! Session ID: {info[0]}.", ephemeral=True)
-        cursor.close()
-        db.close()
-    except discord.app_commands.errors.CommandInvokeError:
-        embed = discord.Embed(title=f"{session_name}", description=f"Session Range: {session_range}", color=discord.Colour.red())
-        embed.set_author(name=f'{author}')
-        embed.add_field(name="Play Location", value=f'{play_location}')
-        embed.add_field(name="Player Limit", value=f'{player_limit}')
-        embed.add_field(name="Date & Time:", value=f'{date} at {hour} which is {arrival}', inline=False)
-        embed.add_field(name="Overview:", value=f'{overview}', inline=False)
-        embed.add_field(name="Description:", value=f'{description}', inline=False)
-        embed.set_footer(text=footer_text)
-        cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
-        sessions_channel = cursor.fetchone()
-        session_channel = await bot.fetch_channel(sessions_channel[0])
-        session_text = f'<@{interaction.user.id}> is running a session.\r\n{session_ranges}'
-        msg = await session_channel.send(content=session_text, embed=embed, allowed_mentions=discord.AllowedMentions(roles=True))
-        thread = await msg.create_thread(name=f"Session name: {session_name} Session ID: {info[0]}", auto_archive_duration=60, reason=f"{description}")
-        message = msg.id
-        await interaction.response.send_message(f"Session created! Session ID: {info[0]}.", ephemeral=True)
-        await Event.create_session_message(self, {info[0]}, message, thread.id, guild_id)
-        cursor.close()
-        db.close()
 
 
 @gamemaster.command()

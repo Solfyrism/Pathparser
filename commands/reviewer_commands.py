@@ -38,13 +38,13 @@ async def register_character_embed(character_name: str, guild: discord.Guild) ->
 
             # Fetch character info
             await cursor.execute(
-                "
+                """
                 SELECT player_name, player_id, True_Character_Name, Title, Titles, Description, Oath, Level,
                        Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value,
                        Essence, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name,
                        Tradition_Link, Template_Name, Template_Link, Article_Link, Message_ID
                 FROM Player_Characters WHERE Character_Name = ?
-                ", (character_name,))
+                """, (character_name,))
             character_info = await cursor.fetchone()
             if not character_info:
                 return f"No character found with Character_Name '{character_name}'."
@@ -234,10 +234,10 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
             cursor = await db.cursor()
             _, character_name = name_fix(character_name)
             await cursor.execute(
-                "Select Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description,
+                """Select Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, 
                 Oath, Tier, Trials, Trials_Required,
                  Essence, Color, Mythweavers, Image_Link, tmp_bio
-                 FROM A_STG_Player_Characters where Character_Name = ?",
+                 FROM A_STG_Player_Characters where Character_Name = ?""",
                 (character_name,))
             player_info = await cursor.fetchone()
             if not player_info:
@@ -303,9 +303,9 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                         (gold_difference, gold_total, gold_value_total, gold_value_max_total,
                          transaction_id) = gold_calculation
                     await cursor.execute(
-                        "INSERT INTO Player_Characters (Player_Name, Player_ID, True_Character_Name, Character_Name,
-                        Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required,
-                        Gold, Gold_Value, Gold_value_Max, Essence, Color, Mythweavers, Image_Link, Fame) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        """INSERT INTO Player_Characters (Player_Name, Player_ID, True_Character_Name, Character_Name, 
+                        Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, 
+                        Gold, Gold_Value, Gold_value_Max, Essence, Color, Mythweavers, Image_Link, Fame) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (info_player_name, info_player_id, info_true_character_name, info_character_name,
                          info_nickname, info_titles, info_description, info_oath, starting_level[0], info_tier,
                          info_minimum_milestones, info_milestones_to_level, info_trials, info_trials_required,
