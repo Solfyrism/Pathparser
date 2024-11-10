@@ -408,7 +408,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                 hammer_time_field = hammer_time
             else:
                 if hammer_time_valid[1]:
-                    (date, time, arrival) = hammer_time_valid[2]
+                    (date, time, arrival, hammer_time) = hammer_time_valid[2]
                     hammer_time_field = "{date} at {time} which is {arrival}"
                 else:
                     (date, time, arrival) = hammer_time_valid[2]
@@ -605,7 +605,39 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
             logging.exception(f"An error occurred whilst creating a session: {e}")
             await interaction.followup.send("An error occurred whilst creating a session. Please try again later.")
 
-
+    @session_group.command(name='delete', description='Delete a session!')
+    async def delete(self, interaction: discord.Interaction, session_id: int):
+        """Delete an ACTIVE Session."""
+        guild_id = interaction.guild_id
+        guild = interaction.guild
+        author = interaction.user.name
+        author_id = interaction.user.id
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        sql = "SELECT Message, Session_Thread, Session_Name from Sessions WHERE Session_ID = ? AND GM_Name = ? AND IsActive = ? ORDER BY Created_Time Desc Limit 1"
+        val = (session_id, author, 1)
+        cursor.execute(sql, val)
+        info = cursor.fetchone()
+        if info is not None:
+            embed = discord.Embed(title=f"{info[1]}", description=f"This session has been cancelled.",
+                                  color=discord.Colour.red())
+            await Event.delete_session(self, session_id, guild_id, author)
+            embed.set_author(name=f'{author}')
+            embed.set_footer(text=f'Session ID: {session_id}.')
+            cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
+            session_channel_info = cursor.fetchone()
+            session_channel = await bot.fetch_channel(session_channel_info[0])
+            msg = await session_channel.fetch_message(info[0])
+            await msg.edit(embed=embed)
+            await interaction.response.send_message(
+                content=f"the following session of {info[2]} located at {msg.jump_url} has been cancelled.",
+                ephemeral=True)
+            thread = guild.get_thread(info[1])
+            await thread.delete()
+        if info is None:
+            await interaction.response.send_message(f"Invalid Session ID of {session_id} associated with host {author}")
+        cursor.close()
+        db.close()
 
 
 """@gamemaster.command()
@@ -754,40 +786,6 @@ async def edit(interaction: discord.Interaction, session_id: int, session_range:
     cursor.close()
     db.close()
 
-
-@gamemaster.command()
-async def delete(interaction: discord.Interaction, session_id: int):
-    "Delete an ACTIVE Session."
-    guild_id = interaction.guild_id
-    guild = interaction.guild
-    author = interaction.user.name
-    author_id = interaction.user.id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    sql = "SELECT Message, Session_Thread, Session_Name from Sessions WHERE Session_ID = ? AND GM_Name = ? AND IsActive = ? ORDER BY Created_Time Desc Limit 1"
-    val = (session_id, author, 1)
-    cursor.execute(sql, val)
-    info = cursor.fetchone()
-    if info is not None:
-        embed = discord.Embed(title=f"{info[1]}", description=f"This session has been cancelled.", color=discord.Colour.red())
-        await Event.delete_session(self, session_id, guild_id, author)
-        embed.set_author(name=f'{author}')
-        embed.set_footer(text=f'Session ID: {session_id}.')
-        cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
-        session_channel_info = cursor.fetchone()
-        session_channel = await bot.fetch_channel(session_channel_info[0])
-        msg = await session_channel.fetch_message(info[0])
-        await msg.edit(embed=embed)
-        await interaction.response.send_message(content=f"the following session of {info[2]} located at {msg.jump_url} has been cancelled.", ephemeral=True)
-        thread = guild.get_thread(info[1])
-        await thread.delete()
-    if info is None:
-        await interaction.response.send_message(f"Invalid Session ID of {session_id} associated with host {author}")
-    cursor.close()
-    db.close()
-
-
-# noinspection PyUnresolvedReferences
 @gamemaster.command()
 @app_commands.autocomplete(specific_character=character_select_autocompletion)
 @app_commands.describe(randomizer="for the purposes of picking a number of randomized players")

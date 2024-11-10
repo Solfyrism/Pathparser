@@ -1168,23 +1168,37 @@ def validate_vtt(url: str) -> Tuple[bool, str, int]:
         return False, "Invalid URL format.", -1  # Exception case uses step indicator -1
 
 
-def validate_hammertime(hammertime: str) -> Union[tuple[bool, bool, tuple[str, str, str, str]], tuple[bool, str]]:
+def validate_hammertime(hammertime: Union[str, datetime]) -> Union[Tuple[bool, bool, Tuple[str, str, str, str]], Tuple[bool, str]]:
     try:
-        if len(hammertime) == 10 or len(hammertime) == 16:
-            hammertime = hammertime if len(hammertime) == 10 else hammertime[3:13]
-            date = "<t:" + hammertime + ":D>"
-            hour = "<t:" + hammertime + ":t>"
-            arrival = "<t:" + hammertime + ":R>"
-            success = True
-            if datetime.fromtimestamp(int(hammertime)) > datetime.now() or datetime.fromtimestamp(int(hammertime)) < (datetime.now() - datetime.timedelta(days=365*5)):
-                valid_time = True # if the timestamp is in the future or more than 5 years ago, it's valid
-            else:
-                valid_time = False # if the timestamp is in the past 5 years, it's invalid
-            return success, valid_time, (date, hour, arrival, hammertime)
+        # Check if hammertime is already a 10-digit Unix timestamp
+        if hammertime.isdigit() and (len(hammertime) == 10 or len(hammertime) == 16):
+            # Use only the first 10 digits if length is 16 (e.g., with milliseconds)
+            hammertime = hammertime[:10]
+
+            # Convert hammertime to datetime object
+            dt_hammertime = datetime.fromtimestamp(int(hammertime))
+
         else:
-            return False, "Invalid timestamp format. Please provide a valid timestamp."
+            dt_hammertime = hammertime
+            hammertime = datetime.fromisoformat(dt_hammertime)
+
+
+        # Generate time formats for the Discord message
+        date = f"<t:{hammertime}:D>"
+        hour = f"<t:{hammertime}:t>"
+        arrival = f"<t:{hammertime}:R>"
+        success = True
+
+        # Check if the datetime is more than 5 years in the past or in the future
+        if dt_hammertime > datetime.now() or dt_hammertime < (datetime.now() - datetime.timedelta(days=365 * 5)):
+            valid_time = True  # valid if it's in the future or more than 5 years ago
+        else:
+            valid_time = False  # invalid if it's in the past 5 years
+
+        return success, valid_time, (date, hour, arrival, str(dt_hammertime))
+
     except (ValueError, IndexError) as e:
-        logging.exception(f"Error validating hammertime '{hammertime}, {e}")
+        logging.exception(f"Error validating hammertime '{hammertime}': {e}")
         return False, "Invalid timestamp format. Please provide a valid timestamp."
 
 def validate_worldanvil_link(guild_id: int, article_id: str) -> (
