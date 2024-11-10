@@ -1115,43 +1115,110 @@ def validate_worldanvil(url: str) -> Tuple[bool, str, int]:
 
 def validate_vtt(url: str) -> Tuple[bool, str, int]:
     """
-    Validates a World Anvil character sheet URL.
+    Validates a Virtual Tabletop (VTT) game link URL for platforms like Roll20 and Forge.
 
     Args:
         url (str): The URL to validate.
 
     Returns:
-        Tuple[bool, str, int]: A tuple containing a boolean indicating validity, an error message if invalid, and a step indicator.
+        Tuple[bool, str, int]: A tuple containing:
+            - A boolean indicating validity.
+            - An error message if invalid.
+            - A step indicator for the validation process.
     """
     try:
         parsed_url = urlparse(url)
+        scheme = parsed_url.scheme.lower()
+        domain = parsed_url.hostname.lower() if parsed_url.hostname else ''
+        path = parsed_url.path.lower()
+
+        # Step indicator starts at 0
+        step = 0
 
         # Check the URL scheme
-        if parsed_url.scheme != 'https':
-            return False, "URL must start with 'https://'.", 0
+        if scheme != 'https':
+            return False, "URL must start with 'https://'.", step
 
-        # Check the netloc (domain)
-        if parsed_url.netloc not in ('roll20.net', 'app.roll20.net', 'forge-vtt.com'):
-            return False, "URL must be from roll20 or forge.", 1
+        step += 1  # Step 1
 
+        # Define valid domains
+        valid_domains = ('roll20.net', 'forge-vtt.com')
+
+        # Check the domain
+        if not any(domain.endswith(valid_domain) for valid_domain in valid_domains):
+            return False, "URL must be from Roll20 or Forge.", step
+
+        step += 1  # Step 2
+
+        # Additional path validation for Roll20
+        if domain.endswith('roll20.net'):
+            if not path.startswith('/join/'):
+                return False, "Roll20 game links should start with '/join/'.", step
+
+        # Additional path validation for Forge
+        if domain.endswith('forge-vtt.com'):
+            if not path.startswith('/game/'):
+                return False, "Forge game links should start with '/game/'.", step
+
+        # All checks passed
         return True, "", -1  # Success case includes step indicator -1
-    except Exception as e:
-        logging.error(f"Error validating World Anvil link '{url}': {e}")
-        return False, "An error occurred during validation.", -1  # Exception case uses step indicator -1
+
+    except ValueError as e:
+        logging.error(f"Error parsing game link '{url}': {e}")
+        return False, "Invalid URL format.", -1  # Exception case uses step indicator -1
 
 
-def validate_hammertime(hammertime: str) -> Union[tuple[bool, tuple[str, str, str, str]], tuple[bool, str]]:
+def validate_hammertime(hammertime: str) -> Union[tuple[bool, bool, tuple[str, str, str, str]], tuple[bool, str]]:
     try:
         if len(hammertime) == 10 or len(hammertime) == 16:
             hammertime = hammertime if len(hammertime) == 10 else hammertime[3:13]
             date = "<t:" + hammertime + ":D>"
             hour = "<t:" + hammertime + ":t>"
             arrival = "<t:" + hammertime + ":R>"
-            return True, (date, hour, arrival, hammertime)
+            success = True
+            if datetime.fromtimestamp(int(hammertime)) > datetime.now() or datetime.fromtimestamp(int(hammertime)) < (datetime.now() - datetime.timedelta(days=365*5)):
+                valid_time = True # if the timestamp is in the future or more than 5 years ago, it's valid
+            else:
+                valid_time = False # if the timestamp is in the past 5 years, it's invalid
+            return success, valid_time, (date, hour, arrival, hammertime)
         else:
             return False, "Invalid timestamp format. Please provide a valid timestamp."
     except (ValueError, IndexError) as e:
+        logging.exception(f"Error validating hammertime '{hammertime}, {e}")
         return False, "Invalid timestamp format. Please provide a valid timestamp."
+
+def validate_worldanvil_link(guild_id: int, article_id: str) -> (
+        Optional)[dict]:
+    allowed_guilds = [883009758179762208, 280061170231017472]
+    if guild_id not in allowed_guilds:
+        logging.warning(f"Guild ID {guild_id} is not authorized to create articles.")
+        return None
+    try:
+        api_key = os.getenv('WORLD_ANVIL_API')
+        user_id = os.getenv('WORLD_ANVIL_USER')
+        if not api_key or not user_id:
+            logging.error("World Anvil API credentials are not set.")
+            return None
+
+        client = WaClient(
+            'pathparser',
+            'https://github.com/Solfyrism/Pathparser',
+            'V1.1',
+            api_key,
+            user_id
+        )
+
+        returned_page = client.article.get(article_id)
+
+        return returned_page
+    except Exception as e:
+        # I haven't ever gotten a proper exception from the World Anvil API, so this is a catch-all until I can specify it down. https://pypi.org/project/pywaclient/#exceptions has them, but I'm not sure how to catch them yet.
+        logging.exception(f"Error in retrieving article with ID '{article_id}': {e}")
+        return None
+
+
+
+
 def ordinal(n):
     if 11 <= (n % 100) <= 13:
         suffix = "th"
@@ -1787,6 +1854,9 @@ class SelfAcknowledgementView(discord.ui.View):
         raise NotImplementedError
 
 
+
+
+
 class DualView(discord.ui.View):
     """Base class for shop views with pagination."""
 
@@ -1956,6 +2026,9 @@ class DualView(discord.ui.View):
     async def get_max_items(self):
         """Get the total number of items. To be implemented in subclasses."""
         raise NotImplementedError
+
+
+
 
 
 logging.basicConfig(

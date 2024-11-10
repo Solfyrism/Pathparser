@@ -574,7 +574,7 @@ async def update_character_name(guild_id: int, character_name: str, new_characte
             await conn.commit()
             return_string = f"Updating character name for '{character_name}' to '{new_character_name}' for Sessions_Group"
             await cursor.execute(
-                "UPDATE Sessions_Group SET Host = ? WHERE Character_Name = ?",
+                "UPDATE Sessions_Group SET Host_Character = ? WHERE Character_Name = ?",
                 (new_character_name, character_name))
             await conn.commit()
             return_string = f"Updating character name for '{character_name}' to '{new_character_name}' for Sessions_Participants"
