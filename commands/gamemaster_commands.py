@@ -1,4 +1,5 @@
 import logging
+import random
 import typing
 from math import floor
 from typing import List, Optional, Tuple, Union
@@ -22,6 +23,318 @@ import Pathfinder_Tester
 
 # *** GLOBAL VARIABLES *** #
 os.chdir("C:\\pathparser")
+
+
+async def session_reward_reversal(
+        interaction: discord.Interaction,
+        session_id: int,
+        character_name: str,
+        author_name: str,
+        session_level: int,
+        session_gold: float,
+        session_info: Union[tuple, aiosqlite.Row],
+        source: str) -> (
+        Union[shared_functions.CharacterChange, str]):
+    if not session_info:
+        return f'invalid session ID of {session_id}'
+    else:
+        async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            try:
+                (info_player_id, info_player_name, info_character_name, info_level, info_tier, info_effective_gold,
+                 info_received_milestones, info_received_trials, info_received_gold, info_received_fame,
+                 info_received_prestige, info_received_essence, info_transaction_id) = session_info
+                await cursor.execute(
+                    "SELECT True_Character_Name, Oath, Level, Tier, Milestones, Trials, Gold, Gold_Value, Gold_Value_Max, Essence, Thread_ID, Accepted_Date, Fame, Prestige FROM Player_Characters WHERE Character_Name = ? OR Nickname = ?",
+                    (character_name, character_name))
+                player_info = await cursor.fetchone()
+                if not player_info:
+                    return f"there is no {character_name} registered."
+                else:
+                    (true_character_name, oath, character_level, tier, milestones, trials, gold, gold_value,
+                     gold_value_max,
+                     essence, thread_id, accepted_date, fame, prestige) = player_info
+                    try:
+                        return_level = await character_commands.level_calculation(
+                            level=session_level,
+                            guild=interaction.guild,
+                            guild_id=interaction.guild.id,
+                            base=milestones,
+                            personal_cap=0,
+                            easy=0,
+                            medium=0,
+                            hard=0,
+                            deadly=0,
+                            misc=-info_received_milestones,
+                            author_id=interaction.user.id,
+                            character_name=character_name)
+                    except character_commands.CalculationAidFunctionError as e:
+                        return_level = f"An error occurred whilst adjusting levels for {character_name} \r\n"
+                        logging.exception(f"Error in level calculation: {e}")
+                    level_value = session_level if isinstance(return_level, str) else character_level[0]
+                    try:
+                        return_mythic = await character_commands.mythic_calculation(
+                            character_name=character_name,
+                            level=level_value,
+                            trials=trials,
+                            trial_change=-info_received_trials,
+                            guild_id=interaction.guild.id)
+                        return_mythic = return_mythic if tier != return_mythic[
+                            0] or info_received_trials != 0 else 0
+                    except character_commands.CalculationAidFunctionError as e:
+                        return_mythic = f"An error occurred whilst adjusting trials for {character_name} \r\n"
+                        logging.exception(f"Error in Mythic calculation: {e}")
+                    try:
+                        return_gold = await character_commands.gold_calculation(
+                            guild_id=interaction.guild.id,
+                            character_name=character_name,
+                            level=level_value,
+                            oath=oath,
+                            gold=gold,
+                            author_name=interaction.user.name,
+                            author_id=interaction.user.id,
+                            gold_value=gold_value,
+                            gold_value_max=gold_value_max,
+                            gold_change=-info_received_gold,
+                            gold_value_change=Decimal(0),
+                            gold_value_max_change=-Decimal(session_gold),
+                            reason='Session Backout',
+                            source=source
+                        )
+                    except character_commands.CalculationAidFunctionError as e:
+                        return_gold = f"An error occurred whilst adjusting gold for {character_name} \r\n"
+                        logging.exception(f"Error in gold calculation: {e}")
+                    try:
+                        return_essence = character_commands.calculate_essence(
+                            character_name=character_name,
+                            essence=essence,
+                            essence_change=-info_received_essence,
+                            accepted_date=accepted_date)
+                    except character_commands.CalculationAidFunctionError as e:
+                        return_essence = f"An error occurred whilst adjusting essence for {character_name} \r\n"
+                        logging.exception(f"Error in essence calculation: {e}")
+                    if isinstance(return_level, tuple) and \
+                            (isinstance(return_mythic, tuple) or isinstance(return_mythic, int)) and \
+                            isinstance(return_gold, tuple) and \
+                            isinstance(return_essence, tuple):
+                        await cursor.execute("DELETE FROM Sessions_Archive WHERE Session_ID = ? AND Character_Name = ?",
+                                             (session_id, character_name))
+                        cursor.connection.commit()
+                    return_fame = (fame - info_received_fame, -info_received_fame, prestige - info_received_prestige,
+                                   -info_received_prestige)
+                    character_updates = shared_functions.UpdateCharacterData(character_name=character_name)
+                    character_changes = shared_functions.CharacterChange(
+                        character_name=character_name,
+                        author=interaction.user.name,
+                        source=source)
+                    if isinstance(return_level, tuple):
+                        (new_level,
+                         total_milestones,
+                         min_milestones,
+                         milestones_to_level,
+                         milestones_required,
+                         awarded_total_milestones) = return_level
+                        character_updates.level_package = (new_level, total_milestones, min_milestones)
+                        character_changes.level = new_level
+                        character_changes.milestones_total = total_milestones
+                        character_changes.milestones_remaining = min_milestones
+                        character_changes.milestone_change = awarded_total_milestones
+                    if isinstance(return_mythic, tuple):
+                        (new_tier, total_trials, trials_required, trial_change) = return_mythic
+                        character_updates.trial_package = (new_tier, total_trials, trials_required)
+                        character_changes.tier = new_tier
+                        character_changes.trials = total_trials
+                        character_changes.trials_remaining = trials_required
+                        character_changes.trial_change = trial_change
+                    if isinstance(return_gold, tuple):
+                        (calculated_difference, gold_total, gold_value_total, gold_value_max_total,
+                         transaction_id) = return_gold
+                        character_updates.gold_package = (gold_total, gold_value_total, gold_value_max_total)
+                        character_changes.gold = gold_total
+                        character_changes.gold_change = calculated_difference
+                        character_changes.effective_gold = gold_value_total
+                        character_changes.effective_gold_max = gold_value_max_total
+                        character_changes.transaction_id = transaction_id
+                    if isinstance(return_essence, tuple):
+                        (essence_total, essence_change) = return_essence
+                        character_updates.essence_package = essence_total
+                        character_changes.essence = essence_total
+                        character_changes.essence_change = essence_change
+                    if isinstance(return_fame, tuple):
+                        (fame, fame_change, prestige, prestige_change) = return_fame
+                        character_updates.fame_package = (fame, prestige)
+                        character_changes.fame = fame
+                        character_changes.fame_change = fame_change
+                        character_changes.prestige = prestige
+                        character_changes.prestige_change = prestige_change
+                    await shared_functions.update_character(
+                        guild_id=interaction.guild.id,
+                        change=character_updates)
+                    return character_changes
+            except (aiosqlite.Error, TypeError, ValueError) as e:
+                logging.exception(
+                    f"an error occurred for {author_name} whilst rewarding session with ID {session_id} for character {character_name}': {e}")
+                return f"An error occurred whilst adjusting session with ID '{session_id}' for {character_name} Error: {e}."
+
+
+async def session_reward_calculation(interaction: discord.Interaction, session_id: int,
+                                     character_name: str, author_name: str, session_level: int, source: str) -> (
+        Union[shared_functions.CharacterChange, str]):
+    async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as conn:
+        cursor = await conn.cursor()
+        # try:
+        await cursor.execute(
+            "SELECT GM_Name, Session_Name, Play_Time, Session_Range, Gold, Essence, Easy, Medium, Hard, Deadly, Trials, Alt_Reward_All, Alt_Reward_Party, Session_Thread, Message, Rewards_Message, Rewards_Thread, Fame, Prestige FROM Sessions WHERE Session_ID = ? and IsActive = 0 LIMIT 1",
+            (session_id,))
+        session_info = await cursor.fetchone()
+        if not session_info:
+            return f'invalid session ID of {session_id}'
+        else:
+            (gm_name, session_name, play_time, session_range, session_gold, session_essence, session_easy,
+             session_medium, session_hard, session_deadly, session_trials, session_alt_reward_all,
+             session_alt_reward_party, session_session_thread, session_message, session_rewards_message,
+             session_rewards_thread, session_fame, session_prestige) = session_info
+            await cursor.execute(
+                "SELECT Player_ID, True_Character_Name, Oath, Level, Tier, Milestones, Trials, Gold, Gold_Value, Gold_Value_Max, Essence, Thread_ID, Accepted_Date, Fame, Prestige FROM Player_Characters WHERE Character_Name = ? OR Nickname = ?",
+                (character_name, character_name))
+            player_info = await cursor.fetchone()
+            if not player_info:
+                return f"there is no {character_name} registered."
+            else:
+                (player_id, true_character_name, oath, character_level, tier, milestones, trials, gold, gold_value,
+                 gold_value_max,
+                 essence, thread_id, accepted_date, fame, prestige) = player_info
+                try:
+                    return_level = await character_commands.level_calculation(
+                        level=session_level,
+                        guild=interaction.guild,
+                        guild_id=interaction.guild.id,
+                        personal_cap=0,
+                        base=milestones,
+                        easy=session_easy,
+                        medium=session_medium,
+                        hard=session_hard,
+                        deadly=session_deadly,
+                        misc=0,
+                        author_id=interaction.user.id,
+                        character_name=character_name)
+                except character_commands.CalculationAidFunctionError as e:
+                    return_level = f"An error occurred whilst adjusting levels for {character_name} \r\n"
+                    logging.exception(f"Error in level calculation: {e}")
+                level_value = session_level if isinstance(return_level, str) else character_level[0]
+                try:
+                    return_mythic = await character_commands.mythic_calculation(
+                        guild_id=interaction.guild.id,
+                        character_name=character_name,
+                        level=level_value,
+                        trials=trials,
+                        trial_change=session_trials)
+                    return_mythic = return_mythic if tier != return_mythic[
+                        0] or session_trials != 0 else "No Change in Mythic"
+                except character_commands.CalculationAidFunctionError as e:
+                    return_mythic = f"An error occurred whilst adjusting trials for {character_name} \r\n"
+                    logging.exception(f"Error in mythic calculation: {e}")
+                try:
+                    return_gold = await character_commands.gold_calculation(
+                        guild_id=interaction.guild_id,
+                        character_name=character_name,
+                        level=level_value,
+                        oath=oath,
+                        gold=gold,
+                        gold_value=gold_value,
+                        gold_value_max=gold_value_max,
+                        gold_change=session_gold,
+                        gold_value_change=Decimal(0),
+                        gold_value_max_change=Decimal(0),
+                        author_name=author_name,
+                        author_id=interaction.user.id,
+                        reason='Session Reward',
+                        source=source)
+                except character_commands.CalculationAidFunctionError as e:
+                    return_gold = f"An error occurred whilst adjusting gold for {character_name} \r\n"
+                    logging.exception(f"Error in gold calculation: {e}")
+                try:
+                    return_essence = character_commands.calculate_essence(
+                        character_name=character_name,
+                        essence=essence,
+                        essence_change=session_essence,
+                        accepted_date=accepted_date)
+                except character_commands.CalculationAidFunctionError as e:
+                    return_essence = f"An error occurred whilst adjusting essence for {character_name} \r\n"
+                    logging.exception(f"Error in essence calculation: {e}")
+                return_fame = character_commands.calculate_fame(
+                    character_name=character_name,
+                    fame=fame,
+                    fame_change=session_fame,
+                    prestige=prestige,
+                    prestige_change=session_prestige,
+                )
+                character_updates = shared_functions.UpdateCharacterData(character_name=character_name)
+                character_changes = shared_functions.CharacterChange(
+                    character_name=character_name,
+                    author=interaction.user.name,
+                    source=source)
+                if isinstance(return_level, tuple):
+                    (
+                        new_level,
+                        total_milestones,
+                        min_milestones,
+                        milestones_to_level,
+                        milestones_required,
+                        awarded_total_milestones) = return_level
+                    character_updates.level_package = (new_level, total_milestones, min_milestones)
+                    character_changes.level = new_level
+                    character_changes.milestones_total = total_milestones
+                    character_changes.milestones_remaining = min_milestones
+                    character_changes.milestone_change = awarded_total_milestones
+                else:
+                    awarded_total_milestones = None
+                if isinstance(return_mythic, tuple):
+                    (new_tier, total_trials, trials_required, trial_change) = return_mythic
+                    new_tier = 1 if new_tier == 0 else new_tier
+                    character_updates.trial_package = (new_tier, total_trials, trials_required)
+                    character_changes.tier = new_tier
+                    character_changes.trials = total_trials
+                    character_changes.trials_remaining = trials_required
+                    character_changes.trial_change = trial_change
+                else:
+                    trial_change = None
+                if isinstance(return_gold, tuple):
+                    (calculated_difference, gold_total, gold_value_total, gold_value_max_total,
+                     transaction_id) = return_gold
+                    character_updates.gold_package = (gold_total, gold_value_total, gold_value_max_total)
+                    character_changes.gold = gold_total
+                    character_changes.gold_change = calculated_difference
+                    character_changes.effective_gold = gold_value_total
+                    character_changes.effective_gold_max = gold_value_max_total
+                    character_changes.transaction_id = transaction_id
+                else:
+                    transaction_id = None
+                if isinstance(return_essence, tuple):
+                    (essence_total, essence_change) = return_essence
+                    character_updates.essence_package = essence_total
+                    character_changes.essence = essence_total
+                    character_changes.essence_change = essence_change
+                else:
+                    essence_change = None
+                if isinstance(return_fame, tuple):
+                    (fame, fame_change, prestige, prestige_change) = return_fame
+                    character_updates.fame_package = (fame, prestige)
+                    character_changes.fame = fame
+                    character_changes.fame_change = fame_change
+                    character_changes.prestige = prestige
+                    character_changes.prestige_change = prestige_change
+                await shared_functions.update_character(guild_id=interaction.guild.id,
+                                                        change=character_updates)
+                await cursor.execute(
+                    "insert into Sessions_Archive (Session_ID, Player_ID, Character_Name, Level, Tier, "
+                    "Effective_Gold, Received_Milestones, Received_Trials, Received_Gold, Received_Fame, "
+                    "Received_Prestige, Received_Essence, Gold_Transaction_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (session_id, player_id, character_name, character_level, tier, awarded_total_milestones,
+                     awarded_total_milestones, trial_change, transaction_id,
+                     fame_change, prestige_change, essence_change, transaction_id))
+                await conn.commit()
+                return character_changes
 
 
 async def reinstate_reminders(server_bot) -> None:
@@ -321,6 +634,23 @@ async def player_signup(guild_id: int, session_name: str, session_id: int, chara
             return True
     except aiosqlite.Error as e:
         logging.exception(f"Failed to sign up character {character_name} for session {session_name} ({session_id})")
+
+
+async def player_accept(guild_id: int, session_name, session_id: int, player_id: int) -> bool:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            updated = await cursor.execute("""insert into player_participants(Session_Name, Session_ID, Player_Name, Player_ID, Character_Name, Level, Gold_Value, Tier) 
+                select ?, ?, Player_Name, Player_ID, Character_Name, Level, Gold_Value, Tier from Player_Characters where Player_ID = ? and Session_ID = ?""",
+                                           (session_name, session_id, player_id, session_id))
+            await db.commit()
+            await cursor.execute("DELETE from Sessions_Participants where Player_Name = ? and Session_ID = ?",
+                                 (player_id, session_id))
+            await db.commit()
+            return True if updated else False
+    except (aiosqlite.Error, TypeError) as e:
+        logging.info(f"Failed to sign up player {player_id} for session {session_id}.")
+        return False
 
 
 class GamemasterCommands(commands.Cog, name='Gamemaster'):
@@ -789,6 +1119,198 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
             logging.exception(f"An error occurred whilst deleting a session: {e}")
             await interaction.followup.send("An error occurred whilst deleting a session. Please try again later.")
 
+    @session_group.command(name='accept', description='accept the players into a session!')
+    @app_commands.autocomplete(specific_character=shared_functions.character_select_autocompletion)
+    @app_commands.describe(randomizer="for the purposes of picking a number of randomized players")
+    @app_commands.describe(
+        specific_character="Picking a specific player's character. You will have to use their CHARACTER Name for this.")
+    async def accept(self, interaction: discord.Interaction, session_id: int, player_1: typing.Optional[discord.Member],
+                     player_2: typing.Optional[discord.Member], player_3: typing.Optional[discord.Member],
+                     player_4: typing.Optional[discord.Member], player_5: typing.Optional[discord.Member],
+                     player_6: typing.Optional[discord.Member], specific_character: typing.Optional[str],
+                     randomizer: int = 0):
+        """GM: Accept player Sign-ups into your session for participation"""
+        await interaction.followup.defer(thinking=True)
+        try:
+            player_list = []
+            if player_1:
+                player_list.append(player_1.id)
+            if player_2:
+                player_list.append(player_2.id)
+            if player_3:
+                player_list.append(player_3.id)
+            if player_4:
+                player_list.append(player_4.id)
+            if player_5:
+                player_list.append(player_5.id)
+            if player_6:
+                player_list.append(player_6.id)
+            if not specific_character and randomizer == 0 and len(player_list) == 0:
+                await interaction.followup.send(f"Please provide a list of players to accept into the session!")
+                return
+            else:
+                async with aiosqlite.connect("Pathparser_{guild.id}.sqlite") as db:
+                    cursor = await db.cursor()
+                    await cursor.execute(
+                        "SELECT Session_Name, Play_location, hammer_time, game_link FROM Sessions WHERE Session_ID = ? AND GM_Name = ?",
+                        (session_id, interaction.user.name))
+                    session_info = cursor.fetchone()
+                    if session_info is None:
+                        await interaction.followup.send(
+                            f"Invalid Session ID of {session_id} associated with host {interaction.user.name}")
+                    else:
+                        (session_name, play_location, hammer_time, game_link) = session_info
+                        hammer_validated = shared_functions.validate_hammertime(hammer_time)
+                        if not hammer_validated[0]:
+                            await interaction.followup.send(
+                                f"Issue with hammer time detected. hammer time was {hammer_time} \r\n {hammer_validated[1]}")
+                            return
+                        hammer_times = hammer_validated[3]
+                        (hammer_date, hammer_hour, hammer_until) = hammer_times
+                        embed = discord.Embed(title=f"{session_info[0]}",
+                                              description=f"Date & Time: {hammer_date} at {hammer_hour} which is {hammer_until}",
+                                              color=discord.Colour.blue())
+                        if game_link:
+                            embed.url = game_link
+                        embed.set_footer(text=f'Session ID: {session_id}.')
+                        content = "The Following Players:"
+                        if specific_character:
+                            # The GM specified a character to join the session. Skip the signup process.
+                            await cursor.execute(
+                                "Select Player_ID, Player_Name, Character_Name from Player_Characters where Character_Name = ? EXCEPT Select Player_ID, Player_Name, Character_Name From Sessions_Participants where Character_Name = ?",
+                                (specific_character, specific_character))
+                            player = await cursor.fetchone()
+                            if not player:
+                                embed.add_field(name=f"SIGNUP FAILED: {specific_character}",
+                                                value=f"could not accepted!")
+                            else:
+                                # Attempt to accept the player
+                                accepted = await player_accept(guild_id=interaction.guild_id, session_name=session_name,
+                                                               session_id=session_id, player_id=player[0])
+                                if accepted:
+                                    # Add accepted player info to the embed and content
+                                    embed.add_field(name=f"{specific_character}",
+                                                    value=f"has been accepted with player: <@{player[0]}>")
+                                    content += f" <@{player[0]}> has been accepted!"
+                                else:
+                                    # Handle case where acceptance fails
+                                    embed.add_field(name=f"SIGNUP FAILED: {specific_character}",
+                                                    value=f"could not be accepted with player: <@{player[0]}>")
+                        if len(player_list) > 0:
+                            # The GM specified a list of players to join the session.
+                            # Execute the query to fetch player signups
+                            await cursor.execute("Select Player_ID, Character_Name from Sessions_Signups",
+                                                 (session_id, interaction.user.name))
+                            signup_list = await cursor.fetchall()
+                            if not signup_list:
+                                await interaction.followup.send(
+                                    f"Session {session_id} does not exist or you are not the GM of this session!")
+                            else:
+                                # iterate through the player list and accept players if they are in the signup list
+                                for signup in signup_list:
+                                    (player_id, character_name) = signup
+                                    if player_id in player_list:
+                                        player_list.remove(
+                                            player_id)  # remove the player from the list to avoid double acceptance
+                                        accepted = await player_accept(guild_id=interaction.guild_id,
+                                                                       session_name=session_name, session_id=session_id,
+                                                                       player_id=player_id)
+                                        if accepted:
+                                            # Add accepted player info to the embed and content
+                                            embed.add_field(name=f"{character_name}",
+                                                            value=f"has been accepted with player: <@{player_id}>")
+                                            content += f" <@{player_id}> has been accepted!"
+                                        else:
+                                            # Handle case where acceptance fails
+                                            embed.add_field(name=f"SIGNUP FAILED: {character_name}",
+                                                            value=f"could not be accepted with player: <@{player_id}>")
+                                for player in player_list:
+                                    content += f" {player} could not be accepted! Player not found in the signup list!"
+                            if randomizer > 0:
+                                # The GM specified a random number of players to join the session.
+                                # Execute the query to fetch player signups
+                                await cursor.execute(
+                                    "SELECT Player_ID, Character_Name FROM Sessions_Signups WHERE Session_ID = ?",
+                                    (session_id,))
+                                signup_list = list(await cursor.fetchall())
+
+                                # Check if signup_list has entries
+                                if signup_list:
+                                    # Sample random players from the list, up to `randomizer` count or total entries available
+                                    random_players = random.sample(signup_list, min(len(signup_list), randomizer))
+
+                                    for player in random_players:
+                                        # Unpack each player tuple
+                                        # Attempt to accept the player
+                                        accepted = await player_accept(
+                                            guild_id=interaction.guild_id,
+                                            session_name=session_name,
+                                            session_id=session_id,
+                                            player_id=player_id
+                                        )
+
+                                        if accepted:
+                                            # Add accepted player info to the embed and content
+                                            embed.add_field(
+                                                name=f"{character_name}",
+                                                value=f"has been accepted with player: <@{player_id}>"
+                                            )
+                                            content += f" <@{player_id}> has been accepted!"
+                                        else:
+                                            # Handle case where acceptance fails
+                                            embed.add_field(
+                                                name=f"SIGNUP FAILED: {character_name}",
+                                                value=f"could not be accepted with player: <@{player_id}>"
+                                            )
+                                else:
+                                    logging.info("No players found in signup_list.")
+        except(aiosqlite.Error, discord.DiscordException, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred whilst accepting players into a session: {e}")
+
+    @session_group.command(name='remove', description='Remove a player from a session!')
+    @app_commands.autocomplete(specific_character=shared_functions.character_select_autocompletion)
+    async def remove(self, interaction: discord.Interaction, session_id: int, player: discord.Member):
+        await interaction.followup.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute(
+                    "SELECT Session_Name, Play_location, hammer_time, game_link, IsActive, Gold, Flux, Alt_Reward_All FROM Sessions WHERE Session_ID = ?",
+                    (session_id,))
+                session_info = cursor.fetchone()
+                if session_info is None:
+                    await interaction.followup.send(f"Invalid Session ID of {session_id}")
+                else:
+                    if session_info[4] == 1:
+                        await cursor.execute(
+                            "SELECT Player_Name, Character_Name FROM Sessions_Participants WHERE Session_ID = ? and Player_Name = ?",
+                            (session_id, player.name))
+                        player_info = cursor.fetchone()
+                        if player_info is None:
+                            await interaction.followup.send(
+                                f"{player.name} does not appear to be participating in the session of {session_info[0]} with session ID: {session_id}")
+                        else:
+                            player_name = player.name
+                            character_name = player_info[1]
+                            await player_commands.player_leave_session(guild_id=interaction.guild_id,
+                                                                       session_id=session_id, player_name=player_name)
+                            await interaction.followup.send(
+                                f"{player.name} has been removed from Session {session_info[0]} with ID: {session_id}")
+                    else:
+                        await cursor.execute(
+                            "SELECT Player_Name, Character_Name, Level, Effective_Gold, Received_Milestones, Received_Trials, Received_Gold, Alt_Reward_Personal, Received_Fame FROM Sessions_Archive WHERE Session_ID = ? and Player_Name = ?",
+                            (session_id, player.name))
+                        reward_info = cursor.fetchone()
+                        if reward_info is None:
+                            await interaction.followup.send(
+                                f"{player.name} does not appear to have participated in the session of {session_info[0]} with session ID: {session_id}")
+                        else:
+                            ...
+        except (aiosqlite.Error, discord.DiscordException, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred whilst removing a player from a session: {e}")
+            await interaction.followup.send(
+                "An error occurred whilst removing a player from a session. Please try again later.")
+
 
 """@gamemaster.command()
 async def help(interaction: discord.Interaction):
@@ -806,257 +1328,6 @@ async def help(interaction: discord.Interaction):
     embed.add_field(name=f'**Glorify**', value=f'**GAMEMASTER**: Increase or decrease characters fame and prestige!', inline=False)
     await interaction.response.send_message(embed=embed)
 
-
-
-
-@gamemaster.command()
-@app_commands.autocomplete(specific_character=character_select_autocompletion)
-@app_commands.describe(randomizer="for the purposes of picking a number of randomized players")
-@app_commands.describe(specific_character="Picking a specific player's character. You will have to use their CHARACTER Name for this.")
-async def accept(interaction: discord.Interaction, session_id: int, player_1: typing.Optional[discord.Member], player_2: typing.Optional[discord.Member], player_3: typing.Optional[discord.Member], player_4: typing.Optional[discord.Member], player_5: typing.Optional[discord.Member], player_6: typing.Optional[discord.Member], specific_character: typing.Optional[str], randomizer: int = 0):
-    "GM: Accept player Sign-ups into your session for participation"
-    guild_id = interaction.guild_id
-    author = interaction.user.name
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute("SELECT Session_Name, Play_location, hammer_time, game_link FROM Sessions WHERE Session_ID = '{session_id}' AND GM_Name = '{author}'")
-    session_info = cursor.fetchone()
-    accepted_characters = 0
-    if session_info is None:
-        await interaction.response.send_message(f"Invalid Session ID of {session_id} associated with host {author}")
-    elif randomizer < 0:
-        await interaction.response.send_message(f"Cannot have a negative number of randomized players! {randomizer} is not acceptable!")
-    else:
-        cursor.execute("SELECT count(character_name) FROM Sessions_Participants WHERE Session_ID = {session_id}")
-        accepted_players = cursor.fetchone()
-        if accepted_players[0] < 20:
-            accepted_characters += accepted_players[0]
-            cursor.execute("SELECT count(character_name) FROM Sessions_Signups WHERE Session_ID = {session_id}")
-            players = cursor.fetchone()
-            print(players)
-            print(accepted_characters)
-            if players[0] > 0:
-                timing = session_info[2]
-                date = "<t:" + timing + ":D>"
-                hour = "<t:" + timing + ":t>"
-                arrival = "<t:" + timing + ":R>"
-                mentions = f"the following players: "
-                if session_info[3] is not None:
-                    embed = discord.Embed(title=f"{session_info[0]}", url=f'{session_info[3]}', description=f"Date & Time: {date} at {hour} which is {arrival}", color=discord.Colour.green())
-                else:
-                    embed = discord.Embed(title=f"{session_info[0]}", description=f"Date & Time: {date} at {hour} which is {arrival}", color=discord.Colour.green())
-                embed.set_author(name=f'{author}')
-                if randomizer == 0 and player_1 is None and player_2 is None and player_3 is None and player_4 and player_5 is None and player_6 is None and specific_character is None:
-                    await interaction.response.send_message(f"a session without players is like a drought with rain.")
-                else:
-                    if player_1 is not None:
-                        player_name = player_1.name
-                        sql = "SELECT Character_Name, Level, Effective_Wealth, Tier FROM Sessions_Signups WHERE Player_Name = ? AND Session_ID = ?"
-                        val = (player_name, session_id)
-                        cursor.execute(sql, val)
-                        player_info = cursor.fetchone()
-                        sql = "SELECT Character_Name, Level, Effective_Wealth, Tier FROM Sessions_Participants WHERE Player_Name = ? AND Session_ID = ?"
-                        val = (player_name, session_id)
-                        cursor.execute(sql, val)
-                        signups_information = cursor.fetchone()
-                        mentions += f'<@{player_1.id}> '
-                        if player_info is None and signups_information is None:
-                            embed.add_field(name=f'**Not Accepted!**:', value=f"<@{player_1.id}> had no characters signed up for this session!")
-                        elif signups_information is not None:
-                            embed.add_field(name=f'**No Duplicates!**:', value=f" <@{player_1.id}> already has {signups_information[0]} signed up!")
-                        else:
-                            accepted_characters += 1
-                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_1.name, player_1.id, author, player_info[3])
-                            embed.add_field(name=f'{player_info[0]}', value=f"has been accepted with Player: <@{player_1.id}>!")
-                    if player_2 is not None and player_2 != player_1:
-                        player_name = player_2.name
-                        sql = "SELECT Character_Name, Level, Effective_Wealth, Tier FROM Sessions_Signups WHERE Player_Name = ? AND Session_ID = ?"
-                        val = (player_name, session_id)
-                        cursor.execute(sql, val)
-                        player_info = cursor.fetchone()
-                        sql = "SELECT Character_Name, Level, Effective_Wealth, Tier FROM Sessions_Participants WHERE Player_Name = ? AND Session_ID = ?"
-                        val = (player_name, session_id)
-                        cursor.execute(sql, val)
-                        signups_information = cursor.fetchone()
-                        mentions += f'<@{player_2.id}> '
-                        if player_info is None and signups_information is None:
-                            embed.add_field(name=f'**Not Accepted!**:', value=f"<@{player_2.id}> had no characters signed up for this session!")
-                        elif signups_information is not None:
-                            embed.add_field(name=f'**No Duplicates!**:', value=f" <@{player_2.id}> already has {signups_information[0]} signed up!")
-                        else:
-                            accepted_characters += 1
-                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_2.name, player_2.id, author, player_info[3])
-                            embed.add_field(name=f'{player_info[0]}', value=f"has been accepted with Player: <@{player_2.id}>!")
-                    if player_3 is not None and player_3 != player_1 and player_3 != player_2:
-                        player_name = player_3.name
-                        sql = "SELECT Character_Name, Level, Effective_Wealth, Tier FROM Sessions_Signups WHERE Player_Name = ? AND Session_ID = ?"
-                        val = (player_name, session_id)
-                        cursor.execute(sql, val)
-                        player_info = cursor.fetchone()
-                        sql = "SELECT Character_Name, Level, Effective_Wealth, Tier FROM Sessions_Participants WHERE Player_Name = ? AND Session_ID = ?"
-                        val = (player_name, session_id)
-                        cursor.execute(sql, val)
-                        signups_information = cursor.fetchone()
-                        mentions += f'<@{player_3.id}> '
-                        if player_info is None:
-                            embed.add_field(name=f'**Not Accepted!**:', value=f"<@{player_3.id}> had no characters signed up for this session!")
-                        elif signups_information is not None and signups_information is None:
-                            embed.add_field(name=f'**No Duplicates!**:', value=f" <@{player_3.id}> already has {signups_information[0]} signed up!")
-                        else:
-                            accepted_characters += 1
-                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_3.name, player_3.id, author, player_info[3])
-                            embed.add_field(name=f'{player_info[0]}', value=f"has been accepted with Player: <@{player_3.id}>!")
-                    if player_4 is not None and player_4 != player_1 and player_4 != player_2 and player_4 != player_3:
-                        player_name = player_4.name
-                        sql = "SELECT Character_Name, Level, Effective_Wealth, Tier FROM Sessions_Signups WHERE Player_Name = ? AND Session_ID = ?"
-                        val = (player_name, session_id)
-                        cursor.execute(sql, val)
-                        player_info = cursor.fetchone()
-                        sql = "SELECT Character_Name, Level, Effective_Wealth, Tier FROM Sessions_Participants WHERE Player_Name = ? AND Session_ID = ?"
-                        val = (player_name, session_id)
-                        cursor.execute(sql, val)
-                        signups_information = cursor.fetchone()
-                        mentions += f'<@{player_4.id}> '
-                        if player_info is None:
-                            embed.add_field(name=f'**Not Accepted!**:',
-                                            value=f" <@{player_4.id}> had no characters signed up for this session!")
-                        elif signups_information is not None:
-                            embed.add_field(name=f'**No Duplicates!**:',
-                                            value=f" <@{player_4.id}> already has {signups_information[0]} signed up!")
-                        else:
-                            accepted_characters += 1
-                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0],
-                                                      player_info[1], player_info[2], player_4.name, player_4.id, author,
-                                                      player_info[3])
-                            embed.add_field(name=f'{player_info[0]}',
-                                            value=f"has been accepted with Player: <@{player_4.id}>!")
-                    if player_5 is not None and player_5 != player_1 and player_5 != player_2 and player_5 != player_3 and player_5 != player_4:
-                        player_name = player_5.name
-                        sql = "SELECT Character_Name, Level, Effective_Wealth, Tier FROM Sessions_Signups WHERE Player_Name = ? AND Session_ID = ?"
-                        val = (player_name, session_id)
-                        cursor.execute(sql, val)
-                        player_info = cursor.fetchone()
-                        sql = "SELECT Character_Name, Level, Effective_Wealth, Tier FROM Sessions_Participants WHERE Player_Name = ? AND Session_ID = ?"
-                        val = (player_name, session_id)
-                        cursor.execute(sql, val)
-                        signups_information = cursor.fetchone()
-                        mentions += f'<@{player_5.id}> '
-                        if player_info is None:
-                            embed.add_field(name=f'**Not Accepted!**:',
-                                            value=f" <@{player_5.id}> had no characters signed up for this session!")
-                        elif signups_information is not None:
-                            embed.add_field(name=f'**No Duplicates!**:',
-                                            value=f" <@{player_5.id}> already has {signups_information[0]} signed up!")
-                        else:
-                            accepted_characters += 1
-                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0],
-                                                      player_info[1], player_info[2], player_5.name, player_5.id, author,
-                                                      player_info[3])
-                            embed.add_field(name=f'{player_info[0]}',
-                                            value=f"has been accepted with Player: <@{player_5.id}>!")
-                    if player_6 is not None and player_6 != player_1 and player_6 != player_2 and player_6 != player_3 and player_6 != player_4 and player_6 != player_5:
-                        player_name = player_6.name
-                        sql = "SELECT Character_Name, Level, Effective_Wealth, Tier FROM Sessions_Signups WHERE Player_Name = ? AND Session_ID = ?"
-                        val = (player_name, session_id)
-                        cursor.execute(sql, val)
-                        player_info = cursor.fetchone()
-                        sql = "SELECT Character_Name, Level, Effective_Wealth, Tier FROM Sessions_Participants WHERE Player_Name = ? AND Session_ID = ?"
-                        val = (player_name, session_id)
-                        cursor.execute(sql, val)
-                        signups_information = cursor.fetchone()
-                        mentions += f'<@{player_6.id}> '
-                        if player_info is None:
-                            embed.add_field(name=f'**Not Accepted!**:',
-                                            value=f" <@{player_6.id}> had no characters signed up for this session!")
-                        elif signups_information is not None:
-                            embed.add_field(name=f'**No Duplicates!**:',
-                                            value=f" <@{player_6.id}> already has {signups_information[0]} signed up!")
-                        else:
-                            accepted_characters += 1
-                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0],
-                                                      player_info[1], player_info[2], player_6.name, player_6.id, author,
-                                                      player_info[3])
-                            embed.add_field(name=f'{player_info[0]}',
-                                            value=f"has been accepted with Player: <@{player_6.id}>!")
-                    if specific_character is not None:
-                        sql = "SELECT Character_Name, Level, Gold_value, Player_Name, Player_ID, Tier FROM Player_Characters WHERE Character_Name = ?"
-                        val = (specific_character,)
-                        cursor.execute(sql, val)
-                        player_info = cursor.fetchone()
-                        if player_info is not None:
-                            accepted_characters += 1
-                            await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_info[3], player_info[4], author, player_info[5])
-                            embed.add_field(name=f'{player_info[0]}', value=f"has been accepted with player: @{player_info[4]}!")
-                            mentions += f'<@{player_info[4]}> '
-                    if randomizer > 0:
-                        characters_total = players[0] - accepted_characters
-                        randomizer = players[0] if randomizer > characters_total else randomizer
-                        for x in range(randomizer):
-                            random_number = random.randint(1, characters_total)
-                            random_number -= 1
-                            characters_total -= 1
-                            accepted_characters += 1
-                            cursor.execute("SELECT Character_Name, Level, Effective_Wealth, Player_Name, Player_ID, Tier FROM Sessions_Signups WHERE Session_ID = '{session_id}' LIMIT 1 OFFSET {random_number}")
-                            player_info = cursor.fetchone()
-                            print(x, player_info)
-                            if accepted_characters <= 20:
-                                await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_info[3], player_info[4], author, player_info[5])
-                                embed.add_field(name=f'{player_info[0]}', value=f"has been accepted with player: @{player_info[3]}!")
-                                mentions += f'<@{player_info[4]}> '
-                            else:
-                                break
-                    mentions += f"have been accepted!"
-                    embed.set_footer(text=f"Session ID: {session_id}")
-                    await interaction.response.send_message(content=mentions, embed=embed, allowed_mentions=discord.AllowedMentions(users=True))
-            else:
-                print(session_info[3])
-                if specific_character is not None:
-                    sql = "SELECT Character_Name, Level, Gold_value, Player_Name, Player_ID, Tier FROM Player_Characters WHERE Character_Name = ?"
-                    val = (specific_character,)
-                    cursor.execute(sql, val)
-                    player_info = cursor.fetchone()
-                    if player_info is not None:
-                        timing = session_info[2]
-                        date = "<t:" + timing + ":D>"
-                        hour = "<t:" + timing + ":t>"
-                        arrival = "<t:" + timing + ":R>"
-                        mentions = f"the following players: "
-                        if session_info[3] is not None:
-                            embed = discord.Embed(title=f"{session_info[0]}", url=f'{session_info[3]}',
-                                                  description=f"Date & Time: {date} at {hour} which is {arrival}",
-                                                  color=discord.Colour.green())
-                        else:
-                            embed = discord.Embed(title=f"{session_info[0]}",
-                                                  description=f"Date & Time: {date} at {hour} which is {arrival}",
-                                                  color=discord.Colour.green())
-                        embed.set_author(name=f'{author}')
-                        accepted_characters += 1
-                        await Event.accept_player(self, guild_id, session_info[0], session_id, player_info[0], player_info[1], player_info[2], player_info[3], player_info[4], author, player_info[5])
-                        embed.add_field(name=f'{player_info[0]}', value=f"has been accepted with player: @{player_info[4]}!")
-                        mentions += f'<@{player_info[4]}> '
-                        embed.set_footer(text=f"Session ID: {session_id}")
-
-                    else:
-                        embed = discord.Embed(title=f"{session_info[0]} signups failed!", description=f"This character was not found.", color=discord.Colour.green())
-                if session_info[3] is not None:
-                    embed = discord.Embed(title=f"{session_info[0]} signups failed!", url=f'{session_info[3]}', description=f"there are no players signed up for this session", color=discord.Colour.green())
-                else:
-                    embed = discord.Embed(title=f"{session_info[0]} signups failed!", description=f"there are no players signed up for this session", color=discord.Colour.green())
-                embed.set_author(name=f'{author}')
-                print(embed)
-                if mentions is not None:
-                    await interaction.response.send_message(content=mentions, embed=embed, allowed_mentions=discord.AllowedMentions(users=True))
-                else:
-                    await interaction.response.send_message(embed=embed)
-        else:
-            if session_info[3] is not None:
-                embed = discord.Embed(title=f"{session_info[0]} signups failed!", url=f'{session_info[3]}', description=f"20 IS THE HARD CAP. GO MAKE A SEPARATE SESSION FOR HANDLING REWARDS.", color=discord.Colour.green())
-            else:
-                embed = discord.Embed(title=f"{session_info[0]} signups failed!", description=f"20 IS THE HARD CAP. GO MAKE A SEPARATE SESSION FOR HANDLING REWARDS.", color=discord.Colour.green())
-            embed.set_author(name=f'{author}')
-            await interaction.response.send_message(embed=embed)
-    cursor.close()
-    db.close()
 
 
 @gamemaster.command()
@@ -1731,6 +2002,44 @@ async def display(interaction: discord.Interaction, session_id: int, group: disc
 """
 
 
+# Base Views for accepting or rejecting a decision
+class RemoveRewardsView(shared_functions.SelfAcknowledgementView):
+    def __init__(self, content: str, interaction: discord.Interaction):
+        super().__init__(content=content, interaction=interaction)
+        self.embed = None
+
+    async def accepted(self, interaction: discord.Interaction):
+        """Handle the approval logic."""
+        # Update the database to mark the proposition as accepted
+        # Adjust prestige, log the transaction, notify the requester, etc.
+        self.embed = discord.Embed(
+            title="Rewards Removed",
+            description=f"{interaction.user.name} has decided to remove the rewards.",
+            color=discord.Color.green()
+        )
+
+        # Additional logic such as notifying the requester
+
+    async def rejected(self, interaction: discord.Interaction):
+        """Handle the rejection logic."""
+        # Update the database to mark the proposition as rejected
+        self.embed = discord.Embed(
+            title="Database Reset Rejected",
+            description=f"{interaction.user.name} has decided to keep me around. :)",
+            color=discord.Color.red()
+        )
+        # Additional logic such as notifying the requester
+
+    async def create_embed(self):
+        """Create the initial embed for the proposition."""
+        self.embed = discord.Embed(
+            title="Database Reset",
+            description="Are you sure you want to reset the database? This action is inconvenient to reverse and may result in data inconsistency.",
+            color=discord.Color.blue()
+        )
+
+
+# Base Views for handling Session Announcements
 class JoinOrLeaveSessionView(discord.ui.View):
     """Base class for views requiring acknowledgment."""
 
