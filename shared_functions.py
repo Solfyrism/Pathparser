@@ -1168,20 +1168,20 @@ def validate_vtt(url: str) -> Tuple[bool, str, int]:
         return False, "Invalid URL format.", -1  # Exception case uses step indicator -1
 
 
-def validate_hammertime(hammertime: Union[str, datetime]) -> Union[Tuple[bool, bool, Tuple[str, str, str, str]], Tuple[bool, str]]:
+def parse_hammer_time(hammer_time_str: str) -> datetime:
+    return datetime.fromisoformat(hammer_time_str)
+
+def validate_hammertime(hammertime: Union[str, datetime]) -> Union[
+    Tuple[bool, bool, Tuple[str, str, str, str]], Tuple[bool, str]]:
     try:
         # Check if hammertime is already a 10-digit Unix timestamp
-        if hammertime.isdigit() and (len(hammertime) == 10 or len(hammertime) == 16):
+        if len(hammertime) == 10:
             # Use only the first 10 digits if length is 16 (e.g., with milliseconds)
-            hammertime = hammertime[:10]
-
+            hammertime = hammertime
+        elif len(hammertime) == 16:
+            hammertime = hammertime[3:13]
             # Convert hammertime to datetime object
             dt_hammertime = datetime.fromtimestamp(int(hammertime))
-
-        else:
-            dt_hammertime = hammertime
-            hammertime = datetime.fromisoformat(dt_hammertime)
-
 
         # Generate time formats for the Discord message
         date = f"<t:{hammertime}:D>"
@@ -1195,9 +1195,101 @@ def validate_hammertime(hammertime: Union[str, datetime]) -> Union[Tuple[bool, b
         else:
             valid_time = False  # invalid if it's in the past 5 years
 
-        return success, valid_time, (date, hour, arrival, str(dt_hammertime))
-
+        return success, valid_time, (date, hour, arrival, hammertime)
     except (ValueError, IndexError) as e:
+        logging.exception(f"Error validating hammertime '{hammertime}': {e}")
+        return False, "Invalid timestamp format. Please provide a valid timestamp."
+
+
+def convert_datetime_to_unix(time_str, timezone_str):
+    # Define possible date formats
+    formats = ["%m/%d/%Y %I:%M %p", "%m/%d/%Y %H:%M"]
+    for fmt in formats:
+        try:
+            # Parse the date with the given format
+            dt = datetime.strptime(time_str, fmt)
+            break
+        except ValueError:
+            continue
+    else:
+        raise ValueError("Time format not recognized.")
+
+    # Localize the datetime to the specified timezone
+    tz = pytz.timezone(timezone_str)
+    dt = tz.localize(dt)
+
+    # Convert to Unix timestamp
+    unix_time = int(dt.timestamp())
+    return unix_time
+
+
+# Function to validate "hammertime" based on different input formats.
+async def complex_validate_hamemrtime(guild_id, author_name, hammertime: Union[str, datetime]) -> Union[
+    Tuple[bool, bool, Tuple[str, str, str, str]], Tuple[bool, str]]:
+    try:
+        # If hammertime is either 10 or 16 characters long, assume it's a date or timestamp format that can be validated directly.
+        if len(hammertime) == 10 or len(hammertime) == 16:
+            hammertime_result = validate_hammertime(hammertime)
+            return hammertime_result
+
+        # Otherwise, connect to the database to retrieve the user's UTC offset.
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.execute()
+            await cursor.execute(
+                "SELECT UTC_Offset FROM Player_Timecard WHERE Player_Name = ?", (author_name,)
+            )
+            utc_result = await cursor.fetchone()
+
+            # Proceed only if UTC offset was successfully retrieved.
+            if utc_result:
+                # Check if hammertime includes "AM" or "PM" and is likely in a 12-hour format (3 to 8 characters).
+                if (hammertime[-2:] == 'PM' or hammertime[-2:] == 'AM') and 3 < len(hammertime) < 8:
+                    midday = hammertime[-2:]  # Extract 'AM' or 'PM'
+                    midday_hours = 0 if midday == 'AM' else 12
+                    hammertime = hammertime[:-2].strip()  # Remove 'AM'/'PM' and strip whitespace
+
+                    # Get current time in user's timezone.
+                    now = datetime.datetime.now(tz=pytz.timezone(utc_result[0]))
+
+                    # Depending on length, set the hour and minute, handling single and double-digit hours.
+                    if len(hammertime) == 4:
+                        updated_time = now.replace(hour=int(hammertime[:1]) + midday_hours, minute=int(hammertime[2:]))
+                    elif len(hammertime) == 5:
+                        updated_time = now.replace(hour=int(hammertime[:2]) + midday_hours, minute=int(hammertime[3:]))
+
+                    # If the computed time has already passed today, set it to the same time tomorrow.
+                    if now > updated_time:
+                        updated_time += datetime.timedelta(days=1)
+
+                    # Convert to Unix timestamp and validate.
+                    create_timestamp = int(updated_time.timestamp())
+                    hammertime_result = validate_hammertime(str(create_timestamp))
+
+                # If hammertime is in 24-hour format without AM/PM, handle it here.
+                elif len(hammertime) == 5:
+                    now = datetime.datetime.now(tz=pytz.timezone(utc_result[0]))
+                    updated_time = now.replace(hour=int(hammertime[:2]), minute=int(hammertime[3:]))
+
+                    if now > updated_time:
+                        updated_time += datetime.timedelta(days=1)
+
+                    create_timestamp = int(updated_time.timestamp())
+                    hammertime_result = validate_hammertime(str(create_timestamp))
+
+                # If hammertime format is non-standard, use a conversion function with UTC offset.
+                else:
+                    (utc_offset,) = utc_result
+                    create_timestamp = convert_datetime_to_unix(hammertime, utc_offset)
+                    hammertime_result = validate_hammertime(str(create_timestamp))
+
+                return hammertime_result
+
+            # If no UTC offset was found, return an error message.
+            else:
+                return False, "Player not found in the database."
+
+    # Exception handling for common errors like ValueError, IndexError, or database errors.
+    except (ValueError, IndexError, aiosqlite.Error) as e:
         logging.exception(f"Error validating hammertime '{hammertime}': {e}")
         return False, "Invalid timestamp format. Please provide a valid timestamp."
 
@@ -1229,8 +1321,6 @@ def validate_worldanvil_link(guild_id: int, article_id: str) -> (
         # I haven't ever gotten a proper exception from the World Anvil API, so this is a catch-all until I can specify it down. https://pypi.org/project/pywaclient/#exceptions has them, but I'm not sure how to catch them yet.
         logging.exception(f"Error in retrieving article with ID '{article_id}': {e}")
         return None
-
-
 
 
 def ordinal(n):
@@ -1868,9 +1958,6 @@ class SelfAcknowledgementView(discord.ui.View):
         raise NotImplementedError
 
 
-
-
-
 class DualView(discord.ui.View):
     """Base class for shop views with pagination."""
 
@@ -2040,9 +2127,6 @@ class DualView(discord.ui.View):
     async def get_max_items(self):
         """Get the total number of items. To be implemented in subclasses."""
         raise NotImplementedError
-
-
-
 
 
 logging.basicConfig(

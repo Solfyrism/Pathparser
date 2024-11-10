@@ -15,11 +15,92 @@ from pywaclient.api import BoromirApiClient as WaClient
 import aiosqlite
 import shared_functions
 import character_commands
+import player_commands
 from shared_functions import name_fix
 from decimal import Decimal, ROUND_HALF_UP
+import Pathfinder_Tester
 
 # *** GLOBAL VARIABLES *** #
 os.chdir("C:\\pathparser")
+
+
+async def reinstate_reminders(server_bot) -> None:
+    guilds = server_bot.guilds
+    now = datetime.datetime.now(datetime.timezone.utc)
+    for guild in guilds:
+        async with aiosqlite.connect(f"pathparser_{guild.id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute(
+                "SELECT Session_ID, Thread_ID, Hammer_Time FROM Sessions WHERE IsActive = 1 AND Hammer_Time > ?",
+                (now.timestamp(),)
+            )
+            reminders = await cursor.fetchall()
+            for reminder in reminders:
+                (session_id, thread_id, hammer_time) = reminder
+                session_reminders(session_id, thread_id, hammer_time, guild.id)
+
+
+async def reinstate_session_buttons(server_bot) -> None:
+    guilds = server_bot.guilds
+    now = datetime.datetime.now(datetime.timezone.utc)
+    for guild in guilds:
+        async with aiosqlite.connect(f"pathparser_{guild.id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute(
+                "SELECT Session_ID, Session_Name, Message, Channel_ID, hammer_time FROM Sessions WHERE IsActive = 1 AND hammer_time > ?",
+                (now.timestamp(),)
+            )
+            sessions = await cursor.fetchall()
+            for session in sessions:
+                session_id, session_name, message_id, channel_id, hammer_time_str = session
+                session_start_time = datetime.strptime(hammer_time_str, '%Y-%m-%d %H:%M:%S')
+                timeout_seconds = (session_start_time - datetime.utcnow()).total_seconds()
+                timeout_seconds = min(timeout_seconds, 12 * 3600)
+
+                # Fetch the channel and message
+                channel = server_bot.get_channel(channel_id)
+                message = await channel.fetch_message(message_id)
+
+                # Create a new view with the updated timeout
+                view = JoinOrLeaveSessionView(timeout_seconds=timeout_seconds, session_id=session_id, guild=guild,
+                                              session_name=session_name)
+                await message.edit(view=view)
+
+
+def session_reminders(session_id, thread_id, time, guild_id) -> None:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    session_start_time = shared_functions.parse_hammer_time(time)
+    time_difference = session_start_time - now
+    remaining_minutes = time_difference.total_seconds() / 60
+    reminder_time_periods = [0, 30, 60]
+    for time in reminder_time_periods:
+        if remaining_minutes >= time:
+            reminder_time = session_start_time - datetime.timedelta(minutes=time)
+            job = Pathfinder_Tester.scheduler.add_job(
+                Pathfinder_Tester.remind_users,
+                trigger='date',
+                run_date=reminder_time,
+                args=[session_id, guild_id, thread_id, time],
+            )
+            Pathfinder_Tester.scheduled_jobs[(session_id, time)] = job
+
+
+def clear_session_reminders(session_id, start_time):
+    now = datetime.datetime.now(datetime.timezone.utc)
+    session_start_time = shared_functions.parse_hammer_time(start_time)
+    time_difference = session_start_time - now
+    remaining_minutes = time_difference.total_seconds() / 60
+    reminder_time_periods = [0, 30, 60]
+    for time in reminder_time_periods:
+        if remaining_minutes >= time:
+            job_key = (session_id, time)
+            job = Pathfinder_Tester.scheduled_jobs.get(job_key)
+            if job:
+                job.remove()
+                del Pathfinder_Tester.scheduled_jobs[job_key]
+                logging.info(f"Canceled reminder for session {session_id} with offset {time} minutes.")
+            else:
+                logging.info(f"No active reminder found for session {session_id} with offset {time}")
 
 
 @dataclass
@@ -72,7 +153,7 @@ async def build_edit_info(
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
-                "SELECT Session_Name, Session_Range, Session_Range_ID, Player_Limit, Play_Location, hammer_time, game_link, Overview, Description, Plot, Overflow, Message, Session_Thread FROM Sessions WHERE Session_ID = ? AND GM_Name = ? AND IsActive = 1 ORDER BY Created_Time Desc Limit 1",
+                "SELECT Session_Name, Session_Range, Session_Range_ID, Player_Limit, Play_Location, hammer_time, game_link, Overview, Description, Plot, Overflow, Message, Session_Thread FROM Sessions WHERE Session_ID = ? AND GM_Name = ? AND IsActive = 1 Limit 1",
                 (session_id, gm_name))
             session_info = await cursor.fetchone()
             if session_info:
@@ -102,7 +183,7 @@ async def build_edit_info(
 
 
 async def edit_session(
-        session_info: SessionBaseInfo) -> int:  # Overview, description
+        session_info: SessionBaseInfo) -> bool:  # Overview, description
     try:
         async with aiosqlite.connect(f"Pathparser_{session_info.guild_id}.sqlite") as db:
             cursor = await db.cursor()
@@ -112,14 +193,10 @@ async def edit_session(
                  session_info.play_location, session_info.hammer_time, session_info.game_link, session_info.overview,
                  session_info.description, session_info.player_limit, session_info.plot, session_info.overflow))
             await db.commit()
-            await cursor.execute(
-                "SELECT Session_ID from Sessions WHERE Session_Name = ? AND GM_Name = ? ORDER BY Session_ID Desc Limit 1",
-                (session_info.session_name, session_info.gm_name))
-            session_id = await cursor.fetchone()
-            return session_id[0]
+            return True
     except (aiosqlite, TypeError, ValueError) as e:
         logging.exception(f"An error occurred whilst creating a session: {e}")
-        return 0
+        return False
 
 
 async def delete_session(
@@ -227,6 +304,23 @@ async def create_session_embed(embed_info: SessionEmbedInfo) -> Union[tuple[Embe
     except (discord.DiscordException, TypeError, ValueError) as e:
         logging.exception(f"An error occurred whilst creating a session embed: {e}")
         return None, f"An error occurred whilst creating a session embed: {e}"
+
+
+async def player_signup(guild_id: int, session_name: str, session_id: int, character_name: str,
+                        warning_duration: typing.Optional[int]) -> bool:
+    warning_duration = -1 if warning_duration is None else warning_duration
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute(
+                """INSERT INTO Sessions_Participants (Session_ID, Session_Name, Player_Name, Player_ID, Character_Name, Level, Gold_Value, Tier, Notification_Warning) 
+                SELECT ?, ?, Player_Name, Player_ID, ?, Level, Gold_Value, Tier, ? FROM Player_Characters WHERE Character_Name = ?""",
+                (session_id, session_name, character_name, warning_duration, character_name)
+            )
+            await db.commit()
+            return True
+    except aiosqlite.Error as e:
+        logging.exception(f"Failed to sign up character {character_name} for session {session_name} ({session_id})")
 
 
 class GamemasterCommands(commands.Cog, name='Gamemaster'):
@@ -403,13 +497,16 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                     await interaction.followup.send(
                         f"Please provide a valid VTT link. You submitted {game_link} \r\n {game_link_valid[1]}")
                     return
-            hammer_time_valid = shared_functions.validate_hammertime(hammer_time)
+            hammer_time_valid = await shared_functions.complex_validate_hamemrtime(guild_id=interaction.guild_id,
+                                                                                   author_name=interaction.user.name,
+                                                                                   hammertime=hammer_time)
+            time = None
             if not hammer_time_valid[0]:
                 hammer_time_field = hammer_time
             else:
                 if hammer_time_valid[1]:
                     (date, time, arrival, hammer_time) = hammer_time_valid[2]
-                    hammer_time_field = "{date} at {time} which is {arrival}"
+                    hammer_time_field = f"{date} at {time} which is {arrival}"
                 else:
                     (date, time, arrival) = hammer_time_valid[2]
                     await interaction.followup.send(
@@ -448,10 +545,11 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                     overview=overview,
                     description=description,
                     plot=plot
-                    )
+                )
                 session_id = await create_session(base_session_info)
                 if session_id == 0:
-                    await interaction.followup.send("An error occurred whilst creating a session. Please try again later.")
+                    await interaction.followup.send(
+                        "An error occurred whilst creating a session. Please try again later.")
                     return
                 else:
                     embed_information = SessionEmbedInfo(
@@ -473,16 +571,28 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                         return
                     else:
                         (embed, session_channel) = embed_information
-                        announcement_message = await session_channel.send(content=group_range_text, embed=embed)
+                        if time:
+                            now = datetime.datetime.now(datetime.timezone.utc)
+                            session_start_time = shared_functions.parse_hammer_time(time)
+                            time_difference = session_start_time - now
+                            timeout_time = int(time_difference.total_seconds())
+                        else:
+                            timeout_time = 3600 * 12
+                        view = JoinOrLeaveSessionView(timeout_seconds=int(time_difference.total_seconds()),
+                                                      session_id=session_id, guild=interaction.guild,
+                                                      session_name=session_name)
+                        announcement_message = await session_channel.send(content=group_range_text, embed=embed,
+                                                                          view=view)
                         await announcement_message.create_thread(name=f"{session_id}: {session_name}",
                                                                  auto_archive_duration=10080)
                         await cursor.execute("UPDATE Sessions SET Message = ?, Session_Thread = ? WHERE Session_ID = ?",
                                              (announcement_message.id, announcement_message.thread.id, session_id))
-                        await interaction.followup.send(f"Session {session_name} with {session_id} has been created at {announcement_message.jump_url}!")
+                        session_reminders(session_id, announcement_message.thread.id, hammer_time, interaction.guild_id)
+                        await interaction.followup.send(
+                            f"Session {session_name} with {session_id} has been created at {announcement_message.jump_url}!")
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"An error occurred whilst creating a session: {e}")
             await interaction.followup.send("An error occurred whilst creating a session. Please try again later.")
-
 
     @session_group.command()
     @app_commands.describe(hammer_time="Please use the plain code hammer time provides that appears like </>, ")
@@ -493,114 +603,136 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
         discord.app_commands.Choice(name='include lower level bracket!', value=3),
         discord.app_commands.Choice(name='ignore role requirements!', value=4)])
     async def edit(self, interaction: discord.Interaction,
-                     session_name: str,
-                     session_range: discord.Role,
-                     player_limit: int,
-                     play_location: str,
-                     game_link: typing.Optional[str],
-                     group_id: typing.Optional[int],
-                     hammer_time: str,
-                     overview: str,
-                     description: str,
-                     plot: str = '9762aebb-43ae-47d5-8c7b-30c34a55b9e5',
-                     overflow: discord.app_commands.Choice[int] = 1):
+                   session_id: int,
+                   session_name: typing.Optional[str],
+                   session_range: typing.Optional[discord.Role],
+                   player_limit: typing.Optional[int],
+                   play_location: typing.Optional[str],
+                   game_link: typing.Optional[str],
+                   group_id: typing.Optional[int],
+                   hammer_time: typing.Optional[str],
+                   overview: typing.Optional[str],
+                   description: typing.Optional[str],
+                   plot: typing.Optional[str],
+                   overflow: typing.Optional[discord.app_commands.Choice[int]]):
         """Create a new session."""
         interaction.response.defer(thinking=True)
         try:
-            session_name, _ = name_fix(session_name)
-            overflow_value = overflow if overflow == 1 else overflow.value
-            level_range_text = f"{session_range.mention}"
-            if overflow_value != 1:
-                evaluated_session_range = await validate_overflow(
-                    guild=interaction.guild,
-                    session_range_id=session_range.id,
-                    overflow=overflow_value)
-                if evaluated_session_range is not None:
-                    level_range_text += f" and {evaluated_session_range.mention}"
-                elif overflow_value == 4:
-                    level_range_text += "\r\n Any level can join."
-            if game_link:
-                game_link_valid = shared_functions.validate_vtt(game_link)
-                if not game_link_valid[0]:
-                    await interaction.followup.send(
-                        f"Please provide a valid VTT link. You submitted {game_link} \r\n {game_link_valid[1]}")
-                    return
-            hammer_time_valid = shared_functions.validate_hammertime(hammer_time)
-            if not hammer_time_valid[0]:
-                hammer_time_field = hammer_time
-            else:
-                if hammer_time_valid[1]:
-                    (date, time, arrival) = hammer_time_valid[2]
-                    hammer_time_field = "{date} at {time} which is {arrival}"
-                else:
-                    (date, time, arrival) = hammer_time_valid[2]
-                    await interaction.followup.send(
-                        f"Please provide a valid hammer time. Your session of {date} at {time} which is {arrival} would occur IN THE PAST and humans haven't discovered time travel yet..")
-                    return
-            plot_valid = shared_functions.validate_worldanvil_link(plot)
-            if not plot_valid:
-                await interaction.followup.send(f"Please provide a valid plot link. You submitted {plot}")
-                return
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
-                cursor = await db.cursor()
-                if group_id:
-                    await cursor.execute("SELECT Player_Name from Sessions_Group_Presign WHERE Group_ID = ?",
-                                         (group_id,))
-                    group_players = await cursor.fetchall()
-                    if group_players:
-                        group_range_text = "\r\n Players in this group include:"
-                        for player in group_players:
-                            group_range_text += f" <@{player[0]}>"
-                        await cursor.execute("DELETE from Sessions_Group_Presign WHERE Group_ID = ?", (group_id,))
-                        await db.commit()
-                    else:
-                        await interaction.followup.send(f"Group ID {group_id} does not exist!")
-                        return
-                base_session_info = SessionBaseInfo(
-                    guild_id=interaction.guild_id,
-                    gm_name=interaction.user.name,
-                    session_name=session_name,
-                    session_range=session_range.name,
-                    session_range_id=session_range.id,
-                    player_limit=player_limit,
-                    hammer_time=hammer_time_field,
-                    overflow=overflow_value,
-                    play_location=play_location,
-                    game_link=game_link,
-                    overview=overview,
-                    description=description,
-                    plot=plot
-                    )
-                session_id = await create_session(base_session_info)
-                if session_id == 0:
-                    await interaction.followup.send("An error occurred whilst creating a session. Please try again later.")
-                    return
-                else:
-                    embed_information = SessionEmbedInfo(
+            build_info = await build_edit_info(
+                gm_name=interaction.user.name,
+                guild_id=interaction.guild_id,
+                session_id=session_id)
+
+            if build_info is not None:
+                (build_info_base, message, session_thread) = build_info
+                build_info_base.session_name = session_name if session_name is not None else build_info_base.session_name
+                build_info_base.session_range = session_range if session_range is not None else build_info_base.session_range.id
+                build_info_base.player_limit = player_limit if player_limit is not None else build_info_base.player_limit
+                build_info_base.play_location = play_location if play_location is not None else build_info_base.play_location
+                build_info_base.game_link = game_link if game_link is not None else build_info_base.game_link
+                build_info_base.group_id = group_id if group_id is not None else build_info_base.group_id
+                build_info_base.hammer_time = hammer_time if hammer_time is not None else build_info_base.hammer_time
+                build_info_base.overview = overview if overview is not None else build_info_base.overview
+                build_info_base.description = description if description is not None else build_info_base.description
+                build_info_base.plot = plot if plot is not None else build_info_base.plot
+                build_info_base.overflow = overflow.value if overflow is not None else build_info_base.overflow
+                level_range_text = f"{build_info_base.session_range.mention}"
+                overflow_value = overflow.value
+                if overflow_value != 1:
+                    evaluated_session_range = await validate_overflow(
                         guild=interaction.guild,
-                        gm_name=interaction.user.name,
-                        session_name=session_name,
-                        session_range=session_range.name,
-                        group_range=group_range_text,
-                        player_limit=player_limit,
-                        hammer_time=hammer_time_field,
-                        play_location=play_location,
-                        game_link=game_link,
-                        overview=overview,
-                        description=description,
-                        session_id=session_id
-                    )
-                    if isinstance(embed_information[1], str):
-                        await interaction.followup.send(embed_information[1])
+                        session_range_id=build_info_base.session_range,
+                        overflow=overflow_value)
+                    if evaluated_session_range is not None:
+                        level_range_text += f" and {evaluated_session_range.mention}"
+                    elif overflow_value == 4:
+                        level_range_text += "\r\n Any level can join."
+                if game_link:
+                    game_link_valid = shared_functions.validate_vtt(game_link)
+                    if not game_link_valid[0]:
+                        await interaction.followup.send(
+                            f"Please provide a valid VTT link. You submitted {game_link} \r\n {game_link_valid[1]}")
+                        return
+                time = None
+                hammer_time_valid = shared_functions.validate_hammertime(build_info_base.hammer_time)
+                if not hammer_time_valid[0]:
+                    hammer_time_field = hammer_time
+                else:
+                    if hammer_time_valid[1]:
+                        (date, time, arrival) = hammer_time_valid[2]
+                        hammer_time_field = "{date} at {time} which is {arrival}"
+                    else:
+                        (date, time, arrival) = hammer_time_valid[2]
+                        await interaction.followup.send(
+                            f"Please provide a valid hammer time. Your session of {date} at {time} which is {arrival} would occur IN THE PAST and humans haven't discovered time travel yet..")
+                        return
+                if plot:
+                    plot_valid = shared_functions.validate_worldanvil_link(plot)
+                    if not plot_valid:
+                        await interaction.followup.send(f"Please provide a valid plot link. You submitted {plot}")
+                        return
+                    async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                        cursor = await db.cursor()
+                        if group_id:
+                            await cursor.execute("SELECT Player_Name from Sessions_Group_Presign WHERE Group_ID = ?",
+                                                 (group_id,))
+                            group_players = await cursor.fetchall()
+                            if group_players:
+                                group_range_text = "\r\n Players in this group include:"
+                                for player in group_players:
+                                    group_range_text += f" <@{player[0]}>"
+                                await cursor.execute("DELETE from Sessions_Group_Presign WHERE Group_ID = ?",
+                                                     (group_id,))
+                                await db.commit()
+                            else:
+                                await interaction.followup.send(f"Group ID {group_id} does not exist!")
+                                return
+
+                    session_update = await edit_session(build_info_base)
+                    if not session_update:
+                        await interaction.followup.send(
+                            "An error occurred whilst editing the session. Please try again later.")
                         return
                     else:
-                        (embed, session_channel) = embed_information
-                        announcement_message = await session_channel.send(content=group_range_text, embed=embed)
-                        await announcement_message.create_thread(name=f"{session_id}: {session_name}",
-                                                                 auto_archive_duration=10080)
-                        await cursor.execute("UPDATE Sessions SET Message = ?, Session_Thread = ? WHERE Session_ID = ?",
-                                             (announcement_message.id, announcement_message.thread.id, session_id))
-                        await interaction.followup.send(f"Session {session_name} with {session_id} has been created at {announcement_message.jump_url}!")
+                        embed_information = SessionEmbedInfo(
+                            session_id=session_id, guild=interaction.guild, gm_name=build_info_base.gm_name,
+                            session_name=build_info_base.session_name, session_range=build_info_base.session_range,
+                            group_range=group_range_text,
+                            player_limit=build_info_base.player_limit, hammer_time=hammer_time_field,
+                            play_location=build_info_base.play_location,
+                            game_link=build_info_base.game_link, overview=build_info_base.overview,
+                            description=build_info_base.description
+                        )
+                        if isinstance(embed_information[1], str):
+                            await interaction.followup.send(embed_information[1])
+                            return
+                        else:
+                            (embed, session_channel) = embed_information
+                            if time:
+                                now = datetime.datetime.now(datetime.timezone.utc)
+                                session_start_time = shared_functions.parse_hammer_time(time)
+                                time_difference = session_start_time - now
+                                timeout_time = int(time_difference.total_seconds())
+                            else:
+                                timeout_time = 3600 * 12
+                            view = JoinOrLeaveSessionView(timeout_seconds=int(timeout_time),
+                                                          session_id=session_id, guild=interaction.guild,
+                                                          session_name=session_name)
+
+                            announcement_message = await session_channel.fetch_message(message)
+                            if announcement_message:
+                                await announcement_message.edit(content=group_range_text, embed=embed, view=view)
+                                clear_session_reminders(session_id, hammer_time)
+                                session_reminders(session_id, announcement_message.thread.id, hammer_time,
+                                                  interaction.guild_id)
+                                await interaction.followup.send(
+                                    f"Session {session_name} with {session_id} has been updated at {announcement_message.jump_url}!")
+                            else:
+                                await interaction.followup.send(
+                                    f"Could not find the session announcement message for session {session_id}!")
+            else:
+                await interaction.followup.send(
+                    f"Invalid Session ID of {session_id} associated with host {interaction.user.name}")
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"An error occurred whilst creating a session: {e}")
             await interaction.followup.send("An error occurred whilst creating a session. Please try again later.")
@@ -608,36 +740,54 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     @session_group.command(name='delete', description='Delete a session!')
     async def delete(self, interaction: discord.Interaction, session_id: int):
         """Delete an ACTIVE Session."""
-        guild_id = interaction.guild_id
-        guild = interaction.guild
-        author = interaction.user.name
-        author_id = interaction.user.id
-        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-        cursor = db.cursor()
-        sql = "SELECT Message, Session_Thread, Session_Name from Sessions WHERE Session_ID = ? AND GM_Name = ? AND IsActive = ? ORDER BY Created_Time Desc Limit 1"
-        val = (session_id, author, 1)
-        cursor.execute(sql, val)
-        info = cursor.fetchone()
-        if info is not None:
-            embed = discord.Embed(title=f"{info[1]}", description=f"This session has been cancelled.",
-                                  color=discord.Colour.red())
-            await Event.delete_session(self, session_id, guild_id, author)
-            embed.set_author(name=f'{author}')
-            embed.set_footer(text=f'Session ID: {session_id}.')
-            cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
-            session_channel_info = cursor.fetchone()
-            session_channel = await bot.fetch_channel(session_channel_info[0])
-            msg = await session_channel.fetch_message(info[0])
-            await msg.edit(embed=embed)
-            await interaction.response.send_message(
-                content=f"the following session of {info[2]} located at {msg.jump_url} has been cancelled.",
-                ephemeral=True)
-            thread = guild.get_thread(info[1])
-            await thread.delete()
-        if info is None:
-            await interaction.response.send_message(f"Invalid Session ID of {session_id} associated with host {author}")
-        cursor.close()
-        db.close()
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute(
+                    "SELECT Message, Session_Thread, Session_Name, Hammer_Time from Sessions WHERE Session_ID = ? AND GM_Name = ? AND IsActive = 1 ORDER BY Created_Time Desc Limit 1",
+                    (session_id, interaction.user.name))
+                info = await cursor.fetchone()
+                if info is not None:
+                    (message_id, thread_id, session_name, hammer_time) = info
+                    await cursor.execute("UPDATE Sessions SET IsActive = 0 WHERE Session_ID = ?", (session_id,))
+                    await db.commit()
+                    clear_session_reminders(session_id, hammer_time)
+                    embed = discord.Embed(title=f"{info[1]}", description=f"This session has been cancelled.",
+                                          color=discord.Colour.red())
+                    embed.set_author(name=f'{interaction.user.name}')
+                    embed.set_footer(text=f'Session ID: {session_id}.')
+                    await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
+                    session_channel_info = await cursor.fetchone()
+                    if not session_channel_info:
+                        await interaction.followup.send(
+                            "Issue with the Sessions Channel set by your Server Admin!!!! Please contact them to fix this issue. Session Channel Not Found in the DB!")
+                        return
+                    session_channel = interaction.guild.get_channel(session_channel_info[0])
+                    if not session_channel:
+                        session_channel = await interaction.guild.fetch_channel(session_channel_info[0])
+                    if not session_channel:
+                        await interaction.followup.send(
+                            "Issue with the Sessions Channel set by your Server Admin!!!! Please contact them to fix this issue. Session Channel Not Found by the Bot!")
+                        return
+                    msg = await session_channel.fetch_message(info[0])
+                    await msg.edit(embed=embed, view=None)
+                    thread = interaction.guild.get_thread(info[1])
+                    if not thread:
+                        thread = await interaction.guild.fetch_channel(info[1])
+                    if thread:
+                        await thread.delete()
+                    else:
+                        await interaction.followup.send("Could not find the session thread!")
+                        return
+                    await interaction.followup.send(
+                        f"the following session of {info[2]} located at {msg.jump_url} has been cancelled.")
+                if info is None:
+                    await interaction.followup.send(
+                        f"Invalid Session ID of {session_id} associated with host {interaction.user.name}")
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred whilst deleting a session: {e}")
+            await interaction.followup.send("An error occurred whilst deleting a session. Please try again later.")
 
 
 """@gamemaster.command()
@@ -658,133 +808,6 @@ async def help(interaction: discord.Interaction):
 
 
 
-
-@gamemaster.command()
-@app_commands.describe(overflow="Allow for adjust role ranges!")
-@app_commands.choices(overflow=[discord.app_commands.Choice(name='current range only!', value=1), discord.app_commands.Choice(name='include next level bracket!', value=2),discord.app_commands.Choice(name='include lower level bracket!', value=3),discord.app_commands.Choice(name='ignore role requirements!', value=4)])
-async def edit(interaction: discord.Interaction, session_id: int, session_range: typing.Optional[discord.Role], session_name: typing.Optional[str], player_limit: typing.Optional[int], play_location: typing.Optional[str], game_link: typing.Optional[str], hammer_time: typing.Optional[str], overview: typing.Optional[str], description: typing.Optional[str], overflow: typing.Optional[discord.app_commands.Choice[int]]):
-    "GM: Edit an Active Session."
-    guild_id = interaction.guild_id
-    author = interaction.user.name
-    author_id = interaction.user.id
-    guild = interaction.guild
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    sql = "SELECT Message, Session_Name, Session_Range_ID, Play_Location, hammer_time, game_link, Overview, Description, Player_Limit, Session_Range, overflow from Sessions WHERE Session_ID = ? AND GM_Name = ? AND IsActive = ? ORDER BY Created_Time Desc Limit 1"
-    val = (session_id, author, 1)
-    cursor.execute(sql, val)
-    info = cursor.fetchone()
-    if info is not None:
-        overflow = info[10] if overflow is None else overflow.value
-        if session_range is not None:
-            session_range = session_range
-            session_range_name = session_range.name
-            session_range_id = session_range.id
-        else:
-            session_range = info[2]
-            session_range_id = info[2]
-            session_range_name = info[9]
-        if session_name is not None:
-            session_name = session_name
-        else:
-            session_name = info[1]
-        if player_limit is not None:
-            player_limit = player_limit
-        else:
-            player_limit = info[8]
-        if play_location is not None:
-            play_location = play_location
-        else:
-            play_location = info[3]
-        if game_link is not None:
-            game_link_valid = game_link[0:4]
-            if str.lower(game_link_valid) == 'http':
-                embed = discord.Embed(title=f"{session_name}", url=f'{game_link}', description=f"Play Location: {play_location}", color=discord.Colour.blue())
-            else:
-                game_link = 'HTTPS://' + game_link
-                embed = discord.Embed(title=f"{session_name}", url=f'{game_link}', description=f"Play Location: {play_location}", color=discord.Colour.blue())
-        elif game_link is None and info[5] is not None:
-            game_link = info[5]
-            embed = discord.Embed(title=f"{session_name}", url=f'{game_link}', description=f"Play Location: {play_location}", color=discord.Colour.blue())
-        else:
-            embed = discord.Embed(title=f"{session_name}", description=f"Play Location: {play_location}", color=discord.Colour.blue())
-        if hammer_time is not None:
-            hammer_timing = hammer_time[0:3]
-            if hammer_timing == "<t:":
-                timing = hammer_time[3:13]
-                date = "<t:" + timing + ":D>"
-                hour = "<t:" + timing + ":t>"
-                arrival = "<t:" + timing + ":R>"
-            else:
-                timing = hammer_time
-                date = "<t:" + timing + ":D>"
-                hour = "<t:" + timing + ":t>"
-                arrival = "<t:" + timing + ":R>"
-        else:
-            timing = info[4]
-            date = "<t:" + timing + ":D>"
-            hour = "<t:" + timing + ":t>"
-            arrival = "<t:" + timing + ":R>"
-        if overview is not None:
-            overview = overview
-        else:
-            overview = info[6]
-        if description is not None:
-            description = description
-        else:
-            description = info[7]
-        print(overflow)
-        print(session_id)
-        if overflow == 1:
-            footer_text = f'Session ID: {session_id}.'
-            session_ranges = f'<@&{session_range_id}>'
-        elif overflow == 2:
-            footer_text = f'Session ID: {session_id}.'
-            cursor.execute("SELECT min(level), max(level) FROM Level_Range WHERE Role_ID = ?", (session_range_id,))
-            session_range_info = cursor.fetchone()
-            if session_range_info is not None and session_range_info[1] + 1 < 20:
-                cursor.execute("SELECT Role_ID FROM Level_Range WHERE level = ?", (session_range_info[1] + 1,))
-                overflow_range_id = cursor.fetchone()
-                session_ranges = f'<@&{session_range_id}> AND <@&{overflow_range_id[0]}>'
-            else:
-                session_ranges = f'<@&{session_range_id}>'
-        elif overflow == 3:
-            footer_text = f'Session ID: {session_id}.'
-            cursor.execute("SELECT min(level), max(level) FROM Level_Range WHERE Role_ID = ?", (session_range_id,))
-            session_range_info = cursor.fetchone()
-            print(session_range_info)
-            if session_range_info is not None and session_range_info[0] - 1 > 3:
-                cursor.execute("SELECT Role_ID FROM Level_Range WHERE level = ?", (session_range_info[0] - 1,))
-                overflow_range_id = cursor.fetchone()
-                session_ranges = f'<@&{session_range_id}> AND <@&{overflow_range_id[0]}>'
-            else:
-                session_ranges = f'<@&{session_range_id}>'
-        else:
-            session_ranges = f'<@&{session_range_id}>'
-            footer_text = f'Session ID: {session_id}. Any level can join.'
-        print(footer_text)
-        await Event.edit_session(self, guild_id, author, session_id, session_name, session_range_name, session_range_id, play_location, timing, game_link, overflow)
-        embed.set_author(name=f'{author}')
-        embed.add_field(name="Session Range", value=session_ranges)
-        embed.add_field(name="Play Location", value=f'{play_location}')
-        embed.add_field(name="Player Limit", value=f'{player_limit}')
-        embed.add_field(name="Date & Time:", value=f'{date} at {hour} which is {arrival}', inline=False)
-        embed.add_field(name="Overview:", value=f'{overview}', inline=False)
-        embed.add_field(name="Description:", value=f'{description}', inline=False)
-        embed.set_footer(text=footer_text)
-        print(info)
-        session_content = f'<@{interaction.user.id}> is running a session.\r\n{session_ranges}'
-        cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
-        session_channel_info = cursor.fetchone()
-        session_channel = await bot.fetch_channel(session_channel_info[0])
-        msg = await session_channel.fetch_message(info[0])
-        role = guild.get_role(session_range_id)
-        await msg.edit(embed=embed, content=session_content)
-        await interaction.response.send_message(content=f"The following session of {session_name} located at {msg.jump_url} has been updated.", allowed_mentions=discord.AllowedMentions(roles=True,))
-    if info is None:
-        await interaction.response.send_message(f"Invalid Session ID of {session_id} associated with host {author}")
-    cursor.close()
-    db.close()
 
 @gamemaster.command()
 @app_commands.autocomplete(specific_character=character_select_autocompletion)
@@ -1707,40 +1730,18 @@ async def display(interaction: discord.Interaction, session_id: int, group: disc
     db.close()
 """
 
+
 class JoinOrLeaveSessionView(discord.ui.View):
     """Base class for views requiring acknowledgment."""
 
-    def __init__(self, content: typing.Optional, interaction: discord.Interaction):
-        super().__init__(timeout=180)
+    def __init__(self, session_id: int, guild: typing.Optional[discord.Guild], timeout_seconds: int, session_name: str):
+        super().__init__(timeout=timeout_seconds)
+        self.session_id = session_id
+        self.session_name = session_name
+        self.thread_id = None
+        self.guild = guild
+        self.message = None
         self.embed = None
-        self.message = None
-        self.content = content
-        self.message = None
-        self.interaction = interaction
-        self.user_id = interaction.user.id
-
-        # Initialize buttons
-        self.accept_button = discord.ui.Button(label='Join', style=discord.ButtonStyle.primary)
-        self.reject_button = discord.ui.Button(label='Leave', style=discord.ButtonStyle.danger)
-
-        self.accept_button.callback = self.accept
-        self.reject_button.callback = self.reject
-
-        self.add_item(self.accept_button)
-        self.add_item(self.reject_button)
-
-    async def send_initial_message(self):
-        """Send the initial message with the view."""
-        await self.create_embed()
-        try:
-            await self.interaction.followup.send(
-                content=self.content,
-                embed=self.embed,
-                view=self
-            )
-            self.message = self.interaction.original_response()
-        except (discord.HTTPException, AttributeError) as e:
-            logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
 
     async def on_timeout(self):
         """Disable buttons when the view times out."""
@@ -1753,94 +1754,189 @@ class JoinOrLeaveSessionView(discord.ui.View):
                 logging.error(
                     f"Failed to edit message on timeout for user {self.user_id} in guild {self.interaction.guild.id}: {e}")
 
-    async def join(self, interaction: discord.Interaction):
-        """Handle the accept action."""
-        await self.joining(interaction)
-        await interaction.response.edit_message(
-            embed=self.embed,
-            view=None
+    @discord.ui.button(label='Join', style=discord.ButtonStyle.primary)
+    async def join_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await self.handle_join(interaction)
+
+    async def handle_join(self, interaction: discord.Interaction):
+        # Fetch the user's characters suitable for the session
+        character_names = await self.get_suitable_characters(interaction)
+        # Create the character selection view
+        if isinstance(character_names, list):
+            view = CharacterSelectionView(character_names=character_names, interaction=interaction,
+                                          session_id=self.session_id, session_name=self.session_name)
+            await interaction.response.send_message(
+                "Please select a character to join the session:",
+                view=view,
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                character_names,
+                ephemeral=True
+            )
+
+    async def get_suitable_characters(self, interaction: discord.Interaction) -> Union[List[str], str]:
+        # Fetch the user's characters
+        try:
+            async with aiosqlite.connect(f'pathfinder_{interaction.guild.id}.sqlite') as db:
+                cursor = await db.cursor()
+                # Check if the user has already signed up for the session
+                await cursor.execute(
+                    "Select Character_Name from Sessions_Signups where Session_ID = ? and Player_ID = ?",
+                    (self.session_id, interaction.user.id))
+                signups_presence = await cursor.fetchone()
+                if signups_presence:
+                    return 'You have already signed up for this session.'
+                await cursor.execute(
+                    "Select Character_Name from Sessions_Participants where Session_ID = ? and Player_ID = ?",
+                    (self.session_id, interaction.user.id))
+                participants_presence = await cursor.fetchone()
+                if participants_presence:
+                    return 'You have already signed up for this session.'
+
+                # Fetch the session information
+                await cursor.execute(
+                    "SELECT Session_Range_ID, Overflow, Thread_ID FROM Sessions WHERE Session_ID = ? And IsActive = 1",
+                    (self.session_id,))
+                session_info = await cursor.fetchone()
+                if not session_info:
+                    return 'No active session with that ID could be found.'
+                else:
+                    (session_range_id, overflow, self.thread_id) = session_info
+
+                    # Fetch the user's characters suitable for the session
+                    if overflow == 4:  # All Characters Suitable as Overflow is 4
+                        await cursor.execute("SELECT Character_Name FROM Player_Characters WHERE Player_ID = ?",
+                                             (interaction.user.id,))
+                    else:  # Fetch characters based on the session range
+                        await cursor.execute(
+                            "Select Min(Level), Max(Level) from Milestone_System where Level_Range_ID = ?",
+                            (session_range_id,))
+                        level_range = await cursor.fetchone()
+                        if level_range:
+                            overflow_validation = await validate_overflow(guild=interaction.guild, overflow=overflow,
+                                                                          session_range_id=session_range_id)  # Overflow is typing.Optional[discord.Role]
+                            if overflow_validation:  # Overflow is a role
+                                await cursor.execute(
+                                    "Select Min(Level), Max(Level) from Milestone_System where Level_Range_ID = ?",
+                                    (overflow_validation.id,))
+                                overflow_level_range = await cursor.fetchone()
+                                minimum_level = min(overflow_level_range[0], level_range[0])
+                                maximum_level = max(overflow_level_range[1], level_range[1])
+                                await cursor.execute(
+                                    "SELECT Character_Name FROM Player_Characters WHERE Player_ID = ? AND Level >= ? AND Level <= ?",
+                                    (interaction.user.id, minimum_level, maximum_level))
+                                character_names = await cursor.fetchall()
+                                return [character_name[0] for character_name in character_names]
+                            else:  # Overflow is not a role
+                                await cursor.execute(
+                                    "SELECT Character_Name FROM Player_Characters WHERE Player_ID = ? AND Level >= ? AND Level <= ?",
+                                    (interaction.user.id, level_range[0], level_range[1]))
+                                character_names = await cursor.fetchall()
+                                return [character_name[0] for character_name in character_names]
+                        else:  # No level range found in milestone system. Matching Role to user permissions.
+                            user_valid = interaction.user.get_role(session_range_id)
+                            if user_valid:
+                                await cursor.execute("SELECT Character_Name FROM Player_Characters WHERE Player_ID = ?",
+                                                     (interaction.user.id,))
+                                character_names = await cursor.fetchall()
+                                return [character_name[0] for character_name in character_names]
+                            else:
+                                return 'You do not have a character suitable for this session.'
+        except aiosqlite.Error as e:
+            logging.exception(
+                f"Failed to fetch characters for user {interaction.user.id} in guild {interaction.guild.id}: {e}")
+
+    @discord.ui.button(label='Leave', style=discord.ButtonStyle.danger)
+    async def leave_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await self.handle_leave(interaction)
+
+    async def handle_leave(self, interaction: discord.Interaction):
+        # Remove the user's character from the session participants in the database
+        await player_commands.player_leave_session(interaction.user.id, self.session_id)
+        await interaction.response.send_message(
+            "You have left the session.",
+            ephemeral=True
         )
 
-    async def leave(self, interaction: discord.Interaction):
-        """Handle the reject action."""
-        await self.leaving(interaction)
-        await interaction.response.edit_message(
-            embed=self.embed,
-            view=None
-        )
 
-    async def joining(self, interaction: discord.Interaction):
-        """To be implemented in subclasses."""
-        raise NotImplementedError
-
-    async def leaving(self, interaction: discord.Interaction):
-        """To be implemented in subclasses."""
-        raise NotImplementedError
-
-    async def create_embed(self):
-        """To be implemented in subclasses."""
-        raise NotImplementedError
-
-
-class DynamicCharacterButtonView(discord.ui.View):
-    """View with dynamically created buttons based on a list of names."""
-
-    def __init__(self, names: typing.List[str], content: typing.Optional[str], interaction: discord.Interaction):
-        super().__init__(timeout=180)
-        self.embed = None
-        self.message = None
-        self.content = content
+class CharacterSelectionView(discord.ui.View):
+    def __init__(self, character_names: List[str], interaction: discord.Interaction, session_id: int, session_name: str,
+                 thread_id: int):
+        super().__init__(timeout=900)  # 15 minutes
         self.interaction = interaction
-        self.user_id = interaction.user.id
-
-        # Dynamically create buttons based on names
-        for name in names:
+        self.session_id = session_id
+        self.session_name = session_name
+        self.thread_id = thread_id
+        for name in character_names:
             button = discord.ui.Button(label=name, style=discord.ButtonStyle.primary)
-            button.callback = lambda interaction, name=name: self.button_action(interaction, name)
+            button.callback = self.create_button_callback(name)
             self.add_item(button)
 
-    async def send_initial_message(self):
-        """Send the initial message with the view."""
-        await self.create_embed()
-        try:
-            await self.interaction.followup.send(
-                content=self.content,
-                embed=self.embed,
-                view=self
-            )
-            self.message = await self.interaction.original_response()
-        except (discord.HTTPException, AttributeError) as e:
-            print(f"Failed to send message: {e}")
+    def create_button_callback(self, name):
+        async def button_callback(interaction: discord.Interaction):
+            await self.handle_character_selection(interaction, name)
 
-    async def on_timeout(self):
-        """Disable buttons when the view times out."""
-        for child in self.children:
-            child.disabled = True
-        if self.message:
-            try:
-                await self.message.edit(content=self.content, embed=self.embed, view=self)
-            except (discord.HTTPException, AttributeError) as e:
-                print(f"Failed to edit message on timeout: {e}")
+        return button_callback
 
-    async def button_action(self, interaction: discord.Interaction, name: str):
-        """Handle the button action with the provided name."""
-        # Perform your specific action here
-        await interaction.response.send_message(f"{name} button pressed by {interaction.user.mention}")
-
-    async def create_embed(self):
-        """Create and set the embed for the message."""
-        self.embed = discord.Embed(
-            title="Choose a person",
-            description="Click on a button to select a person.",
-            color=discord.Color.blue()
+    async def handle_character_selection(self, interaction: discord.Interaction, character_name: str):
+        # Prompt for reminder preference
+        view = ReminderPreferenceView(character_name, self.interaction, self.session_id)
+        await player_commands.player_signup(
+            guild=interaction.guild,
+            session_id=self.session_id,
+            session_name=self.session_name,
+            player_id=interaction.user.id,
+            character_name=character_name,
+            warning_duration=None,
+            thread_id=self.thread_id
+        )
+        await interaction.response.send_message(
+            f"You have selected {character_name}. Would you like to receive a reminder before the session?",
+            view=view,
+            ephemeral=True
         )
 
 
+class ReminderPreferenceView(discord.ui.View):
+    def __init__(self, character_name: str, interaction: discord.Interaction, session_id: int):
+        super().__init__(timeout=900)
+        self.character_name = character_name
+        self.interaction = interaction
+        self.session_id = session_id
 
+    @discord.ui.button(label='60 minutes', style=discord.ButtonStyle.danger)
+    async def sixty_minutes_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await interaction.response.send_message("You will receive a reminder 60 minutes before the session.",
+                                                ephemeral=True)
+        await self.update_notification_warning(interaction, 60)
 
+    @discord.ui.button(label='30 minutes', style=discord.ButtonStyle.danger)
+    async def thirty_minutes_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await interaction.response.send_message("You will receive a reminder 30 minutes before the session.",
+                                                ephemeral=True)
+        await self.update_notification_warning(interaction, 30)
 
+    @discord.ui.button(label='at start', style=discord.ButtonStyle.danger)
+    async def start_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await interaction.response.send_message("You will receive a reminder at the start of the session.",
+                                                ephemeral=True)
+        await self.update_notification_warning(interaction, 0)
 
+    async def update_notification_warning(self, interaction: discord.Interaction, warning_duration: int):
+        try:
+            async with aiosqlite.connect(f'pathfinder_{interaction.guild.id}.sqlite') as db:
+                await db.execute(
+                    "UPDATE Sessions_Signups SET Notification_Warning = ? WHERE Session_ID = ? AND Player_ID = ?",
+                    (warning_duration, self.session_id, interaction.user.id)
+                )
+                await db.commit()
+        except aiosqlite.Error as e:
+            logging.error(
+                f"Failed to update notification warning for user {interaction.user.id} in guild {interaction.guild.id}: {e}")
 
+        # Add the character to the session participants in the database
 
 
 logging.basicConfig(
