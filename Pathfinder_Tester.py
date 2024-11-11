@@ -16,17 +16,13 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import shared_functions
 from commands import gamemaster_commands
-
+from scheduler
 intents = discord.Intents.default()
 intents.typing = True
 intents.message_content = True
 intents.members = True
 os.chdir("C:\\pathparser")
 bot = commands.Bot(command_prefix="!", intents=intents)
-
-scheduler = AsyncIOScheduler()
-scheduler.start()
-scheduled_jobs = {}
 
 
 async def reinstate_reminders(server_bot) -> None:

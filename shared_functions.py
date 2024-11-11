@@ -2177,6 +2177,8 @@ class DualView(discord.ui.View):
         raise NotImplementedError
 
 
+
+
 logging.basicConfig(
     level=logging.ERROR,
     format='%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s',
