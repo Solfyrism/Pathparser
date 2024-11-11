@@ -62,7 +62,7 @@ logging.basicConfig(
 
 async def remind_users(session_id: int, guild_id: int, thread_id: int, time: int):
     try:
-        content = "Reminder: The event is starting in 15 minutes."
+        content = f"Reminder: The event is starting in {time} minutes."
         async with aiosqlite.connect("pathparser.db") as db:
             cursor = await db.cursor
             await cursor.execute(
