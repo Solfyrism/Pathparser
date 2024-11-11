@@ -25,7 +25,7 @@ os.chdir("C:\\pathparser")
 async def register_character_embed(character_name: str, guild: discord.Guild) -> Union[
     Tuple[discord.Embed, str, int, int], str]:
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}_test..sqlite") as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
 
@@ -229,7 +229,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
         "accept a player into your accepted bios, or Remove them."
         guild = interaction.guild
         guild_id = interaction.guild_id
-        async with aiosqlite.connect(f"C:/pathparser/pathparser_{guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"C:/pathparser/pathparser_{guild_id}_test..sqlite") as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.cursor()
             _, character_name = name_fix(character_name)
@@ -365,7 +365,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
             await interaction.followup.send("Invalid link provided!", ephemeral=True)
             return
 
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as db:
             cursor = await db.cursor()
             author = interaction.user.name
             await cursor.execute(
@@ -429,7 +429,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
             await interaction.followup.send("Invalid link provided!", ephemeral=True)
             return
 
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as db:
             cursor = await db.cursor()
             author = interaction.user.name
             await cursor.execute(
@@ -495,7 +495,7 @@ class CleanOldRegistrationView(shared_functions.SelfAcknowledgementView):
             description=f"{interaction.user.name} has cleaned house.",
             color=discord.Color.green()
         )
-        async with aiosqlite.connect(f"C:/pathparser/pathparser_{self.guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"C:/pathparser/pathparser_{self.guild_id}_test..sqlite") as db:
             cursor = await db.cursor()
             for player in self.remove_character:
                 await cursor.execute("DELETE FROM A_STG_Player_Characters WHERE True_Character_Name = ?", (player,))
@@ -516,7 +516,7 @@ class CleanOldRegistrationView(shared_functions.SelfAcknowledgementView):
 
     async def create_embed(self):
         "Create the initial embed for the cleanse."
-        async with aiosqlite.connect(f"C:/pathparser/pathparser_{self.guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"C:/pathparser/pathparser_{self.guild_id}_test..sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
                 "SELECT Player_Name, True_Character_Name, Created_Date FROM A_STG_Player_Characters where Created_Date <= date('now', '-? days')",

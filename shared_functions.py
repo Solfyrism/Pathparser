@@ -39,7 +39,7 @@ timezone_cache = sorted(available_timezones())
 async def player_session_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+    db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(f"Select Session_ID, Session_Name Sessions_Archive WHERE Player_Name = ? AND Session_ID LIKE ? OR Player_Name = ? AND Session_Name like ? Limit 20", (interaction.user.name, f"%{current}%", interaction.user.name, f"%{current}%"))
@@ -58,7 +58,7 @@ async def stg_character_select_autocompletion(interaction: discord.Interaction, 
     app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+    db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
@@ -118,7 +118,7 @@ async def own_character_select_autocompletion(
     if cached_result is not None:
         character_list = cached_result
     else:
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             await cursor.execute(
                 """
@@ -156,7 +156,7 @@ async def character_select_autocompletion(interaction: discord.Interaction, curr
     if cached_result is not None:
         character_list = cached_result
     else:
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             await cursor.execute(
                 """
@@ -230,7 +230,7 @@ async def session_autocompletion(interaction: discord.Interaction, current: str)
     app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+    db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
@@ -250,7 +250,7 @@ async def group_id_autocompletion(interaction: discord.Interaction, current: str
     app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+    db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute("SELECT Group_ID, Group_Name  FROM Sessions_Group WHERE Group_Name LIKE ? Limit 15",
@@ -287,7 +287,7 @@ async def player_session_autocomplete(interaction: discord.Interaction, current:
     app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+    db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
@@ -308,7 +308,7 @@ async def player_session_autocomplete(interaction: discord.Interaction, current:
 async def fame_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+    db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
@@ -328,7 +328,7 @@ async def fame_autocomplete(interaction: discord.Interaction, current: str) -> t
 async def title_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+    db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
     cursor = db.cursor()
     current = unidecode(str.title(current))
     cursor.execute(
@@ -351,7 +351,7 @@ async def settings_autocomplete(interaction: discord.Interaction, current: str) 
     guild_id = interaction.guild_id
     admin_bool = interaction.user.guild_permissions.administrator
     if admin_bool:
-        with sqlite3.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        with sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
             cursor = db.cursor()
             current = unidecode(current.lower())
             try:
@@ -377,7 +377,7 @@ async def settings_autocomplete(interaction: discord.Interaction, current: str) 
 async def character_embed(character_name: str, guild: discord.Guild) -> Union[
     Tuple[discord.Embed, str, int], str]:
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}_test.sqlite") as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
 
@@ -631,7 +631,7 @@ async def update_character(guild_id: int, change: UpdateCharacterData) -> str:
         values.append(change.character_name)
 
         # Execute the SQL statement
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
             await db.execute(sql_statement, values)
             await db.commit()
             logging.info(f"Character '{change.character_name}' updated successfully.")
@@ -875,7 +875,7 @@ def fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset):
         "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00", "20:30",
         "21:00", "21:30", "22:00", "22:30", "23:00", "23:30", "24:00", "24:30"
     ]
-    conn = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+    conn = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
     cursor = conn.cursor()
     print(f" this is {utc_offset}")
     if utc_offset > 0:
@@ -1274,7 +1274,7 @@ async def complex_validate_hamemrtime(guild_id, author_name, hammertime: Union[s
             return hammertime_result
 
         # Otherwise, connect to the database to retrieve the user's UTC offset.
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
             cursor = await db.execute()
             await cursor.execute(
                 "SELECT UTC_Offset FROM Player_Timecard WHERE Player_Name = ?", (author_name,)
@@ -1470,7 +1470,7 @@ async def put_wa_report(guild_id: int, session_id: int, overview: str, author: s
                 os.getenv('WORLD_ANVIL_USER')
             )
             world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
-            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
                 cursor = await db.execute()
                 await cursor.execute("Select Search from Admin where Identifier = 'WA_Session_Folder'")
                 session_folder = await cursor.fetchone()
@@ -1587,7 +1587,7 @@ async def patch_wa_report(guild_id: int, session_id: int, overview: str) -> Opti
         world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
 
         # Establish a new database connection
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
 
             # Fetch session information
@@ -1862,7 +1862,7 @@ class RecipientAcknowledgementView(discord.ui.View):
         """Send the initial message with the view."""
         await self.create_embed()
         try:
-            async with aiosqlite.connect(f"Pathparser_{self.interaction.guild_id}.sqlite") as conn:
+            async with aiosqlite.connect(f"Pathparser_{self.interaction.guild_id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
                 await cursor.execute("SELECT Search FROM Admin WHERE identifier = 'Character_Transaction_Channel'")
                 channel_id = await cursor.fetchone()

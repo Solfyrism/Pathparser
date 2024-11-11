@@ -227,7 +227,7 @@ class AdminCommands(commands.Cog, name='admin'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await cursor.execute(
@@ -283,7 +283,7 @@ class AdminCommands(commands.Cog, name='admin'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await cursor.execute(
@@ -363,7 +363,7 @@ class AdminCommands(commands.Cog, name='admin'):
         effective_gold = Decimal(str(effective_gold))
         lifetime_gold = Decimal(str(lifetime_gold))
 
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 if amount == 0 and effective_gold == 0 and lifetime_gold == 0:
@@ -470,7 +470,7 @@ class AdminCommands(commands.Cog, name='admin'):
         guild = interaction.guild
 
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 transaction_undo = await transaction_reverse(
@@ -547,7 +547,7 @@ class AdminCommands(commands.Cog, name='admin'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await cursor.execute(
@@ -725,7 +725,7 @@ class AdminCommands(commands.Cog, name='admin'):
         await interaction.response.defer(thinking=True)
 
         try:
-            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
                 cursor = await conn.cursor()
 
                 # Decide which query to execute based on whether 'name' is provided
@@ -780,7 +780,7 @@ class AdminCommands(commands.Cog, name='admin'):
     async def update_setting(self, interaction: discord.Interaction, setting: str, revision: str):
         """This allows the admin to adjust a serverside setting"""
         guild_id = interaction.guild_id
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await interaction.response.defer(thinking=True)
@@ -874,7 +874,7 @@ class AdminCommands(commands.Cog, name='admin'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await cursor.execute(
@@ -935,7 +935,7 @@ class AdminCommands(commands.Cog, name='admin'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await cursor.execute(
@@ -1031,7 +1031,7 @@ class AdminCommands(commands.Cog, name='admin'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 if amount == 0 and misc_milestones == 0:
@@ -1110,7 +1110,7 @@ class AdminCommands(commands.Cog, name='admin'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await cursor.execute("SELECT MIN(level), MAX(level) from Milestone_System")
@@ -1238,7 +1238,7 @@ class AdminCommands(commands.Cog, name='admin'):
         """This allows the admin to adjust the milestone floor of a level among other things."""
         guild_id = interaction.guild_id
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await cursor.execute("SELECT MIN(LEVEL), MAX(LEVEL) from Milestone_System")
@@ -1389,7 +1389,7 @@ class AdminCommands(commands.Cog, name='admin'):
         """This allows the admin to adjust the milestone floor of a level among other things."""
         guild_id = interaction.guild_id
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await cursor.execute("SELECT Level, WPL, WPL_Heroic FROM Milestone_System WHERE Level = ?", (level,))
@@ -1433,7 +1433,7 @@ class AdminCommands(commands.Cog, name='admin'):
         """This allows the admin to adjust the milestone floor of a level among other things."""
         guild_id = interaction.guild_id
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await cursor.execute("SELECT easy, medium, hard, deadly FROM Milestone_System WHERE Level = ?",
@@ -1477,7 +1477,7 @@ class AdminCommands(commands.Cog, name='admin'):
         await interaction.response.defer(thinking=True)
 
         try:
-            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
                 cursor = await conn.cursor()
 
                 # Decide which query to execute based on whether 'name' is provided
@@ -1525,7 +1525,7 @@ class AdminCommands(commands.Cog, name='admin'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await cursor.execute(
@@ -1573,7 +1573,7 @@ class AdminCommands(commands.Cog, name='admin'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await cursor.execute("SELECT MIN(tier), MAX(tier) from AA_Trials")
@@ -1663,7 +1663,7 @@ class AdminCommands(commands.Cog, name='admin'):
     async def define_tier(self, interaction: discord.Interaction, tier: int, trials: int):
         guild_id = interaction.guild_id
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 await cursor.execute("SELECT MIN(Tier), MAX(Tier) from AA_Trials")
@@ -1814,7 +1814,7 @@ class AdminCommands(commands.Cog, name='admin'):
         await interaction.response.defer(thinking=True)
 
         try:
-            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
                 cursor = await conn.cursor()
 
                 # Decide which query to execute based on whether 'name' is provided
@@ -1891,7 +1891,7 @@ class AdminCommands(commands.Cog, name='admin'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         await interaction.response.defer(thinking=True)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 if confirmation == 1:
@@ -1958,7 +1958,7 @@ class MilestoneDisplayView(shared_functions.ShopView):
             FROM Milestone_System   
             ORDER BY Tier ASC LIMIT ? OFFSET ? 
         """
-        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test..sqlite") as db:
             cursor = await db.execute(statement, (self.limit, self.offset - 1))
             self.results = await cursor.fetchall()
 
@@ -1982,7 +1982,7 @@ class MilestoneDisplayView(shared_functions.ShopView):
     async def get_max_items(self):
         """Get the total number of levels."""
         if self.max_items is None:
-            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test..sqlite") as db:
                 cursor = await db.execute("SELECT COUNT(*) FROM Milestone_System")
                 count = await cursor.fetchone()
                 self.max_items = count[0]
@@ -2001,7 +2001,7 @@ class MythicDisplayView(shared_functions.ShopView):
             FROM AA_Trials   
             ORDER BY LEVEL ASC LIMIT ? OFFSET ? 
         """
-        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test..sqlite") as db:
             cursor = await db.execute(statement, (self.limit, self.offset - 1))
             self.results = await cursor.fetchall()
 
@@ -2020,7 +2020,7 @@ class MythicDisplayView(shared_functions.ShopView):
     async def get_max_items(self):
         """Get the total number of levels."""
         if self.max_items is None:
-            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test..sqlite") as db:
                 cursor = await db.execute("SELECT COUNT(*) FROM AA_Trials")
                 count = await cursor.fetchone()
                 self.max_items = count[0]
@@ -2052,7 +2052,7 @@ class ArchiveDisplayView(shared_functions.DualView):
                             Tradition_Link, Template_Name, Template_Link, Article_Link
                             FROM Archive_Player_Characters WHERE Player_Name = ? ORDER BY True_Character_Name ASC LIMIT ? OFFSET ? """
             val = (self.player_name, self.limit, self.offset - 1)
-        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test..sqlite") as db:
             cursor = await db.execute(statement, val)
             self.results = await cursor.fetchall()
 
@@ -2130,7 +2130,7 @@ class ArchiveDisplayView(shared_functions.DualView):
     async def get_max_items(self):
         """Get the total number of titles."""
         if self.max_items is None:
-            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test..sqlite") as db:
                 if not self.player_name:
                     cursor = await db.execute("SELECT COUNT(*) FROM Archive_Player_Characters")
                 else:
@@ -2160,7 +2160,7 @@ class SettingDisplayView(shared_functions.DualView):
         statement = """SELECT Search, Type, Identifier, Description FROM Admin Limit ? OFFSET ?"""
         val = (self.limit, self.offset - 1)
 
-        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test..sqlite") as db:
             cursor = await db.execute(statement, val)
             self.results = await cursor.fetchall()
 
@@ -2189,7 +2189,7 @@ class SettingDisplayView(shared_functions.DualView):
     async def get_max_items(self):
         """Get the total number of titles."""
         if self.max_items is None:
-            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test..sqlite") as db:
                 cursor = await db.execute("SELECT COUNT(*) FROM Admin")
                 count = await cursor.fetchone()
                 self.max_items = count[0]
@@ -2220,9 +2220,9 @@ class ResetDatabaseView(shared_functions.SelfAcknowledgementView):
             color=discord.Color.green()
         )
         time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        shutil.copyfile(f"C:/pathparser/pathparser_{interaction.guild.id}.sqlite",
-                        f"C:/pathparser/pathparser_{interaction.guild.id}_{time}.sqlite")
-        shutil.copyfile(f"C:/pathparser/pathparser.sqlite", f"C:/pathparser/pathparser_{interaction.guild.id}.sqlite")
+        shutil.copyfile(f"C:/pathparser/pathparser_{interaction.guild.id}_test..sqlite",
+                        f"C:/pathparser/pathparser_{interaction.guild.id}_{time}_test..sqlite")
+        shutil.copyfile(f"C:/pathparser/pathparser_test..sqlite", f"C:/pathparser/pathparser_{interaction.guild.id}_test..sqlite")
 
         # Additional logic such as notifying the requester
 
@@ -2269,7 +2269,7 @@ class ArchiveCharactersView(shared_functions.SelfAcknowledgementView):
             color=discord.Color.green()
         )
         self.embed.add_field(name=f'Characters Archived', value=f'{self.items_to_be_archived}')
-        async with aiosqlite.connect(f"Pathparser_{self.guild.id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{self.guild.id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             placeholders = ', '.join(
                 '?' for _ in self.items_to_be_archived)  # Create the correct number of placeholders
@@ -2307,7 +2307,7 @@ class ArchiveCharactersView(shared_functions.SelfAcknowledgementView):
             description="Are you sure you want to Archive the following characters?",
             color=discord.Color.blue()
         )
-        async with aiosqlite.connect(f"Pathparser_{self.guild.id}.sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{self.guild.id}_test..sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 if self.retirement_type == 1:
