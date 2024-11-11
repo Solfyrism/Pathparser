@@ -352,53 +352,10 @@ async def session_reward_calculation(interaction: discord.Interaction, session_i
             f"an error occurred for {author_name} whilst rewarding session with ID {session_id} for character {character_name}': {e}")
 
 
-async def reinstate_reminders(server_bot) -> None:
-    guilds = server_bot.guilds
-    now = datetime.datetime.now(datetime.timezone.utc)
-    for guild in guilds:
-        async with aiosqlite.connect(f"pathparser_{guild.id}.sqlite") as db:
-            cursor = await db.cursor()
-            await cursor.execute(
-                "SELECT Session_ID, Thread_ID, Hammer_Time FROM Sessions WHERE IsActive = 1 AND Hammer_Time > ?",
-                (now.timestamp(),)
-            )
-            reminders = await cursor.fetchall()
-            for reminder in reminders:
-                (session_id, thread_id, hammer_time) = reminder
-                session_reminders(session_id, thread_id, hammer_time, guild.id)
-
-
-async def reinstate_session_buttons(server_bot) -> None:
-    guilds = server_bot.guilds
-    now = datetime.datetime.now(datetime.timezone.utc)
-    for guild in guilds:
-        async with aiosqlite.connect(f"pathparser_{guild.id}.sqlite") as db:
-            cursor = await db.cursor()
-            await cursor.execute(
-                "SELECT Session_ID, Session_Name, Message, Channel_ID, hammer_time FROM Sessions WHERE IsActive = 1 AND hammer_time > ?",
-                (now.timestamp(),)
-            )
-            sessions = await cursor.fetchall()
-            for session in sessions:
-                session_id, session_name, message_id, channel_id, hammer_time_str = session
-                session_start_time = datetime.datetime.strptime(hammer_time_str, '%Y-%m-%d %H:%M:%S')
-                timeout_seconds = (session_start_time - datetime.datetime.utcnow()).total_seconds()
-                timeout_seconds = min(timeout_seconds, 12 * 3600)
-
-                # Fetch the channel and message
-                channel = server_bot.get_channel(channel_id)
-                message = await channel.fetch_message(message_id)
-
-                # Create a new view with the updated timeout
-                view = JoinOrLeaveSessionView(timeout_seconds=int(timeout_seconds), session_id=session_id, guild=guild,
-                                              session_name=session_name)
-                await message.edit(view=view)
-
-
-def session_reminders(scheduler, remind_users, scheduled_jobs, session_id: int, thread_id: int, time: str,
+def session_reminders(scheduler, remind_users, scheduled_jobs, session_id: int, thread_id: int, hammer_time: str,
                       guild_id: int) -> None:
     now = datetime.datetime.now(datetime.timezone.utc)
-    session_start_time = shared_functions.parse_hammer_time(time)
+    session_start_time = shared_functions.parse_hammer_time(hammer_time)
     time_difference = session_start_time - now
     remaining_minutes = time_difference.total_seconds() / 60
     reminder_time_periods = [0, 30, 60]

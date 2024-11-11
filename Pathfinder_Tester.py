@@ -3,12 +3,13 @@ import aiosqlite
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv;
+
 load_dotenv()
 import os
 from test_functions import TestCommands
 from commands.character_commands import CharacterCommands
 from commands.admin_commands import AdminCommands
-from commands.gamemaster_commands import GamemasterCommands, reinstate_session_buttons, reinstate_reminders
+from commands.gamemaster_commands import GamemasterCommands
 from commands.player_commands import PlayerCommands
 
 import logging
@@ -84,3 +85,55 @@ async def remind_users(session_id: int, guild_id: int, thread_id: int, time: int
     except (aiosqlite.Error, TypeError) as e:
         logging.exception(
             f"failed to run scheduled task for {guild_id}, session_id {session_id} {thread_id}, with error: {e}")
+
+
+async def reinstate_reminders(server_bot) -> None:
+    guilds = server_bot.guilds
+    now = datetime.datetime.now(datetime.timezone.utc)
+    for guild in guilds:
+        async with aiosqlite.connect(f"pathparser_{guild.id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute(
+                "SELECT Session_ID, Thread_ID, Hammer_Time FROM Sessions WHERE IsActive = 1 AND Hammer_Time > ?",
+                (now.timestamp(),)
+            )
+            reminders = await cursor.fetchall()
+            for reminder in reminders:
+                (session_id, thread_id, hammer_time) = reminder
+                gamemaster_commands.session_reminders(
+                    session_id=session_id,
+                    thread_id=thread_id,
+                    hammer_time=hammer_time,
+                    guild_id=guild.id,
+                    remind_users=remind_users,
+                    scheduler=scheduler,
+                    scheduled_jobs=scheduled_jobs
+                )
+
+
+async def reinstate_session_buttons(server_bot) -> None:
+    guilds = server_bot.guilds
+    now = datetime.datetime.now(datetime.timezone.utc)
+    for guild in guilds:
+        async with aiosqlite.connect(f"pathparser_{guild.id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute(
+                "SELECT Session_ID, Session_Name, Message, Channel_ID, hammer_time FROM Sessions WHERE IsActive = 1 AND hammer_time > ?",
+                (now.timestamp(),)
+            )
+            sessions = await cursor.fetchall()
+            for session in sessions:
+                session_id, session_name, message_id, channel_id, hammer_time_str = session
+                session_start_time = datetime.datetime.strptime(hammer_time_str, '%Y-%m-%d %H:%M:%S')
+                timeout_seconds = (session_start_time - datetime.datetime.utcnow()).total_seconds()
+                timeout_seconds = min(timeout_seconds, 12 * 3600)
+
+                # Fetch the channel and message
+                channel = server_bot.get_channel(channel_id)
+                message = await channel.fetch_message(message_id)
+
+                # Create a new view with the updated timeout
+                view = gamemaster_commands.JoinOrLeaveSessionView(timeout_seconds=int(timeout_seconds),
+                                                                  session_id=session_id, guild=guild,
+                                                                  session_name=session_name)
+                await message.edit(view=view)
