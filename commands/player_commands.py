@@ -1,5 +1,5 @@
+import math
 import typing
-
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
@@ -11,6 +11,9 @@ from zoneinfo import ZoneInfo
 import logging
 from dateutil import parser
 import os
+from pywaclient.api import BoromirApiClient as WaClient
+import shared_functions
+
 
 os.chdir("C:\\pathparser")
 
@@ -471,14 +474,18 @@ class AvailabilityView(discord.ui.View):
             self.stop()
 
 
-async def player_signup(guild: discord.Guild, thread_id: int, session_name: str, session_id: int, player_id: int, character_name: str, warning_duration: typing.Optional[int]) -> bool:
+async def player_signup(guild: discord.Guild, thread_id: int, session_name: str, session_id: int, player_id: int,
+                        character_name: str, warning_duration: typing.Optional[int]) -> bool:
     try:
         async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("Select True_Character_Name, title, level, tier, gold, gold_value, tradition_name, tradition_link, template_name, template_link, mythweavers, image_link, color, description from Player_Characters where Player_ID = ? and Character_Name = ?", (player_id, character_name))
+            await cursor.execute(
+                "Select True_Character_Name, title, level, tier, gold, gold_value, tradition_name, tradition_link, template_name, template_link, mythweavers, image_link, color, description from Player_Characters where Player_ID = ? and Character_Name = ?",
+                (player_id, character_name))
             character_info = await cursor.fetchone()
             if character_info:
-                (character_name, level, tier, gold, gold_value, tradition_name, tradition_link, template_name, template_link, mythweavers, image_link, color, description, titles, flux, oath) = character_info
+                (character_name, level, tier, gold, gold_value, tradition_name, tradition_link, template_name,
+                 template_link, mythweavers, image_link, color, description, titles, flux, oath) = character_info
                 await cursor.execute(
                     """INSERT INTO Sessions_Signups (Session_ID, Session_Name, Player_Name, Player_ID, Character_Name, Level, Gold_Value, Tier, Notification_Warning) Values (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (session_id, session_name, player_id, character_name, level, gold_value, tier, warning_duration)
@@ -488,8 +495,11 @@ async def player_signup(guild: discord.Guild, thread_id: int, session_name: str,
                 if not thread:
                     thread = await guild.fetch_channel(thread_id)
                 if thread:
-                    embed = signup_embed(character_name, titles, level, tier, gold, gold_value, tradition_name, tradition_link, template_name, template_link, mythweavers, image_link, color, description)
-                    await thread.send(embed=embed, content=f"<@{player_id}>", allowed_mentions=discord.AllowedMentions(users=True))
+                    embed = signup_embed(character_name, titles, level, tier, gold, gold_value, tradition_name,
+                                         tradition_link, template_name, template_link, mythweavers, image_link, color,
+                                         description)
+                    await thread.send(embed=embed, content=f"<@{player_id}>",
+                                      allowed_mentions=discord.AllowedMentions(users=True))
                     return True
                 else:
                     raise ValueError(f"Thread {thread_id} not found in guild {guild.id}")
@@ -499,13 +509,13 @@ async def player_signup(guild: discord.Guild, thread_id: int, session_name: str,
         logging.exception(f"Failed to sign up player <@{player_id}> for session {session_name} ({session_id})")
 
 
-
-def signup_embed(character_name: str, title: str, level: int, tier: int, gold: int, gold_value: int, tradition_name: str,
+def signup_embed(character_name: str, title: str, level: int, tier: int, gold: int, gold_value: int,
+                 tradition_name: str,
                  tradition_link: str, template_name: str, template_link: str, mythweavers: str, image_link: str,
                  color: str, description: str) -> discord.Embed:
     try:
         title_field = f"{character_name} would like to participate" if title is None else f"{title} {character_name} would like to participate"
-        embed = discord.Embed(title=title_field, color=int(color[1:], 16),url=mythweavers)
+        embed = discord.Embed(title=title_field, color=int(color[1:], 16), url=mythweavers)
         embed.set_thumbnail(url=image_link)
         embed.add_field(name="Information", value=f"**Level**: {level}, **Mythic Tier**: {tier}", inline=True)
         embed.add_field(name="illiquid Wealth", value=f"**GP**: {round(gold_value - gold, 2)}", inline=True)
@@ -520,10 +530,9 @@ def signup_embed(character_name: str, title: str, level: int, tier: int, gold: i
         logging.exception(f"Failed to create signup embed for character {character_name}")
 
 
-
-async def player_leave_session(guild_id, session_id, player_name) -> bool:
+async def player_leave_session(guild: discord.Guild, session_id: int, player_name: str) -> bool:
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
                 "DELETE FROM Sessions_Signups WHERE Session_ID = ? AND Player_Name = ?",
@@ -535,281 +544,883 @@ async def player_leave_session(guild_id, session_id, player_name) -> bool:
                 (session_id, player_name)
             )
             await db.commit()
+            await cursor.execute("Select Thread_ID from Sessions where Session_ID = ?", (session_id,))
+            session_info = await cursor.fetchone()
+            if session_info:
+                thread_id = session_info[0]
+                thread = guild.get_thread(thread_id)
+                if not thread:
+                    thread = await guild.fetch_channel(thread_id)
+                if thread:
+                    await thread.send(f"{player_name} has decided against participating in the session!")
+                    return True
+                else:
+                    raise ValueError(f"Thread {thread_id} not found in guild {guild.id}")
             return True
     except aiosqlite.Error as e:
         logging.exception(f"Failed to remove player {player_name} from session {session_id}")
 
 
-"""@player.command()
-@app_commands.autocomplete(character_name=own_character_select_autocompletion)
-async def join(interaction: discord.Interaction, session_id: int, character_name: str):
-    "PLAYER: Offer your Participation in a session."
-    guild_id = interaction.guild_id
-    author = interaction.user.name
-    author_id = interaction.user.id
-    user = interaction.user
-    guild = interaction.guild
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    await interaction.response.defer(thinking=True, ephemeral=True)
-    cursor.execute("SELECT Session_Name, Play_location, Play_Time, game_link, Session_Range_ID, Session_Range, Session_Thread, overflow FROM Sessions WHERE Session_ID = '{session_id}' AND IsActive = 1")
-    session_info = cursor.fetchone()
-    if session_info is None:
-        await interaction.followup.send(f"No active session with Session ID: {session_id} can be found!")
-    else:
-        quest_thread = guild.get_thread(session_info[6])
-        role = interaction.guild.get_role(session_info[4])
-        if role in user.roles or session_info[7] == 4 or session_info[7] == 3 or session_info[7] == 2:
-            sql = "SELECT Character_Name, Level, Gold_Value, Tier from Player_Characters where Player_Name = ? and Character_Name = ? OR Nickname = ?"
-            val = (author, character_name, character_name)
-            cursor.execute(sql, val)
-            character_info = cursor.fetchone()
-            if character_info is None:
-                await interaction.followup.send(f"Falsehoods! the Character of {character_name} either doesn't exist or belong to {author}!")
-            if character_info is not None:
-                cursor.execute("SELECT Level, Role_Name from Level_Range WHERE Role_ID = {session_info[4]}")
-                level_range_info = cursor.fetchone()
-                print(session_info[7])
-                if level_range_info is None or session_info[7] == 4:
-                    cursor.execute("SELECT Character_Name from Sessions_Participants where Player_name = '{author}' and Session_ID = {session_id}")
-                    participation = cursor.fetchone()
-                    cursor.execute("SELECT Character_Name from Sessions_Signups where Player_name = '{author}' AND Session_ID = {session_id}")
-                    signups = cursor.fetchone()
-                    if participation is None and signups is None:
-                        await Event.session_join(self, guild_id, session_info[0], session_id, author, author_id, character_info[0], character_info[1], character_info[2], character_info[3])
-                        sql = "SELECT Character_Name, Nickname, Titles, Description, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Color, Mythweavers, Image_Link, Flux, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Gold_Value, Oath from Player_characters WHERE Character_Name = ? OR Nickname = ?"
-                        val = (character_name, character_name)
-                        cursor.execute(sql, val)
-                        result = cursor.fetchone()
-                        if result is None:
-                            await interaction.followup.send(f"{character_name} is not a valid Character name or Nickname.")
-                            cursor.close()
-                            db.close()
+async def update_report(guild_id: int, overview: str, world_id: str, article_id: str, character_name: str,
+                        author_name: str):
+    if guild_id == 883009758179762208:
+        time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        client = WaClient(
+            'pathparser',
+            'https://github.com/Solfyrism/Pathparser',
+            'V1.1',
+            os.getenv('WORLD_ANVIL_API'),
+            os.getenv('WORLD_ANVIL_USER')
+        )
+        overview = shared_functions.drive_word_document(overview)
+
+        specific_article = client.article.get(article_id)
+
+        new_overview = f'{specific_article["reportNotes"]} [br] [br] {character_name} - {time} [br] {overview}' if \
+            specific_article["reportNotes"] is not None else f'{character_name} - {time} [br] {overview}'
+        new_page = client.article.patch(article_id, {
+            'reportNotes': f'{new_overview}',
+            'world': {'id': world_id}
+        })
+
+
+async def delete_group(guild: discord.Guild, group_id: int, role_id: int) -> bool:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("DELETE FROM Player_Group WHERE Group_ID = ?", (group_id,))
+            await db.commit()
+            await cursor.execute("DELETE FROM Player_Group_Presign WHERE Role_ID = ?", (role_id,))
+            await db.commit()
+            await guild.get_role(role_id).delete()
+            return True
+    except aiosqlite.Error as e:
+        logging.exception(f"Failed to delete group {group_id} in guild {guild.id}: {e}.")
+        return False
+
+
+async def create_group(
+        guild: discord.Guild,
+        player_name: str,
+        player_id: int,
+        group_name: str,
+        host_character: str,
+        description: str) -> typing.Optional[discord.Role]:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
+            cursor = await db.cursor()
+            now = datetime.datetime.now()
+            await cursor.execute(
+                "INSERT INTO Sessions_Group(Player_Name, Group_Name, Host_Character, Description) VALUES (?, ?, ?, ?)",
+                (player_name, group_name, host_character, description))
+            await db.commit()
+            await cursor.execute(
+                "SELECT Max(Group_ID) FROM Sessions_Group WHERE Player_Name = ? AND Group_Name = ? AND Host_Character = ?",
+                (player_name, group_name, host_character))
+            group_id = await cursor.fetchone()
+            group_name_with_id = f"{group_id[0]}: {group_name}"
+            role = await guild.create_role(name=group_name_with_id)
+            await cursor.execute("INSERT INTO Player_Group_Presign(Group_ID, Player_Name) VALUES (?, ?)",
+                                 (group_id[0], player_name))
+            await db.commit()
+            await cursor.execute("UPDATE Sessions_Group SET Role_ID = ? WHERE Group_ID = ?", (role.id, group_id[0]))
+            await db.commit()
+            await guild.get_member(player_id).add_roles(role)
+            return role
+    except aiosqlite.Error as e:
+        logging.exception(f"Failed to delete group {group_id} in guild {guild.id}: {e}.")
+        return None
+
+
+async def join_group(
+        guild: discord.Guild,
+        player_name: str,
+        player_id: int,
+        group_id: int,
+        group_role_id) -> bool:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute(
+                "INSERT INTO Player_Group_Presign(Group_ID, Player_Name) VALUES (?, ?)",
+                (group_id, player_name))
+            await db.commit()
+            await guild.get_member(player_id).add_roles(guild.get_role(group_role_id))
+            return True
+    except aiosqlite.Error as e:
+        logging.exception(f"Failed to delete group {group_id} in guild {guild.id}: {e}.")
+        return False
+
+
+async def leave_group(
+        guild: discord.Guild,
+        player_name: str,
+        player_id: int,
+        group_id: int,
+        group_role_id) -> bool:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("DELETE FROM Player_Group_Presign WHERE Group_ID = ? AND Player_Name = ?",
+                                 (group_id, player_name))
+            await db.commit()
+            await guild.get_member(player_id).remove_roles(guild.get_role(group_role_id))
+            return True
+    except aiosqlite.Error as e:
+        logging.exception(f"Failed to delete group {group_id} in guild {guild.id}: {e}.")
+        return False
+
+
+class PlayerCommands(commands.Cog, name='Player'):
+    def __init__(self, bot):
+        self.bot = bot
+
+    player_group = discord.app_commands.Group(
+        name='player',
+        description='Commands related to playing'
+    )
+
+    sessions_group = discord.app_commands.Group(
+        name='sessions',
+        description='commands related to participating and playing in sessions..',
+        parent=player_group
+    )
+
+    group_group = discord.app_commands.Group(
+        name='group',
+        description='Commands related to grouping up.',
+        parent=player_group
+    )
+
+    timesheet_group = discord.app_commands.Group(
+        name='timesheet',
+        description='Commands related to setting your availability',
+        parent=player_group
+    )
+
+    @sessions_group.command(name='join', description='join a session')
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    @app_commands.choices(notification=[
+        discord.app_commands.Choice(name='an hour before', value=60),
+        discord.app_commands.Choice(name='half an hour before', value=30),
+        discord.app_commands.Choice(name='session start', value=0),
+        discord.app_commands.Choice(name='no reminder', value=-1)])
+    async def join(self, interaction: discord.Interaction, session_id: int, character_name: str,
+                   notification: typing.Optional[discord.app_commands.Choice[int]]):
+        """Offer your Participation in a session."""
+        warning_duration = -1 if notification is None else notification.value
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute(
+                    "SELECT Session_Name, Play_location, Play_Time, game_link, Session_Range_ID, Session_Range, Session_Thread, overflow FROM Sessions WHERE Session_ID = ? AND IsActive = 1",
+                    (session_id,)
+                )
+                session_info = await cursor.fetchone()
+                if session_info is None:
+                    await interaction.followup.send(f"No active session with Session ID: {session_id} can be found!")
+                else:
+                    (session_name, play_location, play_time, game_link, session_range_id, session_range, session_thread,
+                     overflow) = session_info
+                    await cursor.execute(
+                        "SELECT Level from Player_Characters WHERE Player_ID = ? AND Character_Name = ?",
+                        (interaction.user.id, character_name))
+                    character_info = await cursor.fetchone()
+                    if not character_info:
+                        await interaction.followup.send(
+                            f"Character {character_name} not found for player {interaction.user.name}")
+                        return
+                    else:
+                        level = character_info[0]
+                        quest_thread = interaction.guild.get_thread(session_thread)
+                        if not quest_thread:
+                            quest_thread = await interaction.guild.fetch_channel(session_thread)
+                        if not quest_thread:
+                            raise ValueError(f"Thread {session_thread} not found in guild {interaction.guild_id}")
+
+                        if overflow == 2 or overflow == 3:
+                            secondary_role = await validate_overflow(guild=interaction.guild,
+                                                                                         overflow=overflow,
+                                                                                         session_range_id=session_range_id)
+                            await cursor.execute(
+                                "Select min(level), max(level) FROM Milestone_System  Level_Range_ID in (? , ?)",
+                                (secondary_role.id, session_range_id))
+                        elif overflow == 1:
+                            await cursor.execute(
+                                "Select min(level), max(level) Role_Name from Level_Range WHERE Role_ID = ?",
+                                (session_range_id,))
+                        level_range_info = await cursor.fetchone()
+                        if overflow == 4:
+                            join_session = await player_signup(guild=interaction.guild, thread_id=session_thread,
+                                                               session_name=session_name, session_id=session_id,
+                                                               player_id=interaction.user.id,
+                                                               character_name=character_name,
+                                                               warning_duration=warning_duration)
+                            if join_session:
+                                await interaction.followup.send(
+                                    content="You have submitted your request! Please wait for the GM to accept or deny your request!",
+                                    ephemeral=True)
+                            else:
+                                await interaction.followup.send(
+                                    f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})",
+                                    ephemeral=True)
+                        elif not level_range_info:
+                            role = interaction.guild.get_role(session_range_id)
+                            if not role:
+                                await interaction.followup.send(
+                                    f"Role {session_range_id} not found in guild {interaction.guild_id}")
+                                raise ValueError(f"Role {session_range_id} not found in guild {interaction.guild_id}")
+                            if role in interaction.user.roles:
+                                join_session = await player_signup(guild=interaction.guild, thread_id=session_thread,
+                                                                   session_name=session_name, session_id=session_id,
+                                                                   player_id=interaction.user.id,
+                                                                   character_name=character_name,
+                                                                   warning_duration=warning_duration)
+                                if join_session:
+                                    await interaction.followup.send(
+                                        content=f"You have submitted your request! Please wait for the GM to accept or deny your request!",
+                                        ephemeral=True)
+                                else:
+                                    await interaction.followup.send(
+                                        f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})",
+                                        ephemeral=True)
+                            else:
+                                await interaction.followup.send(
+                                    f"You do not have the required role to join this session.", ephemeral=True)
+                        elif level_range_info:
+
+                            if level_range_info[0] <= level <= level_range_info[1]:
+                                join_session = await player_signup(guild=interaction.guild, thread_id=session_thread,
+                                                                   session_name=session_name, session_id=session_id,
+                                                                   player_id=interaction.user.id,
+                                                                   character_name=character_name,
+                                                                   warning_duration=warning_duration)
+                                if join_session:
+                                    await interaction.followup.send(
+                                        content=f"You have submitted your request! Please wait for the GM to accept or deny your request!",
+                                        ephemeral=True)
+                                else:
+                                    await interaction.followup.send(
+                                        f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})",
+                                        ephemeral=True)
+                            else:
+                                await interaction.followup.send(
+                                    f"Character {character_name} is not within the level range of the session.",
+                                    ephemeral=True)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(
+                f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})")
+
+    @sessions_group.command(name='notify', description='Update your notification time for a session')
+    @app_commands.choices(notification=[
+        discord.app_commands.Choice(name='an hour before', value=60),
+        discord.app_commands.Choice(name='half an hour before', value=30),
+        discord.app_commands.Choice(name='session start', value=0),
+        discord.app_commands.Choice(name='no reminder', value=-1)])
+    async def join(self, interaction: discord.Interaction, session_id: int,
+                   notification: typing.Optional[discord.app_commands.Choice[int]]):
+        warning_duration = -1 if notification is None else notification.value
+        await interaction.followup.defer(thinking=True, ephemeral=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                update_signups = await cursor.execute(
+                    "UPDATE Sessions_Signups SET Notification_Warning = ? WHERE Session_ID = ? AND Player_ID = ?",
+                    (warning_duration, session_id, interaction.user.id))
+                await db.commit()
+                update_participants = await cursor.execute(
+                    "UPDATE Sessions_Participants SET Notification_Warning = ? WHERE Session_ID = ? AND Player_ID = ?",
+                    (warning_duration, session_id, interaction.user.id))
+                await db.commit()
+                if update_signups.rowcount > 0 or update_participants.rowcount > 0:
+                    await interaction.followup.send(content=f"Notification time updated for {session_id}!",
+                                                    ephemeral=True)
+        except (aiosqlite.Error, TypeError) as e:
+            logging.exception(f"Failed to sign up player {interaction.user.name} for session ({session_id})")
+            await interaction.followup.send(
+                f"Failed to sign up player {interaction.user.name} for session ({session_id})", ephemeral=True)
+
+    @sessions_group.command(name='leave', description='Rescind your Participation in a session')
+    async def leave(self, interaction: discord.Interaction, session_id: int):
+        await interaction.followup.defer(thinking=True, ephemeral=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute(
+                    "SELECT Session_Name, Play_location, Play_Time, Game_Link FROM Sessions WHERE Session_ID = ?",
+                    (session_id,))
+                session_info = await cursor.fetchone()
+                if session_info is None:
+                    await interaction.followup.send(f"No active session with {session_id} can be found!")
+                if session_info is not None:
+                    await cursor.execute(
+                        "SELECT Character_Name, Level, Effective_Wealth from Sessions_Signups where Player_Name = ?",
+                        (interaction.user.name,))
+                    character_info = await cursor.fetchone()
+                    if character_info is None:
+                        await cursor.execute(
+                            "SELECT Character_Name, Level, Effective_Wealth from Sessions_Participants where Player_Name = ?",
+                            (interaction.user.name,))
+                        character_info = await cursor.fetchone()
+                        if character_info is None:
+                            await interaction.followup.send(
+                                f"{interaction.user.name} has no active character in this session!")
+                        if character_info is not None:
+                            true_name = character_info[0]
+                            await player_leave_session(interaction.guild, session_id, interaction.user.name)
+                            await interaction.followup.send(
+                                f"{interaction.user.name}'s {true_name} has decided against participating in the session of '{session_info[0]}'!")
+                    elif character_info is not None:
+                        true_name = character_info[0]
+                        await player_leave_session(interaction.guild, session_id, interaction.user.name)
+                        await interaction.followup.send(
+                            f"{interaction.user.name}'s {true_name} has decided against participating in the session of '{session_info[0]}'!")
+        except aiosqlite.Error as e:
+            logging.exception(f"Failed to remove player {interaction.user.name} from session {session_id} {e}")
+
+    @sessions_group.command(name='display', description='Display all participants and signups for a session!')
+    @app_commands.describe(
+        group="Displaying All Participants & Signups, Active Participants Only, or Potential Sign-ups Only for a session")
+    @app_commands.choices(group=[discord.app_commands.Choice(name='All', value=1),
+                                 discord.app_commands.Choice(name='Participants', value=2),
+                                 discord.app_commands.Choice(name='Sign-ups', value=3)])
+    async def display(self, interaction: discord.Interaction, session_id: int,
+                      group: discord.app_commands.Choice[int] = 1, page_number: int = 1):
+        """ALL: THIS COMMAND DISPLAYS SESSION INFORMATION"""
+        await interaction.followup.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as conn:
+                cursor = await conn.cursor()
+                view_type = 0 if group == 1 else group.value - 1
+                count = 0
+                if view_type == 0 or view_type == 1:
+                    await cursor.execute("SELECT COUNT(*) FROM Sessions_Participants WHERE Session_ID = ?",
+                                         (session_id,))
+                    participants_count = await cursor.fetchone()
+                    count += 0 if not participants_count else participants_count[0]
+                if view_type == 0 or view_type == 2:
+                    cursor = await conn.execute("SELECT COUNT(*) FROM Sessions_Signups WHERE Session_ID = ?",
+                                                (session_id,))
+                    signups_count = await cursor.fetchone()
+                    count += 0 if not signups_count else participants_count[0]
+                max_items = count
+                if max_items == 0:
+                    await interaction.followup.send("No participants or signups found for this session!")
+                    return
+                else:
+                    # Set up pagination variables
+                    page_number = min(max(page_number, 1), math.ceil(max_items / 20))
+                    items_per_page = 20 if view_type == 1 else 1
+                    offset = (page_number - 1) * items_per_page
+
+                    # Create and send the view with the results
+                    view = gamemaster_commands.SessionDisplayView(
+                        user_id=interaction.user.id,
+                        guild_id=interaction.guild.id,
+                        limit=items_per_page,
+                        offset=offset,
+                        view_type=view_type,
+                        interaction=interaction,
+                        session_id=session_id
+                    )
+                    await view.send_initial_message()
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred whilst displaying session information: {e}")
+            await interaction.followup.send(
+                "An error occurred whilst displaying session information. Please try again later.")
+
+    @sessions_group.command()
+    @app_commands.describe(summary="This will use a Google Drive Link if available")
+    @app_commands.autocomplete(session_id=shared_functions.player_session_autocomplete)
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def report(self, interaction: discord.Interaction, session_id: int, summary: str, character_name: str):
+        """Report on a session"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute(
+                    "SELECT Session_ID, Session_Name, Article_Link, Article_ID, History_ID FROM Sessions WHERE Session_ID = ? AND IsActive = 0",
+                    (session_id,))
+                session_info = await cursor.fetchone()
+                if session_info is None:
+                    await interaction.followup.send(f"No completed Session with ID {session_id} could be found!")
+                else:
+                    (session_id, session_name, article_link, article_id, history_id) = session_info
+                    await cursor.execute(
+                        "SELECT Character_Name from Sessions_Archive where Session_ID = ? and Player_Name = ?",
+                        (session_id, interaction.user.name))
+                    character_info = await cursor.fetchone()
+                    if character_info is None:
+                        await interaction.followup.send(
+                            f"Character {character_name} not found for player {interaction.user.name}")
+                    else:
+                        await cursor.execute("Select Search from admin where Identifier = 'WA_World_ID'")
+                        world_id = await cursor.fetchone()
+                        if not world_id:
+                            await interaction.followup.send("World ID not found!")
+                        else:
+                            await update_report(interaction.guild_id, summary, world_id[0], article_id, character_name,
+                                                interaction.user.name)
+                            await interaction.followup.send(f"Report has been updated for {session_name}!")
+        except aiosqlite.Error as e:
+            logging.exception(f"Failed to update report for session {session_id}")
+            await interaction.followup.send(f"Failed to update report for session {session_id}")
+
+    @group_group.command(name='create', description='create your group')
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def create_group(self, interaction: discord.Interaction, character_name: str, group_name: str,
+                           description: str):
+        """Open a session Request"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("Select Group_ID, Role_ID from Sessions_Group where Player_Name = ?",
+                                     (interaction.user.name,))
+                group = await cursor.fetchone()
+                if not group:
+                    new_role = await create_group(interaction.guild, interaction.user.name, interaction.user.id,
+                                                  group_name,
+                                                  character_name, description)
+                    await interaction.followup.send(
+                        f"Group {group_name} has been created with the role <@{new_role.id}>!")
+                else:
+                    await interaction.followup.send(
+                        f"You already have a group request open! Please close it before opening another.")
+        except (aiosqlite.Error, TypeError) as e:
+            logging.exception(f"Failed to add a session request for {interaction.user.name}")
+            await interaction.followup.send(f"Failed to add a session request for {interaction.user.name}")
+
+    @group_group.command(name='delete', description='delete your group')
+    async def create_group(self, interaction: discord.Interaction):
+        """Delete a session Request"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("Select Group_ID, Role_ID from Sessions_Group where Player_Name = ?",
+                                     (interaction.user.name,))
+                group = await cursor.fetchone()
+                if group:
+                    await delete_group(interaction.guild, group[0], group[1])
+                    await interaction.followup.send(f"Group {group[0]} has been deleted!")
+                else:
+                    await interaction.followup.send(f"Group {group_name} could not be found!")
+        except (aiosqlite.Error, TypeError) as e:
+            logging.exception(f"Failed to add a session request for {interaction.user.name}")
+            await interaction.followup.send(f"Failed to add a session request for {interaction.user.name}")
+
+    @group_group.command(name='join', description='Join a group')
+    @app_commands.autocomplete(group_id=shared_functions.group_id_autocompletion)
+    async def group_join(self, interaction: discord.Interaction, group_id: int):
+        """Sync your Groups up for a GM to view whose in a session request group."""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("Select Group_ID, Role_ID from Sessions_Group where Group_ID = ?", (group_id,))
+                group = await cursor.fetchone()
+                if group:
+                    await cursor.execute(
+                        "Select Group_ID, player_name from Player_Group_Presign where Group_ID = ? and Player_Name = ?",
+                        (group_id, interaction.user.name))
+                    group = await cursor.fetchone()
+                    if group:
+                        await interaction.followup.send(f"You have already joined group {group_id}!")
+                    else:
+                        try_to_join = await join_group(interaction.guild, interaction.user.name, interaction.user.id,
+                                                       group_id, group[1])
+                    if try_to_join:
+                        await interaction.followup.send(
+                            f"You have joined group {group_id}! with the role <@{group[1]}>")
+                    else:
+                        await interaction.followup.send(f"Failed to join group {group_id}!")
+                else:
+                    await interaction.followup.send(f"Group {group_id} could not be found!")
+        except (aiosqlite.Error, TypeError) as e:
+            logging.exception(f"Failed to add a session request for {interaction.user.name}")
+            await interaction.followup.send(f"Failed to add a session request for {interaction.user.name}")
+
+    @group_group.command(name='leave', description='leave a group')
+    @app_commands.autocomplete(group_id=shared_functions.group_id_autocompletion)
+    async def group_leave(self, interaction: discord.Interaction, group_id: int):
+        """leave a group because you hate everyone inside.."""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("Select Group_ID, Role_ID from Sessions_Group where Group_ID = ?", (group_id,))
+                group = await cursor.fetchone()
+                if group:
+                    await cursor.execute(
+                        "Select Group_ID, player_name from Player_Group_Presign where Group_ID = ? and Player_Name = ?",
+                        (group_id, interaction.user.name))
+                    group = await cursor.fetchone()
+                    if group:
+                        try_leave = await leave_group(interaction.guild, interaction.user.name, interaction.user.id,
+                                                      group_id, group[1])
+                        if try_leave:
+                            await interaction.followup.send(f"You have left group {group_id}!")
+                        else:
+                            await interaction.followup.send(f"Failed to leave group {group_id}!")
+                    else:
+                        await interaction.followup.send(f"You are not in group {group_id}!")
+                else:
+                    await interaction.followup.send(f"Group {group_id} could not be found!")
+        except (aiosqlite.Error, TypeError) as e:
+            logging.exception(f"Failed to add a session request for {interaction.user.name}")
+            await interaction.followup.send(f"Failed to add a session request for {interaction.user.name}")
+
+    @group_group.command(name='display', description='Display all participants and signups for a group!')
+    @app_commands.autocomplete(group_id=shared_functions.group_id_autocompletion)
+    async def display_groups(self, interaction: discord.Interaction, group_id: typing.Optional[int],
+                             page_number: int = 1):
+        """Display all participants and signups for a group"""
+        await interaction.followup.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as conn:
+                cursor = await conn.cursor()
+                if group_id is None:
+                    view_type = 0
+                    await cursor.execute("SELECT COUNT(*) FROM sessions_group")
+                    count = await cursor.fetchone()
+                    max_items = count
+                    if max_items == 0:
+                        await interaction.followup.send("No groups found!")
+                        return
+                    else:
+                        # Set up pagination variables
+                        items_per_page = 20
+                        page_number = min(max(page_number, 1), math.ceil(max_items[0] / 20))
+                        offset = (page_number - 1) * items_per_page
+
+                        # Create and send the view with the results
+                        view = GroupView(
+                            user_id=interaction.user.id,
+                            guild_id=interaction.guild.id,
+                            limit=items_per_page,
+                            offset=offset,
+                            interaction=interaction,
+                            group_id=group_id
+                        )
+                        await view.send_initial_message()
+                else:
+                    await cursor.execute(
+                        "SELECT Group_ID, Group_Name, Role_ID, Player_Name, Host_Character, Description FROM sessions_group WHERE Group_ID = ?",
+                        (group_id,))
+                    group_info = await cursor.fetchone()
+                    if group_info is None:
+                        await interaction.followup.send("No group found with that ID!")
+                        return
+                    else:
+                        (group_id, group_name, role_id, player_name, host_character, description) = group_info
+                        await cursor.execute("SELECT COUNT(*) FROM sessions_group_presign WHERE group_id = ?",
+                                             (group_id,))
+                        count = await cursor.fetchone()
+
+                        max_items = count
+                        if max_items == 0:
+                            await interaction.followup.send("No participants or signups found for this session!")
                             return
                         else:
-                            color = result[11]
-                            int_color = int(color[1:], 16)
-                            embed = discord.Embed(title="Mythweavers Sheet", url=f'{result[12]}', description=f"Other Names: {result[2]}", color=int_color, timestamp=datetime.datetime.utcnow())
-                            embed.set_author(name=f'{result[0]} would like to participate')
-                            embed.set_thumbnail(url=f'{result[13]}')
-                            embed.add_field(name="Information", value=f'**Level**: {result[4]}, **Mythic Tier**: {result[5]}', inline=True)
-                            embed.add_field(name="illiquid Wealth", value=f'**GP**: {round(result[19] - result[10],2)}', inline=True)
-                            linkage = f""
-                            if result[15] is not None:
-                                linkage += f"**Tradition**: [{result[15]}]({result[16]})"
-                            if result[17] is not None:
-                                if result[15] is not None:
-                                    linkage += " "
-                                linkage += f"**Template**: [{result[17]}]({result[18]})"
-                            if result[15] is not None or result[17] is not None:
-                                embed.add_field(name=f'Additional Info', value=linkage, inline=False)
-                            if result[20] == 'Offerings':
-                                embed.set_footer(text=f'{result[3]}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
-                            elif result[20] == 'Poverty':
-                                embed.set_footer(text=f'{result[3]}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
-                            elif result[20] == 'Absolute':
-                                embed.set_footer(text=f'{result[3]}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
-                            else:
-                                embed.set_footer(text=f'{result[3]}')
-                            await quest_thread.send(embed=embed, content=f"{interaction.user.mention}", allowed_mentions=discord.AllowedMentions(users=True))
-                            await interaction.followup.send(content=f"You have submitted your request! Please wait for the GM to accept or deny your request!", ephemeral=True)
-                    elif participation is not None:
-                        await interaction.followup.send(f"{author} is already participating in {session_info[0]} with session ID: {session_id}")
-                    elif signups is not None:
-                        await interaction.followup.send(f"{author} is already participating in {session_info[0]} with session ID: {session_id}")
-                else:
-                    if session_info[7] == 3:
-                        cursor.execute("SELECT min(level), max(level) Role_Name from Level_Range WHERE Role_ID = {session_info[4]}")
-                        new_level_range_info = cursor.fetchone()
-                        cursor.execute("SELECT Role_Name from Level_Range WHERE level = {new_level_range_info[0]-1}")
-                        overflow_level_role = cursor.fetchone()
-                        overflow_level_role = overflow_level_role if overflow_level_role is not None else new_level_range_info
-                        cursor.execute("SELECT min(level), max(level) Role_Name from Level_Range WHERE Role_Name = ?", (overflow_level_role[0],))
-                        overflow_level_range_info = cursor.fetchone()
-                        overflow_level_range_info = overflow_level_range_info if overflow_level_range_info[0] is not None else new_level_range_info
-                        level_range_validation = 1 if overflow_level_range_info is not None and overflow_level_range_info[0] <= character_info[1] <= new_level_range_info[1] else 0
-                    elif session_info[7] == 2:
-                        cursor.execute("SELECT min(level), max(level) Role_Name from Level_Range WHERE Role_ID = {session_info[4]}")
-                        new_level_range_info = cursor.fetchone()
-                        cursor.execute("SELECT Role_Name from Level_Range WHERE level = {new_level_range_info[1] + 1}")
-                        overflow_level_role = cursor.fetchone()
-                        overflow_level_role = overflow_level_role if overflow_level_role is not None else new_level_range_info
-                        cursor.execute("SELECT min(level), max(level) Role_Name from Level_Range WHERE Role_Name = ?", (overflow_level_role[0],))
-                        overflow_level_range_info = cursor.fetchone()
-                        overflow_level_range_info = overflow_level_range_info if overflow_level_range_info[0] is not None else new_level_range_info
-                        level_range_validation = 1 if overflow_level_range_info is not None and new_level_range_info[0] <= character_info[1] <= overflow_level_range_info[1] else 0
-                    else:
-                        cursor.execute("SELECT min(level), max(level) Role_Name from Level_Range WHERE Role_ID = {session_info[4]} AND Level = {character_info[1]}")
-                        new_level_range_info = cursor.fetchone()
-                        level_range_validation = 1 if new_level_range_info is not None else 0
-                    if level_range_validation != 1:
-                        await interaction.followup.send(f"{character_info[0]} is level {character_info[1]} which is not inside the level range of {level_range_info[1]}!", ephemeral=True)
-                    else:
-                        cursor.execute("SELECT Character_Name from Sessions_Participants where Player_name = '{author}' and Session_ID = {session_id}")
-                        participation = cursor.fetchone()
-                        cursor.execute("SELECT Character_Name from Sessions_Signups where Player_name = '{author}' and Session_ID = {session_id}")
-                        signups = cursor.fetchone()
-                        if participation is None and signups is None:
-                            await Event.session_join(self, guild_id, session_info[0], session_id, author, author_id, character_info[0], character_info[1], character_info[2], character_info[3])
-                            sql = "SELECT True_Character_Name, Nickname, Titles, Description, Level, Tier, Milestones, Milestones_Required, Trials, Trials_required, Gold, Color, Mythweavers, Image_Link, Flux, Tradition_Name, Tradition_Link, Template_Name, Template_Link, Gold_Value, Oath from Player_characters WHERE Character_Name = ? OR Nickname = ?"
-                            val = (character_name, character_name)
-                            cursor.execute(sql, val)
-                            result = cursor.fetchone()
-                            if result is None:
-                                await interaction.followup.send(f"{character_name} is not a valid Character Name or Nickname.")
-                                cursor.close()
-                                db.close()
-                                return
-                            else:
-                                color = result[11]
-                                int_color = int(color[1:], 16)
-                                embed = discord.Embed(title="Mythweavers Sheet", url=f'{result[12]}',
-                                                      description=f"Other Names: {result[2]}", color=int_color)
-                                embed.set_author(name=f'{result[0]} would like to participate!')
-                                embed.set_thumbnail(url=f'{result[13]}')
-                                embed.add_field(name="Information", value=f'**Level**: {result[4]}, **Mythic Tier**: {result[5]}', inline=True)
-                                embed.add_field(name="illiquid Wealth", value=f'**GP**: {round(result[19] - result[10],2)}', inline=True)
-                                linkage = f""
-                                print(result[15], result[17])
-                                if result[15] is not None:
-                                    linkage += f"**Tradition**: [{result[15]}]({result[16]})"
-                                if result[17] is not None:
-                                    if result[15] is not None:
-                                        linkage += " "
-                                    linkage += f"**Template**: [{result[17]}]({result[18]})"
-                                if result[15] is not None or result[17] is not None:
-                                    print(linkage)
-                                    embed.add_field(name=f'Additional Info', value=linkage, inline=False)
-                                if result[20] == 'Offerings':
-                                    embed.set_footer(text=f'{result[3]}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
-                                elif result[20] == 'Poverty':
-                                    embed.set_footer(text=f'{result[3]}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
-                                elif result[20] == 'Absolute':
-                                    embed.set_footer(text=f'{result[3]}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
-                                else:
-                                    embed.set_footer(text=f'{result[3]}')
-                                await quest_thread.send(embed=embed, content=f"{interaction.user.mention}", allowed_mentions=discord.AllowedMentions(users=True))
-                                await interaction.followup.send(content=f"You have submitted your request! Please wait for the GM to accept or deny your request!")
-                        elif participation is not None:
-                            await interaction.followup.send(f"{author} is already participating in {session_info[0]} with session ID: {session_id}")
-                        elif signups is not None:
-                            await interaction.followup.send(f"{author} is already participating in {session_info[0]} with session ID: {session_id}")
-        else:
-            await interaction.followup.send(f"User does not have role: {session_info[5]}! If you wish to join, obtain this role! Ensure you have a character in the correct level bracket.", ephemeral=True)
+                            # Set up pagination variables
+                            items_per_page = 20
+                            page_number = min(max(page_number, 1), math.ceil(max_items / 20))
+                            offset = (page_number - 1) * items_per_page
 
-@player.command()
-async def leave(interaction: discord.Interaction, session_id: int):
-    "PLAYER: Rescind your Participation in a session."
-    guild_id = interaction.guild_id
-    author = interaction.user.name
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute("SELECT Session_Name, Play_location, Play_Time, Game_Link FROM Sessions WHERE Session_ID = '{session_id}'")
-    session_info = cursor.fetchone()
-    if session_info is None:
-        await interaction.response.send_message(f"No active session with {session_id} can be found!")
-    if session_info is not None:
-        cursor.execute("SELECT Character_Name, Level, Effective_Wealth from Sessions_Signups where Player_Name = '{author}'")
-        character_info = cursor.fetchone()
-        if character_info is None:
-            cursor.execute("SELECT Character_Name, Level, Effective_Wealth from Sessions_Participants where Player_Name = '{author}'")
-            character_info = cursor.fetchone()
-            if character_info is None:
-                await interaction.response.send_message(f"{author} has no active character in this session!")
-            if character_info is not None:
-                true_name = character_info[0]
-                cursor.close()
-                db.close()
-                await Event.session_leave(self, guild_id, session_id, author, true_name)
-                await interaction.response.send_message(f"{author}'s {true_name} has decided against participating in the session of '{session_info[0]}!'")
-        elif character_info is not None:
-            true_name = character_info[0]
+                            # Create and send the view with the results
+                            view = GroupManyView(
+                                user_id=interaction.user.id,
+                                guild_id=interaction.guild.id,
+                                limit=items_per_page,
+                                offset=offset,
+                                interaction=interaction,
+                                group_id=group_id,
+                                group_name=group_name,
+                                role_id=role_id,
+                                host_player_name=player_name,
+                                host_character=host_character,
+                                description=description
+                            )
+                            await view.send_initial_message()
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred whilst displaying session information: {e}")
+            await interaction.followup.send(
+                "An error occurred whilst displaying session information. Please try again later.")
+
+
+    @timesheet_group.command()
+    @app_commands.describe(player="leave empty to display all.")
+    @app_commands.choices(
+        day=[discord.app_commands.Choice(name='Monday', value=1), discord.app_commands.Choice(name='Tuesday', value=2),
+             discord.app_commands.Choice(name='Wednesday', value=3), discord.app_commands.Choice(name='Thursday', value=4),
+             discord.app_commands.Choice(name='Friday', value=5), discord.app_commands.Choice(name='Saturday', value=6),
+             discord.app_commands.Choice(name='Sunday', value=7)])
+    async def availability(self, interaction: discord.Interaction, player: typing.Optional[discord.Member],
+                           day: discord.app_commands.Choice[int]):
+        """Display historical Session Requests"""
+        guild_id = interaction.guild.id
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        if day == 1:
+            day = "Monday"
+            day_value = 1
+        else:
+            day_value = day.value
+        if day_value < 1 or day_value > 7:
+            embed = discord.Embed(title=f"Day Error", description=f'{day} is not a valid day of the week!',
+                                  colour=discord.Colour.red())
+            await interaction.response.send_message(embed=embed)
             cursor.close()
             db.close()
-            await Event.session_leave(self, guild_id, session_id, author, true_name)
-            await interaction.response.send_message(f"{author}'s {true_name} has decided against participating in the session of '{session_info[0]}!'")
-
-
-@player.command()
-@app_commands.describe(group="Displaying All Participants & Signups, Active Participants Only, or Potential Sign-ups Only for a session")
-@app_commands.choices(group=[discord.app_commands.Choice(name='All', value=1), discord.app_commands.Choice(name='Participants', value=2), discord.app_commands.Choice(name='Sign-ups', value=3)])
-async def display(ctx: commands.Context, session_id: int, group: discord.app_commands.Choice[int] = 1):
-    "ALL: THIS COMMAND DISPLAYS SESSION INFORMATION"
-    guild_id = ctx.guild.id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    if group == 1:
-        group = 1
-    else:
-        group = group.value
-    cursor.execute("SELECT GM_Name, Session_Name, Session_Range, Play_location, Play_Time, Overview, Description, Message, IsActive FROM Sessions WHERE Session_ID = {session_id}")
-    session_info = cursor.fetchone()
-    if session_info is not None:
-        cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
-        sessions_channel = cursor.fetchone()
-        session_channel = await bot.fetch_channel(sessions_channel[0])
-        msg = await session_channel.fetch_message(session_info[7])
-        embed = discord.Embed(title=f"{session_info[1]}", description=f'[Session overview](<{msg.jump_url}>)!',colour=discord.Colour.blurple())
-        if session_info[8] == 1:
-            embed.add_field(name=f"Active Session Info", value=f"**GM**: {session_info[0]}, **Session Range**: {session_info[2]}, **Play_Location**: {session_info[3]}, **Play_Time**: <t:{session_info[4]}:D>", inline=False)
-            x = 0
-            print(group)
-            if group == 1 or group == 2:
-                cursor.execute("SELECT COUNT(Player_Name) FROM Sessions_Participants WHERE Session_ID = {session_id}")
-                total_participants = cursor.fetchone()
-                cursor.execute("SELECT Player_Name, Character_Name, Level, Effective_Wealth, Tier, Player_ID FROM Sessions_Participants WHERE Session_ID = {session_id}")
-                participants = cursor.fetchall()
-                player_total = total_participants[0]
-                embed.add_field(name=f"Participant List: {player_total} players", value=" ")
-                for player in participants:
-                    embed.add_field(name=f'**Character**: {player[1]}', value=f"**Player**: <@{player[5]}> \n **Level**: {player[2]}, **Tier** {player[4]} \n **Effective_Wealth**: {player[3]} GP", inline=False)
-                    x += 1
-                    if x >= 20:
-                        embed.add_field(name=f"Field Limit reached", value=f'{total_participants[0] - 20} remaining Participants', inline=False)
-                        break
-            else:
-                player_total = 0
-            if group == 1 or group == 3:
-                cursor.execute("SELECT COUNT(Player_Name) FROM Sessions_Signups WHERE Session_ID = {session_id}")
-                total_participants = cursor.fetchone()
-                x = 0 + player_total
-                cursor.execute("SELECT Player_Name, Character_Name, Level, Effective_Wealth, Tier, Player_ID FROM Sessions_Signups WHERE Session_ID = {session_id}")
-                participants = cursor.fetchall()
-                player_total += total_participants[0]
-                embed.add_field(name=f"Sign Up List: {total_participants[0]} players", value=' ', inline=False)
-                for player in participants:
-                    embed.add_field(name=f'**Character**: {player[1]}', value=f"Player: <@{player[5]}>, Level: {player[2]}, Tier: {player[4]}, Effective_Wealth: {player[3]}!", inline=False)
-                    x += 1
-                    if x >= 20:
-                        embed.add_field(name=f"Field Limit reached", value=f'{total_participants[0] - 20} remaining Sign-ups')
-                        break
-                embed.set_footer(text=f"Session ID: {session_id}")
-            await ctx.response.send_message(embed=embed)
         else:
-            cursor.execute("SELECT Gold, Flux, Easy, Medium, Hard, Deadly, Trials FROM Sessions WHERE Session_ID = {session_id}")
-            session_reward_info = cursor.fetchone()
-            embed.add_field(name=f"Inactive Session Info", value=f"**GM**: {session_info[0]}, **Session Range**: {session_info[2]}, **Play_Location**: {session_info[3]}, **Play_Time**: <t:{session_info[4]}:D>", inline=False)
-            embed.add_field(name=f"Milestone Rewards", value=f"**Easy Jobs**: {session_reward_info[2]}, **Medium Jobs**: {session_reward_info[3]}, **Hard_jobs**: {session_reward_info[4]}, **Deadly_Jobs**: {session_reward_info[5]}, **Trials**: {session_reward_info[6]}", inline=False)
-            embed.add_field(name=f"Currency Rewards", value=f"**Gold**: {session_reward_info[0]}, **Flux**: {session_reward_info[1]}", inline=False)
-            x = 0
-            cursor.execute("SELECT COUNT(Player_Name) FROM Sessions_Archive WHERE Session_ID = {session_id}")
-            total_participants = cursor.fetchone()
-            cursor.execute("SELECT Player_Name, Character_Name, Level, Effective_Gold, Tier, Received_Milestones, Received_Gold, Player_ID FROM Sessions_Archive WHERE Session_ID = {session_id}")
-            participants = cursor.fetchall()
-            player_total = total_participants[0]
-            embed.add_field(name=f"Participant List: {player_total} players", value=' ', inline=False)
-            for player in participants:
-                embed.add_field(name=f'**Character**: {player[1]}', value=f"**Player**: <@{player[7]}> \n **Level**: {player[2]}, **Tier** {player[4]}, \n **Received Milestones**: {player[5]}, **Received Trials**: {session_info[12]} \n  **Session Effective Gold**: {player[3]}, **Received Gold**: {player[6]}", inline=False)
-                x += 1
-                if x >= 20:
-                    embed.add_field(name=f"Field Limit reached",
-                                    value=f'{total_participants[0] - 20} remaining Participants')
-                    break
-            embed.set_footer(text=f"Session ID: {session_id}")
-            await ctx.response.send_message(embed=embed)
-    else:
-        embed = discord.Embed(title=f"Display Command Failed", description=f'{session_id} could not be found in current or archived sessions!', colour=discord.Colour.red())
-        await ctx.response.send_message(embed=embed)
-    cursor.close()
-    db.close()
-"""
+            player = interaction.user.name if player is None else player.name
+            cursor.execute(f"Select UTC_Offset from Player_Timecard where Player_Name = ?", (interaction.user.name,))
+            host_utc_offset = cursor.fetchone()
+            cursor.execute(f"select UTC_Offset from Player_Timecard where Player_Name = ?", (player,))
+            player_utc_offset = cursor.fetchone()
+            utc_offset = host_utc_offset[0] if host_utc_offset is not None else 'Universal'
+            print(host_utc_offset)
+            print(utc_offset)
+            if player_utc_offset is not None:
+                await create_timecard_plot(guild_id, player, day_value, utc_offset)
+                print(f"where am I?")
+                with open('C:\\Pathparser\\plots\\timecard_plot.png', 'rb') as f:
+                    picture = discord.File(f)
+                    await interaction.response.send_message(f"Here's the availability chart for {player} on {day.name}:",
+                                                            file=picture)
+            else:
+                embed = discord.Embed(title=f"Player Error", description=f'{player} did not have a valid timecard!!',
+                                      colour=discord.Colour.red())
+                await interaction.response.send_message(embed=embed)
+        cursor.close()
+        db.close()
+
+
+    @timesheet_group.command()
+    @app_commands.describe(group_id="leave 0 to display all.")
+    @app_commands.choices(
+        day=[discord.app_commands.Choice(name='Monday', value=1), discord.app_commands.Choice(name='Tuesday', value=2),
+             discord.app_commands.Choice(name='Wednesday', value=3), discord.app_commands.Choice(name='Thursday', value=4),
+             discord.app_commands.Choice(name='Friday', value=5), discord.app_commands.Choice(name='Saturday', value=6),
+             discord.app_commands.Choice(name='Sunday', value=7)])
+    async def parties(self, interaction: discord.Interaction, day: discord.app_commands.Choice[int], group_id: int = 0):
+        """Display historical Session Requests"""
+        guild_id = interaction.guild.id
+        db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+        cursor = db.cursor()
+        if day == 1:
+            day_value = 1
+        else:
+            day_value = day.value
+        if day_value < 1 or day_value > 7:
+            embed = discord.Embed(title=f"Day Error", description=f'{day} is not a valid day of the week!',
+                                  colour=discord.Colour.red())
+            await interaction.response.send_message(embed=embed)
+            cursor.close()
+            db.close()
+        else:
+            if group_id == 0:
+                buttons = ["⏪", "⬅", "➡", "⏩"]  # skip to start, left, right, skip to end
+                cursor.execute(f"""SELECT COUNT(Player_Name) FROM Sessions_Presign""")
+                admin_count = cursor.fetchone()
+                max_page = math.ceil(admin_count[0] / 10)
+                current_page = 1
+                low = 1 + ((current_page - 1) * 10)
+                high = 20 + ((current_page - 1) * 10)
+                cursor.execute(
+                    f"""SELECT Group_ID, Group_Name, Host, Created_date, Description from Sessions_Group WHERE ROWID BETWEEN {low} and {high}""")
+                pull = cursor.fetchall()
+                embed = discord.Embed(title=f"Group Request Settings Page {current_page}",
+                                      description=f'This a list of groups that have requested a session',
+                                      colour=discord.Colour.blurple())
+                for result in pull:
+                    embed.add_field(name=f'**Group Name**: {result[1]}',
+                                    value=f'**Host Name**: {result[2]} **Request Date:**: {result[3]}, \r\n **Description**: {result[4]}',
+                                    inline=False)
+                    cursor.execute(
+                        f"""SELECT Player_Name, Character_Name from Sessions_Presign WHERE group_id = {result[0]}""")
+                    presigns = cursor.fetchall()
+                    player_list = "Group Members: \r\n"
+                    for presign in presigns:
+                        player_list += f"**{presign[0]}**: {presign[1]} \r\n"
+                    embed.add_field(name=f'**Group Members**', value=player_list, inline=False)
+                await interaction.response.send_message(embed=embed)
+                msg = await interaction.original_response()
+                for button in buttons:
+                    await msg.add_reaction(button)
+                while True:
+                    try:
+                        reaction, user = await bot.wait_for('reaction_add', check=lambda reaction,
+                                                                                         user: user.id == interaction.user.id and reaction.emoji in buttons,
+                                                            timeout=60.0)
+                    except asyncio.TimeoutError:
+                        embed.set_footer(text="Request has timed out.")
+                        await msg.edit(embed=embed)
+                        await msg.clear_reactions()
+                        cursor.close()
+                        db.close()
+                        return print("timed out")
+                    else:
+                        previous_page = current_page
+                        if reaction.emoji == u"\u23EA":
+                            current_page = 1
+                            low = 1
+                            high = 20
+                        elif reaction.emoji == u"\u2B05" and current_page > 1:
+                            low -= 20
+                            high -= 20
+                            current_page -= 1
+                        elif reaction.emoji == u"\u27A1" and current_page < max_page:
+                            low += 20
+                            high += 20
+                            current_page += 1
+                        elif reaction.emoji == u"\u23E9":
+                            current_page = max_page
+                            low = ((20 * max_page) - 19)
+                            high = (20 * max_page)
+                        for button in buttons:
+                            await msg.remove_reaction(button, interaction.user)
+                        if current_page != previous_page:
+                            cursor.execute(
+                                f"""SELECT Group_ID, Group_Name, Host, Created_date, Description from Sessions_Group WHERE ROWID BETWEEN {low} and {high}""")
+                            pull = cursor.fetchall()
+                            embed = discord.Embed(title=f"Group Request Settings Page {current_page}",
+                                                  description=f'This a list of groups that have requested a session',
+                                                  colour=discord.Colour.blurple())
+                            for result in pull:
+                                embed.add_field(name=f'**Group Name**: {result[1]}',
+                                                value=f'**Host Name**: {result[2]} **Request Date:**: {result[3]}, \r\n **Description**: {result[4]}',
+                                                inline=False)
+                                cursor.execute(
+                                    f"""SELECT Player_Name, Character_Name from Sessions_Presign WHERE group_id = {result[0]}""")
+                                presigns = cursor.fetchall()
+                                player_list = "Group Members: \r\n"
+                                for presign in presigns:
+                                    player_list += f"**{presign[0]}**: {presign[1]} \r\n"
+                                embed.add_field(name=f'**Group Members**', value=player_list, inline=False)
+                            await msg.edit(embed=embed)
+                            cursor.close()
+            else:
+                # Specific Group Specified
+                cursor.execute(
+                    f"select SG.Group_Name, SG.Group_ID,  SP.Player_Name, SP.Character_Name from Sessions_Presign as SP LEFT JOIN Sessions_Group as SG on SP.Group_ID = SG.Group_ID where SP.Group_ID = ?",
+                    (group_id,))
+                group_info = cursor.fetchall()
+                if group_info is not None:
+                    cursor.execute(f"Select UTC_Offset from Player_Timecard where Player_Name = ?",
+                                   (interaction.user.name,))
+                    host_utc_offset = cursor.fetchone()
+                    utc_offset = host_utc_offset[0] if host_utc_offset is not None else 'Universal'
+                    await create_timecard_plot(guild_id, group_info, day_value, utc_offset)
+                    embed = discord.Embed(title=f"Group Request {group_id}",
+                                          description=f'This is a list of the players in the group',
+                                          colour=discord.Colour.blurple())
+                    with open('C:\\Pathparser\\plots\\timecard_plot.png', 'rb') as f:
+                        picture = discord.File(f)
+                    await interaction.response.send_message(embed=embed, file=picture)
+                else:
+                    embed = discord.Embed(title=f"Group Request Error", description=f'Group {group_id} could not be found!',
+                                          colour=discord.Colour.red())
+                    await interaction.response.send_message(embed=embed)
+                    cursor.close()
+                    db.close()
+                    return
+        cursor.close()
+        db.close()
+
+
+class GroupManyView(shared_functions.ShopView):
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, group_id: typing.Optional[int],
+                 group_name: str, host_player_name: str, host_character: str, description: str, role_id: int,
+                 interaction: discord.Interaction):
+        super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction,
+                         content=self.content)
+        self.max_items = None  # Cache total number of items
+        self.content = None
+        self.group_id = group_id
+        self.group_name = group_name
+        self.host_player_name = host_player_name
+        self.host_character = host_character
+        self.description = description
+        self.role_id = role_id
+
+    async def update_results(self):
+        """Fetch the history of prestige request  for the current page."""
+
+        statement = """
+                        SELECT Group_ID, Player_Name
+                        FROM Sessions_Group_Presign
+                        WHERE Group_ID = ? ORDER BY Player_Name Offset ? Limit ?
+                    """
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.execute(statement, (self.group_id, self.offset, self.limit))
+            self.results = await cursor.fetchall()
+
+    async def create_embed(self):
+        """Create the embed for the titles."""
+        current_page = ((self.offset - 1) // self.limit) + 1
+        total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+        self.embed = discord.Embed(
+            title=f"Group: {self.group_id}: {self.group_name} hosted by {self.host_player_name}'s {self.host_character}",
+            description=f"Page {current_page} of {total_pages}")
+        self.embed.set_footer(text=f"Group <@{self.role_id}> Description: {self.description}")
+        for item in self.results:
+            (group_id, player_name) = item
+            self.embed.add_field(name=f'**Player**: {player_name}')
+
+    async def get_max_items(self):
+        """Get the total number of titles."""
+        if self.max_items is None:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                cursor = await db.execute("SELECT COUNT(*) FROM Sessions_Group_Presign WHERE Group_ID = ?",
+                                          (self.group_id,))
+                count = await cursor.fetchone()
+                self.max_items = count[0]
+        return self.max_items
+
+
+class GroupView(shared_functions.ShopView):
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, group_id: typing.Optional[int],
+                 interaction: discord.Interaction):
+        super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction,
+                         content=self.content)
+        self.max_items = None  # Cache total number of items
+        self.content = None
+        self.group_id = group_id
+
+    async def update_results(self):
+        """Fetch the history of prestige request  for the current page."""
+
+        statement = """
+                        SELECT Group_ID, Group_Name, Role_ID, Player_Name, Host_Character, Description
+                        FROM Sessions_Group Order by Group_ID Offset ? Limit ?
+                    """
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.execute(statement, (self.group_id, self.offset, self.limit))
+            self.results = await cursor.fetchall()
+
+    async def create_embed(self):
+        """Create the embed for the titles."""
+        current_page = ((self.offset - 1) // self.limit) + 1
+        total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+        self.embed = discord.Embed(
+            title=f"Group Requests",
+            description=f"Page {current_page} of {total_pages}")
+        for item in self.results:
+            (group_id, group_name, role_id, host_player_name, host_character, description) = item
+            self.embed.add_field(name=f'**Group**: {group_id}: {group_name} Role: <@{role_id}>',
+                                 value=f'**Host**: {host_player_name}, **Character**: {host_character}\r\n**Description**: {description}',
+                                 inline=False)
+
+    async def get_max_items(self):
+        """Get the total number of titles."""
+        if self.max_items is None:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                cursor = await db.execute("SELECT COUNT(*) FROM Session_Group",
+                                          (self.group_id,))
+                count = await cursor.fetchone()
+                self.max_items = count[0]
+        return self.max_items

@@ -36,6 +36,24 @@ timezone_cache = sorted(available_timezones())
 # *** AUTOCOMPLETION COMMANDS *** #
 
 
+async def player_session_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild_id
+    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
+    cursor = db.cursor()
+    current = unidecode(str.title(current))
+    cursor.execute(f"Select Session_ID, Session_Name Sessions_Archive WHERE Player_Name = ? AND Session_ID LIKE ? OR Player_Name = ? AND Session_Name like ? Limit 20", (interaction.user.name, f"%{current}%", interaction.user.name, f"%{current}%"))
+    character_list = cursor.fetchall()
+    for test_text in character_list:
+        if current in str(test_text[0]) or str.lower(current) in str.lower(test_text[1]):
+            name_result = f"{test_text[0]}: {test_text[1]}"
+            data.append(app_commands.Choice(name=name_result, value=test_text[0]))
+#        if current in characters[1]:
+#            data.append(app_commands.Choice(name=f"Name: {characters[3]} Requirement: {characters[0]}, Prestige Cost: {characters[1]} **Effect**: {characters[2]}, **Limit**: {characters[4]}", value=characters[3]))
+    cursor.close()
+    db.close()
+    return data
+
 async def stg_character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
     app_commands.Choice[str]]:
     data = []
@@ -246,6 +264,24 @@ async def group_id_autocompletion(interaction: discord.Interaction, current: str
     db.close()
     return data
 
+async def get_plots_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
+    """This is a test command for the wa command."""
+    data = []
+    guild_id = interaction.guild_id
+    client = WaClient(
+        'Pathparser',
+        'https://github.com/Solfyrism/Pathparser',
+        'V1.1',
+        os.getenv('WORLD_ANVIL_API'),
+        os.getenv('WORLD_ANVIL_USER')
+    )
+    articles_list = [article for article in client.world.articles('f7a60480-ea15-4867-ae03-e9e0c676060a', '9ad3d530-1a42-4e99-9a09-9c4dccddc70a')]
+    for articles in articles_list:
+        if current in articles['title']:
+            print(articles['title'])
+            data.append(app_commands.Choice(name=articles['title'], value=f"1-{articles['id']}"))
+    data.append(app_commands.Choice(name=f"NEW: {str.title(current)}", value=f"2-{str.title(current)}"))
+    return data
 
 async def player_session_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[
     app_commands.Choice[str]]:
@@ -332,6 +368,8 @@ async def settings_autocomplete(interaction: discord.Interaction, current: str) 
     else:
         data.append(app_commands.Choice(name="How did you get here?", value="None"))
     return data
+
+
 
 
 # *** DISPLAY FUNCTIONS *** #
@@ -1175,27 +1213,30 @@ def validate_hammertime(hammertime: Union[str, datetime]) -> Union[
     Tuple[bool, bool, Tuple[str, str, str, str]], Tuple[bool, str]]:
     try:
         # Check if hammertime is already a 10-digit Unix timestamp
-        if len(hammertime) == 10:
-            # Use only the first 10 digits if length is 16 (e.g., with milliseconds)
-            hammertime = hammertime
-        elif len(hammertime) == 16:
-            hammertime = hammertime[3:13]
-            # Convert hammertime to datetime object
-            dt_hammertime = datetime.fromtimestamp(int(hammertime))
+        if len(hammertime) == 10 or len(hammertime) == 16:
+            if len(hammertime) == 10:
+                # Use only the first 10 digits if length is 16 (e.g., with milliseconds)
+                hammertime = hammertime
+            elif len(hammertime) == 16:
+                hammertime = hammertime[3:13]
+                # Convert hammertime to datetime object
+                dt_hammertime = datetime.fromtimestamp(int(hammertime))
 
-        # Generate time formats for the Discord message
-        date = f"<t:{hammertime}:D>"
-        hour = f"<t:{hammertime}:t>"
-        arrival = f"<t:{hammertime}:R>"
-        success = True
+            # Generate time formats for the Discord message
+            date = f"<t:{hammertime}:D>"
+            hour = f"<t:{hammertime}:t>"
+            arrival = f"<t:{hammertime}:R>"
+            success = True
 
-        # Check if the datetime is more than 5 years in the past or in the future
-        if dt_hammertime > datetime.now() or dt_hammertime < (datetime.now() - datetime.timedelta(days=365 * 5)):
-            valid_time = True  # valid if it's in the future or more than 5 years ago
+            # Check if the datetime is more than 5 years in the past or in the future
+            if dt_hammertime > datetime.now() or dt_hammertime < (datetime.now() - datetime.timedelta(days=365 * 5)):
+                valid_time = True  # valid if it's in the future or more than 5 years ago
+            else:
+                valid_time = False  # invalid if it's in the past 5 years
+
+            return success, valid_time, (date, hour, arrival, hammertime)
         else:
-            valid_time = False  # invalid if it's in the past 5 years
-
-        return success, valid_time, (date, hour, arrival, hammertime)
+            return True, f"{hammertime}"
     except (ValueError, IndexError) as e:
         logging.exception(f"Error validating hammertime '{hammertime}': {e}")
         return False, "Invalid timestamp format. Please provide a valid timestamp."
@@ -1382,7 +1423,7 @@ async def put_wa_article(guild_id: int, template: str, category: str, title: str
         return None
 
 
-async def patch_wa_article(cursor, guild_id: int, article_id: str, title: str, overview: str) -> Optional[dict]:
+async def patch_wa_article(guild_id: int, article_id: str, overview: str) -> Optional[dict]:
     allowed_guilds = [883009758179762208, 280061170231017472]
     if guild_id not in allowed_guilds:
         logging.warning(f"Guild ID {guild_id} is not authorized to create articles.")
@@ -1406,19 +1447,18 @@ async def patch_wa_article(cursor, guild_id: int, article_id: str, title: str, o
         evaluated_overview = drive_word_document(overview)
 
         updated_page = client.article.patch(article_id, {
-            'title': title,
             'content': f'{evaluated_overview}',
             'world': {'id': world_id}
         })
         return updated_page
     except Exception as e:
         # I haven't ever gotten a proper exception from the World Anvil API, so this is a catch-all until I can specify it down. https://pypi.org/project/pywaclient/#exceptions has them, but I'm not sure how to catch them yet.
-        logging.exception(f"Error in article creation for title '{title}': {e}")
+        logging.exception(f"Error in article creation for article '{article_id}': {e}")
         return None
 
 
-async def put_wa_report(cursor, guild_id: int, session_id: int, overview: str, author: str, plot: str,
-                        significance: int) -> Optional[dict]:
+async def put_wa_report(guild_id: int, session_id: int, overview: str, author: str, plot: str,
+                        significance: int) -> Optional[tuple]:
     if guild_id in [883009758179762208, 280061170231017472]:
         evaluated_overview = drive_word_document(overview)
         try:
@@ -1430,95 +1470,107 @@ async def put_wa_report(cursor, guild_id: int, session_id: int, overview: str, a
                 os.getenv('WORLD_ANVIL_USER')
             )
             world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
-            await cursor.execute(
-                "SELECT Session_Name, Completed_Time, Alt_Reward_Party, Alt_Reward_All, Overview from Sessions where Session_ID = ?",
-                (session_id,))
-            session_info = await cursor.fetchone()
-            await cursor.execute(
-                "SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Archive as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
-                (session_id, author))
-            characters = await cursor.fetchall()
-            if len(characters) == 0:
-                cursor.execute(
-                    "SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Participants as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+                cursor = await db.execute()
+                await cursor.execute("Select Search from Admin where Identifier = 'WA_Session_Folder'")
+                session_folder = await cursor.fetchone()
+                if not session_folder:
+                    raise ValueError("No World Anvil session folder set.")
+                session_folder = session_folder[0]
+                await cursor.execute("Select Search from Admin where Identifier = 'WA_Timeline_Default'")
+                timeline = await cursor.fetchone()
+                if not timeline:
+                    raise ValueError("No World Anvil timeline set.")
+                timeline = timeline[0]
+                await cursor.execute(
+                    "SELECT Session_Name, Completed_Time, Alt_Reward_Party, Alt_Reward_All, Overview from Sessions where Session_ID = ?",
+                    (session_id,))
+                session_info = await cursor.fetchone()
+                await cursor.execute(
+                    "SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Archive as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
                     (session_id, author))
-                characters = cursor.fetchall()
-            else:
-                characters = characters
-            related_persons_block = []
-            counter = 0
-            completed_str = session_info[1] if session_info[1] is not None else datetime.now().strftime(
-                "%Y-%m-%d %H:%M")
-            completed_time = datetime.strptime(completed_str, '%Y-%m-%d %H:%M')
-            day_test = datetime.strftime(completed_time, '%d')
-            month_test = datetime.strftime(completed_time, '%m')
-            new_report_page = client.article.put({
-                'title': f'{str(session_id).rjust(3, "0")}: {session_info[0]}',
-                'content': f'{evaluated_overview}',
-                'category': {'id': 'b71f939a-f72d-413b-b4d7-4ebff1e162ca'},
-                'templateType': 'report',  # generic article template
-                'state': 'public',
-                'isDraft': False,
-                'entityClass': 'Report',
-                'tags': f'{author}',
-                'world': {'id': world_id},
-                #                  'reportDate': report_date,  # Convert the date to a string
-                'plots': [{'id': plot}]
-            })
-            for character in characters:
-                print(f" This is a character {character[0]} Do they have an article: {character[2]}?")
-                if character[2] is not None:
-                    person = {'id': character[2]}
-                    related_persons_block.append(person)
-                    counter += 1
-            if counter == 0:
-                new_timeline_page = client.history.put({
-                    'title': f'{session_info[0]}',
-                    'content': f'{session_info[4]}',
-                    'fullcontent': f'{evaluated_overview}',
-                    'timelines': [{'id': '906c8c14-2283-47e0-96e2-0fcd9f71d0d0'}],
-                    'significance': significance,
-                    'parsedContent': session_info[4],
-                    'report': {'id': new_report_page['id']},
-                    'year': 22083,
-                    'month': int(month_test),
-                    'day': int(day_test),
-                    'endingYear': int(22083),
-                    'endingMonth': int(month_test),
-                    'endingDay': int(day_test),
-                    'world': {'id': world_id}
+                characters = await cursor.fetchall()
+                if len(characters) == 0:
+                    await cursor.execute(
+                        "SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Participants as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
+                        (session_id, author))
+                    characters = cursor.fetchall()
+                else:
+                    characters = characters
+                related_persons_block = []
+                counter = 0
+                completed_str = session_info[1] if session_info[1] is not None else datetime.now().strftime(
+                    "%Y-%m-%d %H:%M")
+                completed_time = datetime.strptime(completed_str, '%Y-%m-%d %H:%M')
+                day_test = datetime.strftime(completed_time, '%d')
+                month_test = datetime.strftime(completed_time, '%m')
+                new_report_page = client.article.put({
+                    'title': f'{str(session_id).rjust(3, "0")}: {session_info[0]}',
+                    'content': f'{evaluated_overview}',
+                    'category': {'id': f'{session_folder}'},
+                    'templateType': 'report',  # generic article template
+                    'state': 'public',
+                    'isDraft': False,
+                    'entityClass': 'Report',
+                    'tags': f'{author}',
+                    'world': {'id': world_id},
+                    #                  'reportDate': report_date,  # Convert the date to a string
+                    'plots': [{'id': plot}]
                 })
-            else:
-                related_persons_block = related_persons_block
-                new_timeline_page = client.history.put({
-                    'title': f'{session_info[0]}',
-                    'content': f'{session_info[4]}',
-                    'fullcontent': f'{evaluated_overview}',
-                    'timelines': [{'id': '906c8c14-2283-47e0-96e2-0fcd9f71d0d0'}],
-                    'significance': significance,
-                    'characters': related_persons_block,
-                    'parsedContent': session_info[4],
-                    'report': {'id': new_report_page['id']},
-                    'year': 22083,
-                    'month': int(month_test),
-                    'day': int(day_test),
-                    'endingYear': int(22083),
-                    'endingMonth': int(month_test),
-                    'endingDay': int(day_test),
-                    'world': {'id': world_id}
-                })
-            await cursor.execute(
-                'update Sessions set Article_link = ?, Article_ID = ?, History_ID = ? where Session_ID = ?',
-                (new_report_page['url'], new_report_page['id'], new_timeline_page['id'], session_id))
-            await cursor.connection.commit()
+                for character in characters:
+                    print(f" This is a character {character[0]} Do they have an article: {character[2]}?")
+                    if character[2] is not None:
+                        person = {'id': character[2]}
+                        related_persons_block.append(person)
+                        counter += 1
+                if counter == 0:
+                    new_timeline_page = client.history.put({
+                        'title': f'{session_info[0]}',
+                        'content': f'{session_info[4]}',
+                        'fullcontent': f'{evaluated_overview}',
+                        'timelines': [{'id': f'{timeline}'}],
+                        'significance': significance,
+                        'parsedContent': session_info[4],
+                        'report': {'id': new_report_page['id']},
+                        'year': 22083,
+                        'month': int(month_test),
+                        'day': int(day_test),
+                        'endingYear': int(22083),
+                        'endingMonth': int(month_test),
+                        'endingDay': int(day_test),
+                        'world': {'id': world_id}
+                    })
+                else:
+                    related_persons_block = related_persons_block
+                    new_timeline_page = client.history.put({
+                        'title': f'{session_info[0]}',
+                        'content': f'{session_info[4]}',
+                        'fullcontent': f'{evaluated_overview}',
+                        'timelines': [{'id': f'{timeline}'}],
+                        'significance': significance,
+                        'characters': related_persons_block,
+                        'parsedContent': session_info[4],
+                        'report': {'id': new_report_page['id']},
+                        'year': 22083,
+                        'month': int(month_test),
+                        'day': int(day_test),
+                        'endingYear': int(22083),
+                        'endingMonth': int(month_test),
+                        'endingDay': int(day_test),
+                        'world': {'id': world_id}
+                    })
+                await cursor.execute(
+                    'update Sessions set Article_link = ?, Article_ID = ?, History_ID = ? where Session_ID = ?',
+                    (new_report_page['url'], new_report_page['id'], new_timeline_page['id'], session_id))
+                await db.commit()
+                return new_report_page, new_timeline_page
         except Exception as e:
             # I haven't ever gotten a proper exception from the World Anvil API, so this is a catch-all until I can specify it down. https://pypi.org/project/pywaclient/#exceptions has them, but I'm not sure how to catch them yet.
             logging.exception(f"Error in article creation for session '{session_id}': {e}")
             return None
 
 
-async def patch_wa_report(guild_id: int, session_id: int, overview: str, author: str, plot: str, significance: int) -> \
-        Optional[dict]:
+async def patch_wa_report(guild_id: int, session_id: int, overview: str) -> Optional[dict]:
     if guild_id not in [883009758179762208, 280061170231017472]:
         logging.warning(f"Guild ID {guild_id} is not authorized to create articles.")
         return None
@@ -1557,10 +1609,6 @@ async def patch_wa_report(guild_id: int, session_id: int, overview: str, author:
                 'content': evaluated_overview,
                 'world': {'id': world_id}
             })
-
-            # Optionally update the database if needed
-            # await cursor.execute("UPDATE Sessions SET ... WHERE Session_ID = ?", (session_id,))
-            # await conn.commit()
 
             return {'article': new_page, 'history': new_history}
 

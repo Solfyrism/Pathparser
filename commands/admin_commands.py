@@ -582,6 +582,23 @@ class AdminCommands(commands.Cog, name='admin'):
                                              rewarded_reward_party,
                                              rewarded_reward_all, session_id))
                     await conn.commit()
+                    base_session_info = gamemaster_commands.RewardSessionBaseInfo(
+                        session_name=session_name,
+                        rewarded_gold=rewarded_gold,
+                        rewarded_essence=rewarded_essence,
+                        rewarded_easy=rewarded_easy,
+                        rewarded_medium=rewarded_medium,
+                        rewarded_hard=rewarded_hard,
+                        rewarded_deadly=rewarded_deadly,
+                        rewarded_trials=rewarded_trials,
+                        rewarded_alt_reward_all=rewarded_reward_all,
+                        rewarded_alt_reward_party=rewarded_reward_party,
+                        rewarded_fame=rewarded_fame,
+                        rewarded_prestige=rewarded_prestige,
+                        rewarded_session_thread=session_rewards_thread,
+                        rewarded_message=session_rewards_message
+                    )
+
                     if rewarded_gold < 0 or rewarded_easy < 0 or rewarded_medium < 0 or rewarded_hard < 0 or rewarded_deadly < 0 or rewarded_essence < 0 or rewarded_trials < 0:
                         await interaction.followup.send(
                             f"Minimum Session Rewards may only be 0, if a player receives a lesser reward, have them claim the transaction.")
@@ -622,37 +639,44 @@ class AdminCommands(commands.Cog, name='admin'):
                                     if isinstance(remove_rewards, str):
                                         field += "failed to remove rewards, skipping adjustment. \r\n "
                                     else:
+                                        (reversal_dataclass, reversal_thread_id) = remove_rewards
                                         add_rewards = await gamemaster_commands.session_reward_calculation(
                                             interaction=interaction,
                                             session_id=session_id,
                                             character_name=character_name,
                                             author_name=gm_name,
-                                            session_level=level,
+                                            pre_session_level=level,
+                                            pre_session_tier=tier,
+                                            pre_session_gold=effective_gold,
                                             source="Session Adjustment",
+                                            session_base_info=base_session_info
                                         )
-                                        numeric_fields = ['milestone_change', 'milestones_total',
-                                                          'milestones_remaining',
-                                                          'trial_change', 'trials', 'trials_remaining',
-                                                          'gold_change',
-                                                          'essence_change', 'fame_change', 'prestige_change']
-                                        for field in numeric_fields:
-                                            a_value = getattr(add_rewards, field)
-                                            r_value = getattr(remove_rewards, field)
-                                            new_value = safe_add(a_value, r_value)
-                                            setattr(add_rewards, field, new_value)
-                                        await shared_functions.log_embed(change=add_rewards, guild=guild,
-                                                                         thread=thread_id, bot=self.bot)
-                                        await shared_functions.character_embed(
-                                            character_name=character_name,
-                                            guild=guild)
-                                        field += f"Rewards adjusted for {character_name}. \r\n"
-                                        if idx < 20:
-                                            embed.add_field(name=f"{player_name}'s {character_name}",
-                                                            value=field, inline=False)
-                                        elif idx == 21:
-                                            embed.add_field(name=f"Additional Players",
-                                                            value="Additional players have been adjusted, please check the session log for more information.",
-                                                            inline=False)
+                                        if isinstance(add_rewards, str):
+                                            field += "failed to calculate rewards, skipping adjustment. \r\n "
+                                        else:
+                                            numeric_fields = ['milestone_change', 'milestones_total',
+                                                              'milestones_remaining',
+                                                              'trial_change', 'trials', 'trials_remaining',
+                                                              'gold_change',
+                                                              'essence_change', 'fame_change', 'prestige_change']
+                                            for field in numeric_fields:
+                                                a_value = getattr(add_rewards, field)
+                                                r_value = getattr(reversal_dataclass, field)
+                                                new_value = safe_add(a_value, r_value)
+                                                setattr(add_rewards, field, new_value)
+                                            await shared_functions.log_embed(change=add_rewards, guild=guild,
+                                                                             thread=thread_id, bot=self.bot)
+                                            await shared_functions.character_embed(
+                                                character_name=character_name,
+                                                guild=guild)
+                                            field += f"Rewards adjusted for {character_name}. \r\n"
+                                if idx < 20:
+                                    embed.add_field(name=f"{player_name}'s {character_name}",
+                                                    value=field, inline=False)
+                                elif idx == 21:
+                                        embed.add_field(name=f"Additional Players",
+                                                        value="Additional players have been adjusted, please check the session log for more information.",
+                                                        inline=False)
                             await interaction.followup.send(embed=embed)
             except (aiohttp.ClientError, aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(

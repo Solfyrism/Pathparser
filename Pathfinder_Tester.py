@@ -1,16 +1,16 @@
 import datetime
-
 import aiosqlite
-
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv;
-
 load_dotenv()
 import os
 from test_functions import TestCommands
 from commands.character_commands import CharacterCommands
 from commands.admin_commands import AdminCommands
+from commands.gamemaster_commands import GamemasterCommands, reinstate_session_buttons, reinstate_reminders
+from commands.player_commands import PlayerCommands
+
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import shared_functions
@@ -27,6 +27,7 @@ scheduler = AsyncIOScheduler()
 scheduler.start()
 scheduled_jobs = {}
 
+
 @bot.event
 async def on_ready():
     await bot.wait_until_ready()
@@ -34,10 +35,12 @@ async def on_ready():
     await bot.add_cog(TestCommands(bot))
     await bot.add_cog(CharacterCommands(bot))
     await bot.add_cog(AdminCommands(bot))
-    await bot.add_cog(gamemaster_commands.GamemasterCommands(bot))
+    await bot.add_cog(GamemasterCommands(bot))
+    await bot.add_cog(PlayerCommands(bot))
+
     await bot.tree.sync()
-    await gamemaster_commands.reinstate_reminders(bot)
-    await gamemaster_commands.reinstate_session_buttons(bot)
+    await reinstate_reminders(bot)
+    await reinstate_session_buttons(bot)
 
 
 @bot.event
@@ -81,5 +84,3 @@ async def remind_users(session_id: int, guild_id: int, thread_id: int, time: int
     except (aiosqlite.Error, TypeError) as e:
         logging.exception(
             f"failed to run scheduled task for {guild_id}, session_id {session_id} {thread_id}, with error: {e}")
-
-
