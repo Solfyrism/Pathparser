@@ -1,32 +1,29 @@
+import asyncio
+import logging
+import os
+import re
+import sqlite3
 import typing
 import urllib.error
+from dataclasses import dataclass, field
+
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
+from typing import List, Optional, Tuple, Union, Dict
+from urllib.parse import urlparse, parse_qs
+from zoneinfo import available_timezones, ZoneInfo
+import aiosqlite
 import discord
-import math
-import sqlite3
+import matplotlib.pyplot as plt
+import numpy as np
+import pytz
 from dateutil import parser
 from discord import app_commands
-import pytz
-import asyncio
-from math import floor
 from dotenv import load_dotenv
-from unidecode import unidecode
-from pywaclient.api import BoromirApiClient as WaClient
-import numpy as np
-from typing import List, Optional, Tuple, Union, Dict
-import matplotlib.pyplot as plt
-from zoneinfo import available_timezones, ZoneInfo
-import os
-from datetime import datetime
-import aiosqlite
-import logging
-from dataclasses import dataclass, field
-import re
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from urllib.parse import urlparse, parse_qs
-from decimal import Decimal, ROUND_HALF_UP
-
-import shared_functions
+from pywaclient.api import BoromirApiClient as WaClient
+from unidecode import unidecode
 
 load_dotenv()
 # CALL ME MR MONEYBAGS BECAUSE HERE IS MY CASH
@@ -36,26 +33,9 @@ timezone_cache = sorted(available_timezones())
 # *** AUTOCOMPLETION COMMANDS *** #
 
 
-async def player_session_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
-    data = []
-    guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
-    cursor = db.cursor()
-    current = unidecode(str.title(current))
-    cursor.execute(f"Select Session_ID, Session_Name Sessions_Archive WHERE Player_Name = ? AND Session_ID LIKE ? OR Player_Name = ? AND Session_Name like ? Limit 20", (interaction.user.name, f"%{current}%", interaction.user.name, f"%{current}%"))
-    character_list = cursor.fetchall()
-    for test_text in character_list:
-        if current in str(test_text[0]) or str.lower(current) in str.lower(test_text[1]):
-            name_result = f"{test_text[0]}: {test_text[1]}"
-            data.append(app_commands.Choice(name=name_result, value=test_text[0]))
-#        if current in characters[1]:
-#            data.append(app_commands.Choice(name=f"Name: {characters[3]} Requirement: {characters[0]}, Prestige Cost: {characters[1]} **Effect**: {characters[2]}, **Limit**: {characters[4]}", value=characters[3]))
-    cursor.close()
-    db.close()
-    return data
-
-async def stg_character_select_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+async def stg_character_select_autocompletion(
+        interaction: discord.Interaction,
+        current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
@@ -104,7 +84,7 @@ async def own_character_select_autocompletion(
     data = []
     user_id = interaction.user.id
     guild_id = interaction.guild_id
-    _, current_fixed = shared_functions.name_fix(current)
+    _, current_fixed = name_fix(current)
     current_prefix = current_fixed.lower()
     cache_key = (user_id, current_prefix)
 
@@ -146,7 +126,7 @@ async def character_select_autocompletion(interaction: discord.Interaction, curr
     data = []
     user_id = interaction.user.id
     guild_id = interaction.guild_id
-    _, current_fixed = shared_functions.name_fix(current)
+    _, current_fixed = name_fix(current)
     current_prefix = current_fixed.lower()
     cache_key = (user_id, current_prefix)
 
@@ -165,7 +145,7 @@ async def character_select_autocompletion(interaction: discord.Interaction, curr
                 WHERE LOWER(Character_Name) LIKE ? OR LOWER(Nickname) LIKE ?
                 LIMIT 5
                 """,
-                (interaction.user.name, f"{current_prefix}%", f"{current_prefix}%")
+                (f"{current_prefix}%", f"{current_prefix}%")
             )
             character_list = await cursor.fetchall()
             # Cache the result
@@ -178,18 +158,11 @@ async def character_select_autocompletion(interaction: discord.Interaction, curr
     return data
 
 
-async def clear_autocomplete_cache():
-    while True:
-        await asyncio.sleep(300)  # Wait for 5 minutes
-        async with autocomplete_cache.lock:
-            autocomplete_cache.cache.clear()
-
-
-async def get_plots_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+async def get_plots_autocompletion(
+        interaction: discord.Interaction,
+        current: str) -> typing.List[app_commands.Choice[str]]:
     """This is a test command for the wa command."""
     data = []
-    guild_id = interaction.guild_id
     client = WaClient(
         'Pathparser',
         'https://github.com/Solfyrism/Pathparser',
@@ -207,8 +180,9 @@ async def get_plots_autocompletion(interaction: discord.Interaction, current: st
     return data
 
 
-async def get_precreated_plots_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+async def get_precreated_plots_autocompletion(
+        interaction: discord.Interaction,
+        current: str) -> typing.List[app_commands.Choice[str]]:
     """This is a test command for the wa command."""
     data = []
     client = WaClient(
@@ -226,8 +200,9 @@ async def get_precreated_plots_autocompletion(interaction: discord.Interaction, 
     return data
 
 
-async def session_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+async def session_autocompletion(
+        interaction: discord.Interaction,
+        current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
@@ -246,8 +221,9 @@ async def session_autocompletion(interaction: discord.Interaction, current: str)
     return data
 
 
-async def group_id_autocompletion(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+async def group_id_autocompletion(
+        interaction: discord.Interaction,
+        current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
@@ -264,10 +240,12 @@ async def group_id_autocompletion(interaction: discord.Interaction, current: str
     db.close()
     return data
 
-async def get_plots_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
+
+async def get_plots_autocomplete(
+        interaction: discord.Interaction,
+        current: str) -> typing.List[app_commands.Choice[str]]:
     """This is a test command for the wa command."""
     data = []
-    guild_id = interaction.guild_id
     client = WaClient(
         'Pathparser',
         'https://github.com/Solfyrism/Pathparser',
@@ -275,7 +253,8 @@ async def get_plots_autocomplete(interaction: discord.Interaction, current: str)
         os.getenv('WORLD_ANVIL_API'),
         os.getenv('WORLD_ANVIL_USER')
     )
-    articles_list = [article for article in client.world.articles('f7a60480-ea15-4867-ae03-e9e0c676060a', '9ad3d530-1a42-4e99-9a09-9c4dccddc70a')]
+    articles_list = [article for article in client.world.articles('f7a60480-ea15-4867-ae03-e9e0c676060a',
+                                                                  '9ad3d530-1a42-4e99-9a09-9c4dccddc70a')]
     for articles in articles_list:
         if current in articles['title']:
             print(articles['title'])
@@ -283,8 +262,10 @@ async def get_plots_autocomplete(interaction: discord.Interaction, current: str)
     data.append(app_commands.Choice(name=f"NEW: {str.title(current)}", value=f"2-{str.title(current)}"))
     return data
 
-async def player_session_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+
+async def player_session_autocomplete(
+        interaction: discord.Interaction,
+        current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
@@ -327,55 +308,55 @@ async def fame_autocomplete(interaction: discord.Interaction, current: str) -> t
 
 async def title_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
-    guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
-    cursor = db.cursor()
-    current = unidecode(str.title(current))
-    cursor.execute(
-        "SELECT ID, Masculine_Name, Feminine_Name, Fame, Effect from Store_Title WHERE Masculine_Name LIKE ? OR Feminine_Name LIKE ? LEFT JOIN  Limit 20",
-        (f"%{current}%", f"%{current}%"))
-    character_list = cursor.fetchall()
-    for characters in character_list:
-        if current in characters[1]:
-            data.append(app_commands.Choice(name=f"{characters[1]}", value=characters[1]))
-        if current in characters[2]:
-            data.append(app_commands.Choice(name=f"{characters[2]}", value=characters[2]))
-    cursor.close()
-    db.close()
+    async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+        cursor = await db.cursor()
+        current = unidecode(str.title(current))
+        await cursor.execute(
+            "SELECT ID, Masculine_Name, Feminine_Name, Fame, Effect from Store_Title WHERE Masculine_Name LIKE ? OR Feminine_Name LIKE ? LIMIT 20",
+            (f"%{current}%", f"%{current}%"))
+        character_list = await cursor.fetchall()
+        for characters in character_list:
+            if current in characters[1]:
+                data.append(app_commands.Choice(name=f"{characters[1]}", value=characters[1]))
+            if current in characters[2]:
+                data.append(app_commands.Choice(name=f"{characters[2]}", value=characters[2]))
     return data
 
 
-async def settings_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[
-    app_commands.Choice[str]]:
+import aiosqlite
+from discord import app_commands
+from unidecode import unidecode
+import logging
+
+
+async def settings_autocomplete(
+        interaction: discord.Interaction,
+        current: str) -> list[app_commands.Choice[str]]:
     data = []
-    guild_id = interaction.guild_id
-    admin_bool = interaction.user.guild_permissions.administrator
-    if admin_bool:
-        with sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
-            cursor = db.cursor()
-            current = unidecode(current.lower())
-            try:
-                cursor.execute(
-                    "SELECT Identifier from Admin WHERE Search LIKE ? Limit 20",
-                    f"%{current}%")
-                settings_list = cursor.fetchall()
-                for setting in settings_list:
-                    if current in setting[1].lower():
-                        data.append(app_commands.Choice(name=f"{setting[0]}", value=setting[0]))
-                cursor.close()
-            except (aiosqlite, TypeError, ValueError) as e:
-                logging.exception(f"An error occurred whilst fetching settings: {e}")
-    else:
-        data.append(app_commands.Choice(name="How did you get here?", value="None"))
+    guild_id = interaction.guild.id
+    current = unidecode(current.lower())
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            # Correct parameterized query
+            cursor = await db.execute("SELECT Identifier FROM Admin WHERE Identifier LIKE ? LIMIT 20",
+                                      (f"%{current}%",))
+            settings_list = await cursor.fetchall()
+
+            # Populate choices
+            for setting in settings_list:
+                if current in setting[0].lower():
+                    data.append(app_commands.Choice(name=setting[0], value=setting[0]))
+
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"An error occurred while fetching settings: {e}")
     return data
-
-
 
 
 # *** DISPLAY FUNCTIONS *** #
 
-async def character_embed(character_name: str, guild: discord.Guild) -> Union[
-    Tuple[discord.Embed, str, int], str]:
+async def character_embed(
+        character_name: str,
+        guild: discord.Guild) -> Union[Tuple[discord.Embed, str, int], str]:
     try:
         async with aiosqlite.connect(f"Pathparser_{guild.id}_test.sqlite") as conn:
             conn.row_factory = aiosqlite.Row
@@ -562,7 +543,7 @@ class CharacterChange:
     gold: Optional[Decimal] = None
     gold_change: Optional[Decimal] = None
     gold_value: Optional[Decimal] = None
-    effective_gold: Optional[Decimal] = None
+    gold_value_max: Optional[Decimal] = None
     transaction_id: Optional[int] = None
     essence: Optional[int] = None
     essence_change: Optional[int] = None
@@ -632,10 +613,16 @@ async def update_character(guild_id: int, change: UpdateCharacterData) -> str:
 
         # Execute the SQL statement
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
-            await db.execute(sql_statement, values)
-            await db.commit()
-            logging.info(f"Character '{change.character_name}' updated successfully.")
-            return f"Character '{change.character_name}' updated successfully."
+            cursor = await db.cursor()
+            print(sql_statement, values)
+            await cursor.execute(sql_statement, values)
+            updated_rows = cursor.rowcount
+            if updated_rows == 0:
+                return f"No character found with name '{change.character_name}'."
+            else:
+                await db.commit()
+                logging.info(f"Character '{change.character_name}' updated successfully.")
+                return f"Character '{change.character_name}' updated successfully."
 
     except aiosqlite.Error as e:
         logging.exception(f"Database error while updating '{change.character_name}': {e}")
@@ -720,15 +707,16 @@ async def log_embed(change: CharacterChange, guild: discord.Guild, thread: int, 
 
         # Wealth Changes
         if change.gold_change is not None:
-            gold = change.gold if change.gold is not None else "N/A"
-            gold_change = change.gold_change
-            effective_gold = change.effective_gold if change.effective_gold is not None else "N/A"
+            gold = round(change.gold, 2) if change.gold is not None else "N/A"
+            gold_change = round(change.gold_change, 2) if change.gold_change is not None else "N/A"
+            gold_value = round(change.gold_value, 2) if change.gold_value is not None else "N/A"
+            print(gold, gold_change, gold_value)
             embed.add_field(
                 name="Wealth Changes",
                 value=(
-                    f"**Gold**: {round(gold, 2)}\n"
-                    f"**Gold Change**: {round(gold_change, 2)}\n"
-                    f"**Effective Gold**: {round(effective_gold, 2)} GP\n"
+                    f"**Gold**: {gold}\n"
+                    f"**Gold Change**: {gold_change}\n"
+                    f"**Effective Gold**: {gold_value} GP\n"
                     f"**Transaction ID**: {change.transaction_id}"
                 )
             )
@@ -788,10 +776,10 @@ async def log_embed(change: CharacterChange, guild: discord.Guild, thread: int, 
             logging_thread = await bot.fetch_channel(thread)
             if logging_thread.archived:
                 try:
-                    # Unarchive the thread
+                    # Remove the thread from Archive
                     await logging_thread.edit(archived=False, locked=False)
                 except discord.Forbidden:
-                    logging.exception(f"Bot lacks permissions to unarchive thread {logging_thread.id}")
+                    logging.exception(f"Bot lacks permissions to update thread from archived {logging_thread.id}")
         await logging_thread.send(embed=embed)
         return embed
     except (TypeError, ValueError) as e:
@@ -806,7 +794,7 @@ def get_next_weekday(weekday):
     days_ahead = weekday - today.weekday()
     if days_ahead <= 0:
         days_ahead += 7
-    return today + datetime.timedelta(days=days_ahead)
+    return today + timedelta(days=days_ahead)
 
 
 def parse_time_input(time_str):
@@ -837,7 +825,7 @@ def get_utc_offset(tz):
     try:
         # Get the current time for the timezone
         tzinfo = ZoneInfo(tz)
-        now_utc = datetime.now(datetime.timezone.utc)
+        now_utc = datetime.now(timezone.utc)
         now_tz = now_utc.astimezone(tzinfo)
         print(tzinfo, now_utc, now_tz)
         # Get the offset in hours and minutes
@@ -932,13 +920,10 @@ async def create_timecard_plot(guild_id, player_name, day, utc_offset):
         "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00", "20:30",
         "21:00", "21:30", "22:00", "22:30", "23:00", "23:30", "24:00", "24:30"
     ]
-    daysdict = {1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday', 7: 'Sunday'}
+    days_dict = {1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday', 7: 'Sunday'}
     # Get timecard data for the player and day
-    print(f"trying to adjust UTC Offset of {utc_offset}")
     utc_offset_time = get_utc_offset(utc_offset)
-    print(f"transforming of {utc_offset_time}")
     utc_offset_minutes = time_to_minutes(utc_offset_time)
-    test = ['nuts', 'berries', 'bananas']
     if isinstance(player_name, str):
         row = fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset_minutes)
 
@@ -975,7 +960,7 @@ async def create_timecard_plot(guild_id, player_name, day, utc_offset):
         cbar.set_label('Red = Unavailable, Green = Available', fontsize=10)
 
         # Add a title with an increased font size
-        plt.title(f"{player_name} availability on {daysdict[day]}", fontsize=14)
+        plt.title(f"{player_name} availability on {days_dict[day]}", fontsize=14)
 
         # Adjust the layout to fit the x-axis labels and title
         plt.subplots_adjust(bottom=0.3,
@@ -1037,7 +1022,7 @@ async def create_timecard_plot(guild_id, player_name, day, utc_offset):
         ax2.legend(loc='upper right')
 
         # Add a title with an increased font size
-        ax1.set_title(f"{group_name} Availability for {daysdict[day]}", fontsize=14)
+        ax1.set_title(f"{group_name} Availability for {days_dict[day]}", fontsize=14)
 
         # Adjust the layout to fit the x-axis labels and title
         plt.subplots_adjust(bottom=0.3, top=0.85)
@@ -1063,8 +1048,8 @@ def convert_to_unix(military_time: str, timezone_str: str) -> str:
 
     # Convert to the given timezone
     try:
-        timezone = pytz.timezone(timezone_str)
-        localized_time = timezone.localize(time_combined)
+        timezone_info = pytz.timezone(timezone_str)
+        localized_time = timezone_info.localize(time_combined)
         unix_timestamp = int(localized_time.timestamp())
         return f"<t:{unix_timestamp}:t>"
     except Exception as e:
@@ -1102,7 +1087,7 @@ def validate_mythweavers(url: str) -> Tuple[bool, str, int]:
             return False, "URL must start with 'https://'", 0
         if parsed_url.netloc != 'www.myth-weavers.com':
             return False, "URL must be from 'www.myth-weavers.com'", 1
-        if parsed_url.path != '/sheet.html':
+        if parsed_url.path != '/sheets/':
             return False, "URL path must be '/sheet.html'", 2
         query_params = parse_qs(parsed_url.query)
         fragment_params = parse_qs(parsed_url.fragment)
@@ -1195,8 +1180,9 @@ def validate_vtt(url: str) -> Tuple[bool, str, int]:
 
         # Additional path validation for Forge
         if domain.endswith('forge-vtt.com'):
-            if not path.startswith('/game/'):
-                return False, "Forge game links should start with '/game/'.", step
+            print(path)
+            if not path.startswith('/invite/') and not path.startswith('/game/'):
+                return False, "Forge game links should start with '/invite/' or  '/game/'.", step
 
         # All checks passed
         return True, "", -1  # Success case includes step indicator -1
@@ -1206,22 +1192,29 @@ def validate_vtt(url: str) -> Tuple[bool, str, int]:
         return False, "Invalid URL format.", -1  # Exception case uses step indicator -1
 
 
-def parse_hammer_time(hammer_time_str: str) -> datetime:
+def parse_hammer_time_to_iso(hammer_time_str: str) -> datetime:
+    return datetime.fromtimestamp(int(hammer_time_str), tz=timezone.utc)
+
+
+def parse_hammer_time_to_timestamp(hammer_time_str: str) -> datetime:
     return datetime.fromisoformat(hammer_time_str)
 
-def validate_hammertime(hammertime: Union[str, datetime]) -> Union[
-    Tuple[bool, bool, Tuple[str, str, str, str]], Tuple[bool, str]]:
+
+def validate_hammertime(
+        hammertime: Union[str, datetime]) -> Union[Tuple[bool, bool, Tuple[str, str, str, str]], Tuple[bool, str]]:
     try:
         # Check if hammertime is already a 10-digit Unix timestamp
         if len(hammertime) == 10 or len(hammertime) == 16:
             if len(hammertime) == 10:
                 # Use only the first 10 digits if length is 16 (e.g., with milliseconds)
                 hammertime = hammertime
+                dt_hammertime = datetime.fromtimestamp(int(hammertime))
             elif len(hammertime) == 16:
                 hammertime = hammertime[3:13]
                 # Convert hammertime to datetime object
                 dt_hammertime = datetime.fromtimestamp(int(hammertime))
-
+            else:
+                raise ValueError("Invalid timestamp format. Please provide a valid timestamp.")
             # Generate time formats for the Discord message
             date = f"<t:{hammertime}:D>"
             hour = f"<t:{hammertime}:t>"
@@ -1229,7 +1222,7 @@ def validate_hammertime(hammertime: Union[str, datetime]) -> Union[
             success = True
 
             # Check if the datetime is more than 5 years in the past or in the future
-            if dt_hammertime > datetime.now() or dt_hammertime < (datetime.now() - datetime.timedelta(days=365 * 5)):
+            if dt_hammertime > datetime.now() or dt_hammertime < (datetime.now() - timedelta(days=365 * 5)):
                 valid_time = True  # valid if it's in the future or more than 5 years ago
             else:
                 valid_time = False  # invalid if it's in the past 5 years
@@ -1265,8 +1258,10 @@ def convert_datetime_to_unix(time_str, timezone_str):
 
 
 # Function to validate "hammertime" based on different input formats.
-async def complex_validate_hamemrtime(guild_id, author_name, hammertime: Union[str, datetime]) -> Union[
-    Tuple[bool, bool, Tuple[str, str, str, str]], Tuple[bool, str]]:
+async def complex_validate_hammertime(
+        guild_id,
+        author_name,
+        hammertime: Union[str, datetime]) -> Union[Tuple[bool, bool, Tuple[str, str, str, str]], Tuple[bool, str]]:
     try:
         # If hammertime is either 10 or 16 characters long, assume it's a date or timestamp format that can be validated directly.
         if len(hammertime) == 10 or len(hammertime) == 16:
@@ -1275,7 +1270,7 @@ async def complex_validate_hamemrtime(guild_id, author_name, hammertime: Union[s
 
         # Otherwise, connect to the database to retrieve the user's UTC offset.
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
-            cursor = await db.execute()
+            cursor = await db.cursor()
             await cursor.execute(
                 "SELECT UTC_Offset FROM Player_Timecard WHERE Player_Name = ?", (author_name,)
             )
@@ -1290,7 +1285,7 @@ async def complex_validate_hamemrtime(guild_id, author_name, hammertime: Union[s
                     hammertime = hammertime[:-2].strip()  # Remove 'AM'/'PM' and strip whitespace
 
                     # Get current time in user's timezone.
-                    now = datetime.datetime.now(tz=pytz.timezone(utc_result[0]))
+                    now = datetime.now(tz=pytz.timezone(utc_result[0]))
 
                     # Depending on length, set the hour and minute, handling single and double-digit hours.
                     if len(hammertime) == 4:
@@ -1300,7 +1295,7 @@ async def complex_validate_hamemrtime(guild_id, author_name, hammertime: Union[s
 
                     # If the computed time has already passed today, set it to the same time tomorrow.
                     if now > updated_time:
-                        updated_time += datetime.timedelta(days=1)
+                        updated_time += timedelta(days=1)
 
                     # Convert to Unix timestamp and validate.
                     create_timestamp = int(updated_time.timestamp())
@@ -1308,11 +1303,11 @@ async def complex_validate_hamemrtime(guild_id, author_name, hammertime: Union[s
 
                 # If hammertime is in 24-hour format without AM/PM, handle it here.
                 elif len(hammertime) == 5:
-                    now = datetime.datetime.now(tz=pytz.timezone(utc_result[0]))
+                    now = datetime.now(tz=pytz.timezone(utc_result[0]))
                     updated_time = now.replace(hour=int(hammertime[:2]), minute=int(hammertime[3:]))
 
                     if now > updated_time:
-                        updated_time += datetime.timedelta(days=1)
+                        updated_time += timedelta(days=1)
 
                     create_timestamp = int(updated_time.timestamp())
                     hammertime_result = validate_hammertime(str(create_timestamp))
@@ -1333,6 +1328,7 @@ async def complex_validate_hamemrtime(guild_id, author_name, hammertime: Union[s
     except (ValueError, IndexError, aiosqlite.Error) as e:
         logging.exception(f"Error validating hammertime '{hammertime}': {e}")
         return False, "Invalid timestamp format. Please provide a valid timestamp."
+
 
 def validate_worldanvil_link(guild_id: int, article_id: str) -> (
         Optional)[dict]:
@@ -1355,7 +1351,7 @@ def validate_worldanvil_link(guild_id: int, article_id: str) -> (
             user_id
         )
 
-        returned_page = client.article.get(article_id)
+        returned_page = client.article.get(identifier=article_id, granularity=1)
 
         return returned_page
     except Exception as e:
@@ -1409,10 +1405,10 @@ async def put_wa_article(guild_id: int, template: str, category: str, title: str
             'title': title,
             'content': evaluated_overview,
             'category': {'id': category},
-            'templateType': template,
+            'templateType': template.lower(),
             'state': 'public',
             'isDraft': False,
-            'entityClass': entity_class,
+            'entityClass': entity_class.title(),
             'tags': author,
             'world': {'id': world_id}
         })
@@ -1471,7 +1467,7 @@ async def put_wa_report(guild_id: int, session_id: int, overview: str, author: s
             )
             world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
-                cursor = await db.execute()
+                cursor = await db.cursor()
                 await cursor.execute("Select Search from Admin where Identifier = 'WA_Session_Folder'")
                 session_folder = await cursor.fetchone()
                 if not session_folder:
@@ -1704,6 +1700,7 @@ class ShopView(discord.ui.View):
 
     async def first_page(self, interaction: discord.Interaction):
         """Handle moving to the first page."""
+        await interaction.response.defer()
         if self.offset == 1:
             await interaction.response.send_message("You are already on the first page.", ephemeral=True)
             return
@@ -1711,13 +1708,14 @@ class ShopView(discord.ui.View):
         await self.update_results()
         await self.create_embed()
         await self.update_buttons()
-        await interaction.response.edit_message(
+        await interaction.message.edit(
             embed=self.embed,
             view=self
         )
 
     async def previous_page(self, interaction: discord.Interaction):
         """Handle moving to the previous page."""
+        await interaction.response.defer()
         if self.offset > 1:
             self.offset -= self.limit
             if self.offset < 1:
@@ -1725,7 +1723,7 @@ class ShopView(discord.ui.View):
             await self.update_results()
             await self.create_embed()
             await self.update_buttons()
-            await interaction.response.edit_message(
+            await interaction.message.edit(
                 embed=self.embed,
                 view=self
             )
@@ -1734,13 +1732,14 @@ class ShopView(discord.ui.View):
 
     async def next_page(self, interaction: discord.Interaction):
         """Handle moving to the next page."""
+        await interaction.response.defer()
         max_items = await self.get_max_items()
         if self.offset + self.limit - 1 < max_items:
             self.offset += self.limit
             await self.update_results()
             await self.create_embed()
             await self.update_buttons()
-            await interaction.response.edit_message(
+            await interaction.message.edit(
                 embed=self.embed,
                 view=self
             )
@@ -1749,6 +1748,7 @@ class ShopView(discord.ui.View):
 
     async def last_page(self, interaction: discord.Interaction):
         """Handle moving to the last page."""
+        await interaction.response.defer()
         max_items = await self.get_max_items()
         last_page_offset = ((max_items - 1) // self.limit) * self.limit + 1
         if self.offset != last_page_offset:
@@ -1756,7 +1756,7 @@ class ShopView(discord.ui.View):
             await self.update_results()
             await self.create_embed()
             await self.update_buttons()
-            await interaction.response.edit_message(
+            await interaction.message.edit(
                 embed=self.embed,
                 view=self
             )
@@ -1845,7 +1845,7 @@ class RecipientAcknowledgementView(discord.ui.View):
     async def accept(self, interaction: discord.Interaction):
         """Handle the accept action."""
         await self.accepted(interaction)
-        await interaction.response.edit_message(
+        await interaction.message.edit(
             embed=self.embed,
             view=None
         )
@@ -1853,7 +1853,7 @@ class RecipientAcknowledgementView(discord.ui.View):
     async def reject(self, interaction: discord.Interaction):
         """Handle the reject action."""
         await self.rejected(interaction)
-        await interaction.response.edit_message(
+        await interaction.message.edit(
             embed=self.embed,
             view=None
         )
@@ -1892,7 +1892,7 @@ class RecipientAcknowledgementView(discord.ui.View):
                         view=self
                     )
         except (discord.HTTPException, AttributeError, aiosqlite.Error) as e:
-            logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
+            logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id}")
             await self.interaction.followup.send(
                 "An error occurred while trying to send the message. Please try again later.",
                 ephemeral=True
@@ -1957,12 +1957,11 @@ class SelfAcknowledgementView(discord.ui.View):
         """Send the initial message with the view."""
         await self.create_embed()
         try:
-            await self.interaction.followup.send(
+            self.message = await self.interaction.followup.send(
                 content=self.content,
                 embed=self.embed,
                 view=self
             )
-            self.message = self.interaction.original_response()
         except (discord.HTTPException, AttributeError) as e:
             logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
 
@@ -1979,16 +1978,18 @@ class SelfAcknowledgementView(discord.ui.View):
 
     async def accept(self, interaction: discord.Interaction):
         """Handle the accept action."""
+        await interaction.response.defer()
         await self.accepted(interaction)
-        await interaction.response.edit_message(
+        await interaction.message.edit(
             embed=self.embed,
             view=None
         )
 
     async def reject(self, interaction: discord.Interaction):
         """Handle the reject action."""
+        await interaction.response.defer()
         await self.rejected(interaction)
-        await interaction.response.edit_message(
+        await interaction.message.edit(
             embed=self.embed,
             view=None
         )
@@ -2044,43 +2045,57 @@ class DualView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Ensure that only the user who initiated the view can interact with the buttons."""
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "You cannot interact with this button.",
-                ephemeral=True
-            )
-            return False
-        return True
+        try:
+            if interaction.user.id != self.user_id:
+                await interaction.response.send_message(
+                    "You cannot interact with this button.",
+                    ephemeral=True
+                )
+                return False
+            return True
+        except Exception as e:
+            logging.error(f"Failed to check interaction: {e}")
+            raise
 
     async def first_page(self, interaction: discord.Interaction):
         """Handle moving to the first page."""
-        if self.offset == 1:
-            await interaction.response.send_message("You are already on the first page.", ephemeral=True)
-            return
-        self.offset = 1
-        await self.update_results()
-        await self.create_embed()
-        await self.update_buttons()
-        await interaction.response.edit_message(
-            embed=self.embed,
-            view=self
-        )
-
-    async def previous_page(self, interaction: discord.Interaction):
-        """Handle moving to the previous page."""
-        if self.offset > 1:
-            self.offset -= self.limit
-            if self.offset < 1:
-                self.offset = 1
+        try:
+            await interaction.response.defer()
+            if self.offset == 1:
+                await interaction.response.send_message("You are already on the first page.", ephemeral=True)
+                return
+            self.offset = 1
             await self.update_results()
             await self.create_embed()
             await self.update_buttons()
-            await interaction.response.edit_message(
+            await interaction.message.edit(
                 embed=self.embed,
                 view=self
             )
-        else:
-            await interaction.response.send_message("You are on the first page.", ephemeral=True)
+        except Exception as e:
+            logging.error(f"Failed to move to the first page: {e}")
+            raise
+
+    async def previous_page(self, interaction: discord.Interaction):
+        """Handle moving to the previous page."""
+        try:
+            await interaction.response.defer()
+            if self.offset > 1:
+                self.offset -= self.limit
+                if self.offset < 1:
+                    self.offset = 1
+                await self.update_results()
+                await self.create_embed()
+                await self.update_buttons()
+                await interaction.message.edit(
+                    embed=self.embed,
+                    view=self
+                )
+            else:
+                await interaction.followup.send("You are on the first page.", ephemeral=True)
+        except Exception as e:
+            logging.error(f"Failed to move to the previous page: {e}")
+            raise
 
     async def send_initial_message(self):
         """Send the initial message with the view."""
@@ -2088,77 +2103,105 @@ class DualView(discord.ui.View):
             await self.update_results()
             await self.create_embed()
             await self.update_buttons()
-            await self.interaction.followup.send(
+            self.message = await self.interaction.followup.send(
                 content=self.content,
                 embed=self.embed,
                 view=self
             )
-            self.message = self.interaction.original_response()
-        except (discord.HTTPException, AttributeError) as e:
+        except discord.HTTPException as e:
+            logging.error(
+                f"Failed to send message due to HTTPException: {e} in guild {self.interaction.guild.id} for {self.user_id}")
+        except Exception as e:
             logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
 
     async def on_timeout(self):
         """Disable buttons when the view times out."""
-        for child in self.children:
-            child.disabled = True
-        if self.message:
-            try:
-                await self.message.edit(content=self.content, embed=self.embed, view=self)
-            except discord.HTTPException as e:
-                logging.error(f"Failed to edit message on timeout: {e}")
+        try:
+            for child in self.children:
+                child.disabled = True
+            if self.message:
+                try:
+                    await self.message.edit(content=self.content, embed=self.embed, view=self)
+                except discord.HTTPException as e:
+                    logging.error(f"Failed to edit message on timeout: {e}")
+
+        except Exception as e:
+            logging.error(f"Failed to disable buttons: {e}")
+            raise
 
     async def change_view(self, interaction: discord.Interaction):
-        """Change the viewtype."""
-        await self.on_view_change()
-        await self.update_results()
-        await self.create_embed()
-        await self.update_buttons()
-        await interaction.response.edit_message(
-            embed=self.embed,
-            view=self
-        )
+        """Change the view type."""
+        await interaction.response.defer()
+        try:
+            await self.on_view_change()
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.message.edit(
+                embed=self.embed,
+                view=self
+            )
+        except Exception as e:
+            logging.error(f"Failed to change view: {e}")
+            raise
 
     async def next_page(self, interaction: discord.Interaction):
         """Handle moving to the next page."""
-        max_items = await self.get_max_items()
-        if self.offset + self.limit - 1 < max_items:
-            self.offset += self.limit
-            await self.update_results()
-            await self.create_embed()
-            await self.update_buttons()
-            await interaction.response.edit_message(
-                embed=self.embed,
-                view=self
-            )
-        else:
-            await interaction.response.send_message("You are on the last page.", ephemeral=True)
+        try:
+            await interaction.response.defer()
+            max_items = await self.get_max_items()
+            if self.offset + self.limit - 1 < max_items:
+                self.offset += self.limit
+                await self.update_results()
+                await self.create_embed()
+                await self.update_buttons()
+                await interaction.message.edit(
+                    embed=self.embed,
+                    view=self
+                )
+            else:
+                await interaction.response.send_message("You are on the last page.", ephemeral=True)
+        except Exception as e:
+            logging.error(f"Failed to move to the next page: {e}")
+            raise
 
     async def last_page(self, interaction: discord.Interaction):
         """Handle moving to the last page."""
-        max_items = await self.get_max_items()
-        last_page_offset = ((max_items - 1) // self.limit) * self.limit + 1
-        if self.offset != last_page_offset:
-            self.offset = last_page_offset
-            await self.update_results()
-            await self.create_embed()
-            await self.update_buttons()
-            await interaction.response.edit_message(
-                embed=self.embed,
-                view=self
-            )
-        else:
-            await interaction.response.send_message("You are on the last page.", ephemeral=True)
+        try:
+            await interaction.response.defer()
+            max_items = await self.get_max_items()
+            last_page_offset = ((max_items - 1) // self.limit) * self.limit + 1
+            if self.offset != last_page_offset:
+                self.offset = last_page_offset
+                await self.update_results()
+                await self.create_embed()
+                await self.update_buttons()
+                await interaction.message.edit(
+                    embed=self.embed,
+                    view=self
+                )
+            else:
+                await interaction.response.send_message("You are on the last page.", ephemeral=True)
+        except Exception as e:
+            logging.error(f"Failed to move to the last page: {e}")
+            raise
 
     async def update_buttons(self):
         """Update the enabled/disabled state of buttons based on the current page."""
-        max_items = await self.get_max_items()
-        first_page = self.offset == 1
-        last_page = self.offset + self.limit - 1 >= max_items
+        try:
 
-        self.first_page_button.disabled = first_page
-        self.previous_page_button.disabled = first_page
-        self.next_page_button.disabled = last_page
-        self.last_page_button.disabled = last_page
+            max_items = await self.get_max_items()
+            print("Updating buttons", self.offset, self.limit, max_items)
+            first_page = self.offset == 1
+            last_page = self.offset + self.limit - 1 >= max_items
+
+            self.first_page_button.disabled = first_page
+            self.previous_page_button.disabled = first_page
+            self.next_page_button.disabled = last_page
+            self.last_page_button.disabled = last_page
+        except Exception as e:
+            logging.error(f"Failed to update buttons: {e}")
+            raise
 
     async def on_view_change(self):
         """Change the view type."""
@@ -2177,10 +2220,8 @@ class DualView(discord.ui.View):
         raise NotImplementedError
 
 
-
-
 logging.basicConfig(
-    level=logging.ERROR,
+    level=logging.INFO,
     format='%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     filename='pathparser.log',  # Specify the log file name

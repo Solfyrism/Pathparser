@@ -1,31 +1,25 @@
 import logging
-import shutil
-import typing
-from math import floor
-from typing import List, Optional, Tuple, Union
-import discord
-import re
-import unbelievaboat
-from unidecode import unidecode
-from discord.ext import commands
-from discord import app_commands
-import datetime
 import os
-from pywaclient.api import BoromirApiClient as WaClient
+from decimal import Decimal
+from typing import Tuple, Union
 import aiosqlite
-import shared_functions
-from decimal import Decimal, ROUND_HALF_UP
-from shared_functions import name_fix
+import discord
+from discord import app_commands
+from discord.ext import commands
+from unidecode import unidecode
 import commands.character_commands as character_commands
+import shared_functions
+from shared_functions import name_fix
 
 # *** GLOBAL VARIABLES *** #
 os.chdir("C:\\pathparser")
 
 
-async def register_character_embed(character_name: str, guild: discord.Guild) -> Union[
-    Tuple[discord.Embed, str, int, int], str]:
+async def register_character_embed(
+        character_name: str,
+        guild: discord.Guild) -> Union[Tuple[discord.Embed, str, int, int], str]:
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild.id}_test..sqlite") as conn:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}_test.sqlite") as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
 
@@ -76,7 +70,6 @@ async def register_character_embed(character_name: str, guild: discord.Guild) ->
         template_name = character_info['Template_Name']
         template_link = character_info['Template_Link']
         article_link = character_info['Article_Link']
-        message_id = character_info['Message_ID']
 
         # Convert color to integer
         try:
@@ -188,55 +181,58 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
         parent=reviewer_group
     )
 
-    @registration_group.command()
-    @app_commands.describe(player_wipe="if yes, remove all inactive players!")
+    @registration_group.command(name='wipe', description="Clean out database entries older than a certain age!")
+    @app_commands.describe(remove="if yes, remove all inactive players!")
     @app_commands.choices(
         remove=[discord.app_commands.Choice(name='No!', value=1),
                 discord.app_commands.Choice(name='Yes!', value=2)])
     async def wipe(self, interaction: discord.Interaction, cleanse: str, remove: discord.app_commands.Choice[int]):
-        "Clean out the entire stging base or clean out a specific player's character by mentioning them or using their role!"
-        await interaction.followup.defer(thinking=True)
+        """Clean out database entries older than a certain age!"""
+        await interaction.response.defer(thinking=True)
         try:
-            if cleanse.endswith('D'):
-                cleanse = cleanse.replace('D', '')
-                cleanse_in_days = int(cleanse)
-            elif cleanse.endswith('W'):
-                cleanse = cleanse.replace('W', '')
-                cleanse_in_days = int(cleanse) * 7
+            if remove.value == 1:
+                if cleanse.endswith('D'):
+                    cleanse = cleanse.replace('D', '')
+                    cleanse_in_days = int(cleanse)
+                elif cleanse.endswith('W'):
+                    cleanse = cleanse.replace('W', '')
+                    cleanse_in_days = int(cleanse) * 7
+                else:
+                    cleanse_in_days = int(cleanse)
+                guild_id = interaction.guild_id
+                # Create and send the view with the results
+                view = CleanOldRegistrationView(
+                    days=cleanse_in_days,
+                    guild_id=guild_id,
+                    interaction=interaction
+                )
+                await view.create_embed()
+                await interaction.followup.send(embed=view.embed, view=view)
             else:
-                cleanse_in_days = int(cleanse)
-            guild_id = interaction.guild_id
-            # Create and send the view with the results
-            view = CleanOldRegistrationView(
-                days=cleanse_in_days,
-                guild_id=guild_id,
-            )
-            await view.create_embed()
-            await interaction.followup.send(embed=view.embed, view=view)
-
-
+                await interaction.followup.send("No action taken.", ephemeral=True)
         except (AttributeError, TypeError) as e:
             logging.exception(f"Error in cleanse. {cleanse} was not valid. {e}")
             await interaction.followup.send(f"Error in cleanse. {cleanse} was not valid.", ephemeral=True)
 
-    @registration_group.command()
+    @registration_group.command(name='manage', description="Accept or reject a player's character.")
     @app_commands.autocomplete(character_name=shared_functions.stg_character_select_autocompletion)
     @app_commands.describe(status="Accepted players are moved into active and posted underneath!")
     @app_commands.choices(status=[discord.app_commands.Choice(name='Accepted!', value=1),
                                   discord.app_commands.Choice(name='Rejected!', value=2)])
     async def manage(self, interaction: discord.Interaction, character_name: str,
                      status: discord.app_commands.Choice[int]):
-        "accept a player into your accepted bios, or Remove them."
+        """accept a player into your accepted bios, or Remove them."""
         guild = interaction.guild
         guild_id = interaction.guild_id
-        async with aiosqlite.connect(f"C:/pathparser/pathparser_{guild_id}_test..sqlite") as db:
+        await interaction.response.defer(thinking=True)
+        async with aiosqlite.connect(f"C:/pathparser/pathparser_{guild_id}_test.sqlite") as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.cursor()
             _, character_name = name_fix(character_name)
             await cursor.execute(
                 """Select Player_Name, Player_ID, True_Character_Name, Character_Name, Nickname, Titles, Description, 
                 Oath, Tier, Trials, Trials_Required,
-                 Essence, Color, Mythweavers, Image_Link, tmp_bio
+                 Color, Mythweavers, Image_Link, Backstory
                  FROM A_STG_Player_Characters where Character_Name = ?""",
                 (character_name,))
             player_info = await cursor.fetchone()
@@ -263,11 +259,10 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                     info_tier = player_info['tier']
                     info_trials = player_info['trials']
                     info_trials_required = player_info['trials_required']
-                    info_essence = player_info['essence']
                     info_color = player_info['color']
                     info_mythweavers = player_info['mythweavers']
                     info_image_link = player_info['image_link']
-                    info_tmp_bio = player_info['tmp_bio']
+                    info_tmp_bio = player_info['Backstory']
                     await cursor.execute("Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
                     character_log_channel_id = await cursor.fetchone()
                     await cursor.execute("SELECT search from admin where identifier = 'WA_Backstory_Category'")
@@ -284,7 +279,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                             ephemeral=True)
                     else:
                         (info_minimum_milestones, info_milestones_to_level, info_wpl) = starting_level_info
-                        gold_calculation = character_commands.gold_calculation(
+                        gold_calculation = await character_commands.gold_calculation(
                             guild_id=guild_id,
                             level=starting_level[0],
                             author_name=interaction.user.name,
@@ -305,12 +300,15 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                     await cursor.execute(
                         """INSERT INTO Player_Characters (Player_Name, Player_ID, True_Character_Name, Character_Name, 
                         Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, 
-                        Gold, Gold_Value, Gold_value_Max, Essence, Color, Mythweavers, Image_Link, Fame) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        Gold, Gold_Value, Gold_value_Max, Essence, Color, Mythweavers, Image_Link, Fame, Prestige) VALUES (
+                        ?,?,?,?,
+                        ?,?,?,?,?,?,?,?,?,?,
+                        ?,?,?,?,?,?,?,?, ?)""",
                         (info_player_name, info_player_id, info_true_character_name, info_character_name,
                          info_nickname, info_titles, info_description, info_oath, starting_level[0], info_tier,
                          info_minimum_milestones, info_milestones_to_level, info_trials, info_trials_required,
-                         gold_total, gold_value_total, gold_value_max_total, info_essence, info_color, info_mythweavers,
-                         info_image_link, 0))
+                         str(gold_total), str(gold_value_total), str(gold_value_max_total), 0, info_color, info_mythweavers,
+                         info_image_link, 0, 0))
                     await db.commit()
                     await cursor.execute("DELETE FROM A_STG_Player_Characters WHERE Character_Name = ?",
                                          (character_name,))
@@ -321,7 +319,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                                           description=f"Other Names: {info_titles}", color=int(info_color[1:], 16))
                     embed.set_author(name=f'{info_player_name}')
                     embed.set_thumbnail(url=f'{info_image_link}')
-                    character_log_channel = await interaction.guild.get_channel(character_log_channel_id[0])
+                    character_log_channel = interaction.guild.get_channel(character_log_channel_id[0])
                     if not character_log_channel:
                         character_log_channel = await self.bot.fetch_channel(character_log_channel_id[0])
                     character_log_message = await character_log_channel.send(content=f'<@{info_player_id}>',
@@ -329,14 +327,21 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                                                                              allowed_mentions=discord.AllowedMentions(
                                                                                  users=True))
                     thread = await character_log_message.create_thread(name=f'{info_true_character_name}')
-                    article = await shared_functions.put_wa_article(guild_id=interaction.guild.id, template='Person',
-                                                                    title=info_true_character_name,
-                                                                    category=backstory_category[0],
-                                                                    overview=info_tmp_bio)
+                    if info_tmp_bio:
+                        article = await shared_functions.put_wa_article(guild_id=interaction.guild.id, template='Person',
+                                                                        title=info_true_character_name,
+                                                                        category=backstory_category[0],
+                                                                        overview=info_tmp_bio,
+                                                                        author=info_player_name)
+                        article_url = article['url']
+                        article_id = article['id']
+                    else:
+                        article_url = None
+                        article_id = None
                     await cursor.execute(
-                        "UPDATE Player_Characters SET Article_Link = ?, Article_ID = ?, Message_ID = ?, Logging_ID, Thread_ID = ? WHERE Character_Name = ?",
+                        "UPDATE Player_Characters SET Article_Link = ?, Article_ID = ?, Message_ID = ?, Logging_ID = ?, Thread_ID = ? WHERE Character_Name = ?",
                         (
-                            article['url'], article['id'], character_embed_info[3], character_log_message.id, thread.id,
+                            article_url, article_id, character_embed_info[3], character_log_message.id, thread.id,
                             info_character_name))
                     await db.commit()
                     await interaction.followup.send(f"{character_name} has been moved to the accepted bios.",
@@ -344,32 +349,29 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
 
     customize_group = discord.app_commands.Group(
         name='customize',
-        description='Commands related to costumizing a character.',
+        description='Commands related to customizing a character.',
         parent=reviewer_group
     )
 
-    customize_group.command()
-
+    @customize_group.command(name='tradition', description="Set a character's tradition.")
     @app_commands.autocomplete(character_name=shared_functions.character_select_autocompletion)
-    @app_commands.describe(
-        destination="Shorthand for determining whether you are looking for a character name or nickname")
-    @app_commands.describe(customized_name="For the name of the template or tradition")
     async def apply_tradition(self, interaction: discord.Interaction, character_name: str,
                               tradition_name: str, link: str, essence_cost: int):
-        "Administrative: set a character's tradition!"
+        """Administrative: set a character's tradition!"""
         character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
         guild_id = interaction.guild_id
         guild = interaction.guild
         shared_functions.extract_document_id(link)
+        await interaction.response.defer(thinking=True)
         if not shared_functions:
             await interaction.followup.send("Invalid link provided!", ephemeral=True)
             return
 
-        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
             cursor = await db.cursor()
             author = interaction.user.name
             await cursor.execute(
-                "Select Character_Name, Essence, Thread_ID, FROM Player_Characters where Character_Name = ?",
+                "Select Character_Name, Essence, Thread_ID FROM Player_Characters where Character_Name = ?",
                 (character_name,))
             player_info = await cursor.fetchone()
 
@@ -387,22 +389,20 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                 )  # Calculate the new essence
                 if isinstance(essence_calculation, tuple):
                     (essence_total, essence_change) = essence_calculation
-                    character_updates = shared_functions.UpdateCharacterData(
-                        character_name=character_name,
-                        essence=essence_total)
                     await cursor.execute(
-                        "UPDATE Player_Characters SET Essence = ?, Tradition_Name, Tradition_Link WHERE Character_Name = ?",
+                        "UPDATE Player_Characters SET Essence = ?, Tradition_Name = ?, Tradition_Link = ? WHERE Character_Name = ?",
                         (essence_total, tradition_name, link, character_name))
                     await db.commit()
                     log_character = shared_functions.CharacterChange(
                         character_name=character_name,
                         author=author,
+                        essence=essence_total,
                         essence_change=essence_change,
                         tradition_name=tradition_name,
                         tradition_link=link,
                         source="Apply Tradition"
                     )
-                    log_embed = shared_functions.log_embed(
+                    log_embed = await shared_functions.log_embed(
                         change=log_character,
                         guild=guild,
                         thread=logging_thread,
@@ -414,26 +414,25 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                     await interaction.followup.send(essence_calculation, ephemeral=True)
                     return
 
+    @customize_group.command(name='template', description="Set a character's template.")
     @app_commands.autocomplete(character_name=shared_functions.character_select_autocompletion)
-    @app_commands.describe(
-        destination="Shorthand for determining whether you are looking for a character name or nickname")
-    @app_commands.describe(customized_name="For the name of the template or tradition")
     async def apply_template(self, interaction: discord.Interaction, character_name: str,
                              template_name: str, link: str, essence_cost: int):
-        "Administrative: set a character's tradition!"
+        """Administrative: set a character's tradition!"""
         character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
         guild_id = interaction.guild_id
         guild = interaction.guild
         shared_functions.extract_document_id(link)
+        await interaction.response.defer(thinking=True)
         if not shared_functions:
             await interaction.followup.send("Invalid link provided!", ephemeral=True)
             return
 
-        async with aiosqlite.connect(f"Pathparser_{guild_id}_test..sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
             cursor = await db.cursor()
             author = interaction.user.name
             await cursor.execute(
-                "Select Character_Name, Essence, Thread_ID, FROM Player_Characters where Character_Name = ?",
+                "Select Character_Name, Essence, Thread_ID FROM Player_Characters where Character_Name = ?",
                 (character_name,))
             player_info = await cursor.fetchone()
 
@@ -451,22 +450,20 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                 )  # Calculate the new essence
                 if isinstance(essence_calculation, tuple):
                     (essence_total, essence_change) = essence_calculation
-                    character_updates = shared_functions.UpdateCharacterData(
-                        character_name=character_name,
-                        essence=essence_total)
                     await cursor.execute(
-                        "UPDATE Player_Characters SET Essence = ?, template_name, template_Link WHERE Character_Name = ?",
+                        "UPDATE Player_Characters SET Essence = ?, template_name = ?, template_Link = ? WHERE Character_Name = ?",
                         (essence_total, template_name, link, character_name))
                     await db.commit()
                     log_character = shared_functions.CharacterChange(
                         character_name=character_name,
                         author=author,
+                        essence=essence_total,
                         essence_change=essence_change,
                         template_name=template_name,
                         template_link=link,
                         source="Apply Tradition"
                     )
-                    log_embed = shared_functions.log_embed(
+                    log_embed = await shared_functions.log_embed(
                         change=log_character,
                         guild=guild,
                         thread=logging_thread,
@@ -480,22 +477,22 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
 
 
 class CleanOldRegistrationView(shared_functions.SelfAcknowledgementView):
-    def __init__(self, guild_id: int, days: int):
-        super().__init__()
+    def __init__(self, guild_id: int, days: int, interaction: discord.Interaction):
+        super().__init__(content="", interaction=self.interaction)
+        self.interaction = interaction
         self.embed = None
         self.guild_id = guild_id
         self.days = days
         self.remove_character = []
 
     async def accepted(self, interaction: discord.Interaction):
-        "Handle the approval logic."
-
+        """Handle the approval logic."""
         self.embed = discord.Embed(
             title="Cleanse of dated characters Successful",
             description=f"{interaction.user.name} has cleaned house.",
             color=discord.Color.green()
         )
-        async with aiosqlite.connect(f"C:/pathparser/pathparser_{self.guild_id}_test..sqlite") as db:
+        async with aiosqlite.connect(f"C:/pathparser/pathparser_{self.guild_id}_test.sqlite") as db:
             cursor = await db.cursor()
             for player in self.remove_character:
                 await cursor.execute("DELETE FROM A_STG_Player_Characters WHERE True_Character_Name = ?", (player,))
@@ -504,9 +501,8 @@ class CleanOldRegistrationView(shared_functions.SelfAcknowledgementView):
         # Additional logic such as notifying the requester
 
     async def rejected(self, interaction: discord.Interaction):
-        "Handle the rejection logic."
+        """Handle the rejection logic."""
         # Update the database to mark the proposition as rejected
-        await self.update_proposition_status(is_allowed=-1)
         self.embed = discord.Embed(
             title="Database Reset Rejected",
             description=f"{interaction.user.name} has decided to keep me around. :)",
@@ -515,8 +511,8 @@ class CleanOldRegistrationView(shared_functions.SelfAcknowledgementView):
         # Additional logic such as notifying the requester
 
     async def create_embed(self):
-        "Create the initial embed for the cleanse."
-        async with aiosqlite.connect(f"C:/pathparser/pathparser_{self.guild_id}_test..sqlite") as db:
+        """Create the initial embed for the cleanse."""
+        async with aiosqlite.connect(f"C:/pathparser/pathparser_{self.guild_id}_test.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
                 "SELECT Player_Name, True_Character_Name, Created_Date FROM A_STG_Player_Characters where Created_Date <= date('now', '-? days')",
