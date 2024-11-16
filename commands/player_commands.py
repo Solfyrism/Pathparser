@@ -40,13 +40,13 @@ regions = {
     'Australia', 'Europe', 'Indian', 'Pacific', 'Etc'
 }
 
-
 africa_regions = {
     'Northern Africa': ['Algeria', 'Egypt', 'Libya', 'Morocco', 'Sudan', 'Tunisia', 'Western Sahara'],
     'Western Africa': ['Benin', 'Burkina Faso', 'Cabo Verde', 'Côte d\'Ivoire', 'Gambia', 'Ghana', 'Guinea',
                        'Guinea-Bissau', 'Liberia', 'Mali', 'Mauritania', 'Niger', 'Nigeria', 'Senegal', 'Sierra Leone',
                        'Togo'],
-    'Central Africa': ['Angola', 'Cameroon', 'Central African Republic', 'Chad', 'Congo', 'Democratic Republic of the Congo',
+    'Central Africa': ['Angola', 'Cameroon', 'Central African Republic', 'Chad', 'Congo',
+                       'Democratic Republic of the Congo',
                        'Equatorial Guinea', 'Gabon', 'São Tomé and Príncipe'],
     'Eastern Africa': ['Burundi', 'Comoros', 'Djibouti', 'Eritrea', 'Ethiopia', 'Kenya', 'Madagascar', 'Malawi',
                        'Mauritius', 'Mozambique', 'Rwanda', 'Seychelles', 'Somalia', 'South Sudan', 'Tanzania',
@@ -56,9 +56,11 @@ africa_regions = {
 
 asia_regions = {
     'Western Asia': ['Armenia', 'Azerbaijan', 'Bahrain', 'Cyprus', 'Georgia', 'Iraq', 'Israel', 'Jordan', 'Kuwait',
-                     'Lebanon', 'Oman', 'Qatar', 'Saudi Arabia', 'State of Palestine', 'Syria', 'Turkey', 'United Arab Emirates', 'Yemen'],
+                     'Lebanon', 'Oman', 'Qatar', 'Saudi Arabia', 'State of Palestine', 'Syria', 'Turkey',
+                     'United Arab Emirates', 'Yemen'],
     'Central Asia': ['Kazakhstan', 'Kyrgyzstan', 'Tajikistan', 'Turkmenistan', 'Uzbekistan'],
-    'South Asia': ['Afghanistan', 'Bangladesh', 'Bhutan', 'India', 'Iran', 'Maldives', 'Nepal', 'Pakistan', 'Sri Lanka'],
+    'South Asia': ['Afghanistan', 'Bangladesh', 'Bhutan', 'India', 'Iran', 'Maldives', 'Nepal', 'Pakistan',
+                   'Sri Lanka'],
     'East Asia': ['China', 'Japan', 'Mongolia', 'North Korea', 'South Korea', 'Taiwan'],
     'Southeast Asia': ['Brunei', 'Cambodia', 'Indonesia', 'Laos', 'Malaysia', 'Myanmar', 'Philippines', 'Singapore',
                        'Thailand', 'Timor-Leste', 'Vietnam'],
@@ -109,7 +111,6 @@ def parse_time_input(time_str: str) -> Optional[datetime.time]:
 # Build mapping from continents to country codes and names
 continent_to_countries = {}
 
-
 for country in pycountry.countries:
     country_code = country.alpha_2
     country_name = country.name
@@ -130,6 +131,7 @@ for country in pycountry.countries:
 
 class ContinentSelect(discord.ui.Select):
     def __init__(self):
+        # Use the exact continent names from your mappings
         options = [discord.SelectOption(label=continent) for continent in continent_to_countries.keys()]
         super().__init__(
             placeholder="Select your continent...",
@@ -151,6 +153,8 @@ class ContinentSelect(discord.ui.Select):
                 "An error occurred while selecting your continent.", ephemeral=True
             )
             self.view.stop()
+
+
 class RegionSelect(discord.ui.Select):
     def __init__(self, continent: str, regions: typing.Dict[str, List[str]]):
         self.continent = continent
@@ -210,6 +214,7 @@ class CountrySelect(discord.ui.Select):
                 "An error occurred while selecting your country.", ephemeral=True
             )
             self.view.stop()
+
 
 class TimezoneSelect(discord.ui.Select):
     def __init__(self, options: List[discord.SelectOption]):
@@ -362,13 +367,13 @@ class AvailabilityView(discord.ui.View):
         try:
             self.clear_items()
             continent_name = self.continent
-            # Check if continent requires region selection
+            logging.info(f"Continent: {continent_name}")
+            logging.info(f"Region: {self.region}")
+
             if continent_name in continent_regions:
-                # Get countries from the selected region
                 regions = continent_regions[continent_name]
                 countries = regions.get(self.region, [])
             else:
-                # Get all countries in the continent
                 countries = [country['name'] for country in continent_to_countries[continent_name]]
 
             if not countries:
@@ -382,10 +387,19 @@ class AvailabilityView(discord.ui.View):
             countries_sorted = sorted(countries)
             # Create options for the select menu
             options = [
-                discord.SelectOption(label=country) for country in countries_sorted[:25]
+                discord.SelectOption(label=country) for country in countries_sorted[:24]
             ]
-            if len(countries_sorted) > 25:
+
+            if not options:
+                await interaction.response.send_message(
+                    "No country options available.", ephemeral=True
+                )
+                self.stop()
+                return
+
+            if len(countries_sorted) > 24:
                 options.append(discord.SelectOption(label='Other...', value='other'))
+
             self.add_item(CountrySelect(options=options))
             await interaction.response.edit_message(content="Select your country:", view=self)
         except Exception as e:
@@ -463,7 +477,6 @@ class AvailabilityView(discord.ui.View):
             )
             return False
         return True
-
 
     async def update_day_select(self, interaction: discord.Interaction):
         try:
