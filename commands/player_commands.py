@@ -76,14 +76,19 @@ class ContinentSelect(discord.ui.Select):
             discord.SelectOption(label='Pacific'),
             discord.SelectOption(label='Etc'),
         ]
-        super().__init__(placeholder="Select your region...", options=options)
+        super().__init__(
+            placeholder="Select your region...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
 
     async def callback(self, interaction: discord.Interaction):
         try:
             self.view.region = self.values[0]
             await self.view.update_timezone_select(interaction)
         except Exception as e:
-            logging.exception(f"Error in ContinentSelect callback: {e}")
+            logging.exception("Error in ContinentSelect callback")
             await interaction.response.send_message(
                 "An error occurred while selecting your region.", ephemeral=True
             )
@@ -92,7 +97,12 @@ class ContinentSelect(discord.ui.Select):
 
 class TimezoneSelect(discord.ui.Select):
     def __init__(self, options: List[discord.SelectOption]):
-        super().__init__(placeholder="Select your timezone...", options=options)
+        super().__init__(
+            placeholder="Select your timezone...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
 
     async def callback(self, interaction: discord.Interaction):
         try:
@@ -109,7 +119,7 @@ class TimezoneSelect(discord.ui.Select):
             self.view.timezone = selected_timezone
             await self.view.update_day_select(interaction)
         except Exception as e:
-            logging.exception(f"Error in TimezoneSelect callback: {e}")
+            logging.exception("Error in TimezoneSelect callback")
             await interaction.response.send_message(
                 "An error occurred while selecting your timezone.", ephemeral=True
             )
@@ -127,14 +137,19 @@ class DaySelect(discord.ui.Select):
             discord.SelectOption(label='Saturday', value='Saturday'),
             discord.SelectOption(label='Sunday', value='Sunday'),
         ]
-        super().__init__(placeholder='Select a day...', options=options)
+        super().__init__(
+            placeholder='Select a day...',
+            min_values=1,
+            max_values=1,
+            options=options
+        )
 
     async def callback(self, interaction: discord.Interaction):
         try:
             self.view.day = self.values[0]
             await self.view.update_time_select(interaction, time_type="start")
         except Exception as e:
-            logging.exception(f"Error in DaySelect callback: {e}")
+            logging.exception("Error in DaySelect callback")
             await interaction.response.send_message(
                 "An error occurred while selecting the day.", ephemeral=True
             )
@@ -149,7 +164,12 @@ class TimeSelect(discord.ui.Select):
                   ] + [
                       discord.SelectOption(label=f"{hour:02d}:30", value=f"{hour:02d}:30") for hour in range(0, 24)
                   ]
-        super().__init__(placeholder=label, options=options)
+        super().__init__(
+            placeholder=label,
+            min_values=1,
+            max_values=1,
+            options=options
+        )
 
     async def callback(self, interaction: discord.Interaction):
         try:
@@ -161,7 +181,7 @@ class TimeSelect(discord.ui.Select):
                 self.view.end_time = selected_time
                 await self.view.process_availability(interaction)
         except Exception as e:
-            logging.exception(f"Error in TimeSelect callback: {e}")
+            logging.exception("Error in TimeSelect callback")
             await interaction.response.send_message(
                 "An error occurred while selecting the time.", ephemeral=True
             )
@@ -171,7 +191,7 @@ class TimeSelect(discord.ui.Select):
 # Custom Buttons for Adding Multiple Time Slots
 class AddAnotherSlotButton(discord.ui.Button):
     def __init__(self):
-        super().__init__(label="Add Another Time Slot")
+        super().__init__(label="Add Another Time Slot", style=discord.ButtonStyle.secondary)
 
     async def callback(self, interaction: discord.Interaction):
         try:
@@ -182,7 +202,7 @@ class AddAnotherSlotButton(discord.ui.Button):
             await interaction.response.edit_message(content="Select the day of the week for the new time slot:",
                                                     view=self.view)
         except Exception as e:
-            logging.exception(f"Error in AddAnotherSlotButton callback: {e}")
+            logging.exception("Error in AddAnotherSlotButton callback")
             await interaction.response.send_message(
                 "An error occurred while adding another time slot.", ephemeral=True
             )
@@ -197,7 +217,7 @@ class FinishButton(discord.ui.Button):
         try:
             await self.view.process_all_availability(interaction)
         except Exception as e:
-            logging.exception(f"Error in FinishButton callback: {e}")
+            logging.exception("Error in FinishButton callback")
             await interaction.response.send_message(
                 "An error occurred while finalizing your availability.", ephemeral=True
             )
@@ -257,7 +277,7 @@ class AvailabilityView(discord.ui.View):
             self.add_item(TimezoneSelect(options=options))
             await interaction.response.edit_message(content="Select your timezone:", view=self)
         except Exception as e:
-            logging.exception(f"Error in update_timezone_select {e}")
+            logging.exception("Error in update_timezone_select")
             await interaction.response.send_message(
                 "An error occurred while updating timezone selection.", ephemeral=True
             )
@@ -271,7 +291,7 @@ class AvailabilityView(discord.ui.View):
             self.add_item(DaySelect())
             await interaction.response.edit_message(content="Select the day of the week:", view=self)
         except Exception as e:
-            logging.exception(f"Error in update_day_select {e}")
+            logging.exception("Error in update_day_select")
             await interaction.response.send_message(
                 "An error occurred while updating day selection.", ephemeral=True
             )
@@ -291,7 +311,7 @@ class AvailabilityView(discord.ui.View):
                 self.add_item(FinishButton())
                 await interaction.response.edit_message(content="Select your end time:", view=self)
         except Exception as e:
-            logging.exception(f"Error in update_time_select: {e}")
+            logging.exception("Error in update_time_select")
             await interaction.response.send_message(
                 "An error occurred while updating time selection.", ephemeral=True
             )
@@ -334,11 +354,10 @@ class AvailabilityView(discord.ui.View):
             # Create datetime objects with timezone
             try:
                 tzinfo = ZoneInfo(self.timezone)
-            except Exception as e:
+            except Exception:
                 await interaction.response.send_message(
                     "Invalid timezone selected.", ephemeral=True
                 )
-                logging.info(f"Invalid timezone {self.timezone}: {e}")
                 return
 
             start_datetime = datetime.datetime.combine(next_date, start_time_parsed, tzinfo=tzinfo)
@@ -381,7 +400,7 @@ class AvailabilityView(discord.ui.View):
                 view=self
             )
         except Exception as e:
-            logging.exception(f"Error in process_availability: {e}")
+            logging.exception("Error in process_availability")
             await interaction.response.send_message(
                 "An unexpected error occurred while processing your availability.", ephemeral=True
             )
@@ -395,7 +414,7 @@ class AvailabilityView(discord.ui.View):
                 )
                 return
 
-            async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
                 for slot in self.time_slots:
                     user_name = interaction.user.name
                     day_value = {
@@ -419,8 +438,7 @@ class AvailabilityView(discord.ui.View):
                     # Create datetime objects with timezone
                     try:
                         tzinfo = ZoneInfo(slot['timezone'])
-                    except Exception as e:
-                        logging.info(f"Invalid timezone {slot['timezone']} for {slot['day']}. Skipping: {e}.")
+                    except Exception:
                         await interaction.response.send_message(
                             f"Invalid timezone {slot['timezone']} for {slot['day']}. Skipping.", ephemeral=True
                         )
@@ -469,7 +487,7 @@ class AvailabilityView(discord.ui.View):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             self.stop()
         except Exception as e:
-            logging.exception(f"Error in process_all_availability: {e}")
+            logging.exception("Error in process_all_availability")
             await interaction.response.send_message(
                 "An unexpected error occurred while finalizing your availability.", ephemeral=True
             )
@@ -1168,6 +1186,18 @@ class PlayerCommands(commands.Cog, name='Player'):
                                 description=description
                             )
                             await view.send_initial_message()
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred whilst displaying session information: {e}")
+            await interaction.followup.send(
+                "An error occurred whilst displaying session information. Please try again later.")
+
+
+    @timesheet_group.command(name="set", description="Set your availability for a day of the week")
+    async def timesheet_creation(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)
+        try:
+            view = AvailabilityView()
+            await interaction.followup.send(content="This is a test", view=view)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"An error occurred whilst displaying session information: {e}")
             await interaction.followup.send(

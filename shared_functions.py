@@ -174,55 +174,79 @@ async def invalidate_worldanvil_user_cache(user_id: int):
 
 @dataclass
 class AutocompleteWorldAnvilCache:
-    cache: Dict[Tuple[int, str], List[Tuple[str, dict]]] = field(default_factory=dict)
+    cache: Dict[int, Tuple[List[Tuple[str, dict]], float]] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-
 autocomplete_worldanvil_cache = AutocompleteWorldAnvilCache()
-
+CACHE_EXPIRATION = 600  # 10 minutes
 
 async def get_plots_autocompletion(
         interaction: discord.Interaction,
-        current: str) -> typing.List[app_commands.Choice[str]]:
-    """This is a test command for the wa command."""
+        current: str) -> List[app_commands.Choice[str]]:
+    """Provide autocomplete suggestions for plots."""
     data = []
-    user_id = interaction.user.id
     guild_id = interaction.guild_id
-    _, current_fixed = name_fix(current)
-    current_prefix = current_fixed.lower()
-    cache_key = (user_id, current_prefix)
+    cache_key = guild_id
+    current_lower = current.lower()
+
     async with autocomplete_worldanvil_cache.lock:
-        cached_result = autocomplete_worldanvil_cache.cache.get(cache_key)
+        cached_entry = autocomplete_worldanvil_cache.cache.get(cache_key)
+        if cached_entry:
+            plot_list, timestamp = cached_entry
+            if time.time() - timestamp < CACHE_EXPIRATION:
+                # Cache is valid
+                pass
+            else:
+                # Cache expired
+                plot_list = None
+        else:
+            plot_list = None
 
-    if cached_result is not None:
-        plot_list = cached_result
-    else:
-        client = WaClient(
-            'Pathparser',
-            'https://github.com/Solfyrism/Pathparser',
-            'V1.1',
-            os.getenv('WORLD_ANVIL_API'),
-            os.getenv(f'WORLD_ANVIL_{interaction.guild.id}')
-        )
-        async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
-            cursor = await db.cursor()
-            await cursor.execute("SELECT Search from admin where Identifier = 'WA_World_ID'")
-            wa_world_id = await cursor.fetchone()
-            await cursor.execute("SELECT Search from admin where Identifier = 'WA_Plot_Folder'")
-            wa_plot_folder = await cursor.fetchone()
-            plot_list = [article for article in client.world.articles(
+    if plot_list is None:
+        # Fetch data from World Anvil API
+        try:
+            client = WaClient(
+                'Pathparser',
+                'https://github.com/Solfyrism/Pathparser',
+                'V1.1',
+                os.getenv('WORLD_ANVIL_API'),
+                os.getenv(f'WORLD_ANVIL_{guild_id}')
+            )
+            async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+                cursor = await db.execute("SELECT Search FROM admin WHERE Identifier = 'WA_World_ID'")
+                wa_world_id = await cursor.fetchone()
+                cursor = await db.execute("SELECT Search FROM admin WHERE Identifier = 'WA_Plot_Folder'")
+                wa_plot_folder = await cursor.fetchone()
+
+            # Ensure that the client methods are asynchronous or use an executor
+            loop = asyncio.get_event_loop()
+            plot_list = await loop.run_in_executor(
+                None,
+                client.world.articles,
                 wa_world_id[0],
-                wa_plot_folder[0])]
+                wa_plot_folder[0]
+            )
 
-            # cache the result
+            # Cache the result with a timestamp
             async with autocomplete_worldanvil_cache.lock:
-                autocomplete_worldanvil_cache.cache[cache_key] = plot_list
+                autocomplete_worldanvil_cache.cache[cache_key] = (plot_list, time.time())
+        except Exception as e:
+            logging.error(f"Error fetching articles from World Anvil: {e}")
+            return []
 
+    # Filter the plots based on the current input
     for plot in plot_list:
-        test = plot[1]
-        if current in test['title']:
-            data.append(app_commands.Choice(name=test['title'], value=f"1-{test['id']}"))
-    data.append(app_commands.Choice(name=f"NEW: {str.title(current)}", value=f"2-{str.title(current)}"))
+        plot_title = plot[1]['title']
+        if current_lower in plot_title.lower():
+            data.append(app_commands.Choice(name=plot_title, value=f"2-{plot[1]['id']}"))
+
+    # If the current input doesn't match any existing plots, offer to create a new one
+    if len(data) < 25:
+        data.append(app_commands.Choice(name=f"NEW: {current.title()}", value=f"1-{current.title()}"))
+
+    # Limit the number of choices to Discord's maximum
+    data = data[:25]
+
     return data
 
 
