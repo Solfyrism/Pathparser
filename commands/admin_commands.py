@@ -317,10 +317,10 @@ class AdminCommands(commands.Cog, name='admin'):
                         character_changes = shared_functions.CharacterChange(
                             character_name=character_name,
                             author=interaction.user.name,
-                            fame=fame_change,
-                            total_fame=fame,
-                            prestige=prestige_change,
-                            total_prestige=prestige,
+                            fame=fame,
+                            fame_change=fame_change,
+                            prestige=prestige,
+                            prestige_change=prestige_change,
                             source=f"admin adjusted fame by {fame_change} and prestige by {prestige_change} for {character_name}")
                         character_log = await shared_functions.log_embed(change=character_changes, guild=guild,
                                                                          thread=info_thread_id, bot=self.bot)

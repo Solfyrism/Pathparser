@@ -34,7 +34,7 @@ async def reinstate_reminders(server_bot) -> None:
             async with aiosqlite.connect(f"pathparser_{guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
-                    "SELECT Session_ID, Thread_ID, Hammer_Time FROM Sessions WHERE IsActive = 1 AND Hammer_Time > ?",
+                    "SELECT Session_ID, Session_Thread, Hammer_Time FROM Sessions WHERE IsActive = 1 AND Hammer_Time > ?",
                     (now.timestamp(),)
                 )
                 reminders = await cursor.fetchall()
@@ -47,7 +47,8 @@ async def reinstate_reminders(server_bot) -> None:
                         guild_id=guild.id,
                         remind_users=remind_users,
                         scheduler=scheduler,
-                        scheduled_jobs=scheduled_jobs
+                        scheduled_jobs=scheduled_jobs,
+                        bot=server_bot
                     )
         except aiosqlite.Error as e:
             logging.exception(f"Failed to reinstate reminders for guild {guild.id} with error: {e}")
@@ -58,27 +59,33 @@ async def reinstate_session_buttons(server_bot) -> None:
     now = datetime.datetime.now(datetime.timezone.utc)
     for guild in guilds:
         try:
-            async with aiosqlite.connect(f"pathparser_{guild.id}.sqlite") as db:
+            async with aiosqlite.connect(f"pathparser_{guild.id}_Test.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
-                    "SELECT Session_ID, Session_Name, Message, Channel_ID, hammer_time FROM Sessions WHERE IsActive = 1 AND hammer_time > ?",
+                    "SELECT Session_ID, Session_Name, Message, Session_Thread, Hammer_Time FROM Sessions WHERE IsActive = 1 AND hammer_time > ?",
                     (now.timestamp(),)
                 )
                 sessions = await cursor.fetchall()
+                await cursor.execute("SELECT Search From Admin Where Identifier = 'Sessions_Channel'")
+                channel_id = await cursor.fetchone()
+                print(channel_id)
+                channel = server_bot.get_channel(channel_id[0])
+                if not channel:
+                    channel = await guild.fetch_channel(channel_id[0])
+
                 for session in sessions:
                     session_id, session_name, message_id, channel_id, hammer_time_str = session
-                    session_start_time = datetime.datetime.strptime(hammer_time_str, '%Y-%m-%d %H:%M:%S')
-                    timeout_seconds = (session_start_time - datetime.datetime.utcnow()).total_seconds()
+                    session_start_time = datetime.datetime.fromtimestamp(int(hammer_time_str), datetime.timezone.utc)
+                    timeout_seconds = (session_start_time - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
                     timeout_seconds = min(timeout_seconds, 12 * 3600)
 
                     # Fetch the channel and message
-                    channel = server_bot.get_channel(channel_id)
                     message = await channel.fetch_message(message_id)
 
                     # Create a new view with the updated timeout
                     view = gamemaster_commands.JoinOrLeaveSessionView(timeout_seconds=int(timeout_seconds),
                                                                       session_id=session_id, guild=guild,
-                                                                      session_name=session_name)
+                                                                      session_name=session_name, content="")
                     await message.edit(view=view)
         except aiosqlite.Error as e:
             logging.exception(f"Failed to reinstate session buttons for guild {guild.id} with error: {e}")

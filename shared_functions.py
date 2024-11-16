@@ -158,24 +158,70 @@ async def character_select_autocompletion(interaction: discord.Interaction, curr
     return data
 
 
+async def clear_worldanvil_autocomplete_cache():
+    while True:
+        await asyncio.sleep(300)  # Wait for 5 minutes
+        async with autocomplete_cache.lock:
+            autocomplete_cache.cache.clear()
+
+
+async def invalidate_worldanvil_user_cache(user_id: int):
+    async with autocomplete_cache.lock:
+        keys_to_delete = [key for key in autocomplete_cache.cache if key[0] == user_id]
+        for key in keys_to_delete:
+            del autocomplete_cache.cache[key]
+
+
+@dataclass
+class AutocompleteWorldAnvilCache:
+    cache: Dict[Tuple[int, str], List[Tuple[str, dict]]] = field(default_factory=dict)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+autocomplete_worldanvil_cache = AutocompleteWorldAnvilCache()
+
+
 async def get_plots_autocompletion(
         interaction: discord.Interaction,
         current: str) -> typing.List[app_commands.Choice[str]]:
     """This is a test command for the wa command."""
     data = []
-    client = WaClient(
-        'Pathparser',
-        'https://github.com/Solfyrism/Pathparser',
-        'V1.1',
-        os.getenv('WORLD_ANVIL_API'),
-        os.getenv('WORLD_ANVIL_USER')
-    )
-    articles_list = [article for article in client.world.articles('f7a60480-ea15-4867-ae03-e9e0c676060a',
-                                                                  '9ad3d530-1a42-4e99-9a09-9c4dccddc70a')]
-    for articles in articles_list:
-        if current in articles['title']:
-            print(articles['title'])
-            data.append(app_commands.Choice(name=articles['title'], value=f"1-{articles['id']}"))
+    user_id = interaction.user.id
+    guild_id = interaction.guild_id
+    _, current_fixed = name_fix(current)
+    current_prefix = current_fixed.lower()
+    cache_key = (user_id, current_prefix)
+    async with autocomplete_worldanvil_cache.lock:
+        cached_result = autocomplete_worldanvil_cache.cache.get(cache_key)
+
+    if cached_result is not None:
+        plot_list = cached_result
+    else:
+        client = WaClient(
+            'Pathparser',
+            'https://github.com/Solfyrism/Pathparser',
+            'V1.1',
+            os.getenv('WORLD_ANVIL_API'),
+            os.getenv(f'WORLD_ANVIL_{interaction.guild.id}')
+        )
+        async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("SELECT Search from admin where Identifier = 'WA_World_ID'")
+            wa_world_id = await cursor.fetchone()
+            await cursor.execute("SELECT Search from admin where Identifier = 'WA_Plot_Folder'")
+            wa_plot_folder = await cursor.fetchone()
+            plot_list = [article for article in client.world.articles(
+                wa_world_id[0],
+                wa_plot_folder[0])]
+
+            # cache the result
+            async with autocomplete_worldanvil_cache.lock:
+                autocomplete_worldanvil_cache.cache[cache_key] = plot_list
+
+    for plot in plot_list:
+        test = plot[1]
+        if current in test['title']:
+            data.append(app_commands.Choice(name=test['title'], value=f"1-{test['id']}"))
     data.append(app_commands.Choice(name=f"NEW: {str.title(current)}", value=f"2-{str.title(current)}"))
     return data
 
@@ -552,10 +598,10 @@ class CharacterChange:
     template_name: Optional[str] = None
     template_link: Optional[str] = None
     alternate_reward: Optional[str] = None
-    total_fame: Optional[int] = None
     fame: Optional[int] = None
-    total_prestige: Optional[int] = None
+    fame_change: Optional[int] = None
     prestige: Optional[int] = None
+    prestige_change: Optional[int] = None
     source: Optional[str] = None
 
 
@@ -753,18 +799,19 @@ async def log_embed(change: CharacterChange, guild: discord.Guild, thread: int, 
             )
 
         # Fame and Prestige
-        if change.fame is not None or change.prestige is not None:
-            total_fame = change.total_fame if change.total_fame is not None else "Not Changed"
-            total_prestige = change.total_prestige if change.total_prestige is not None else "Not Changed"
-            fame = change.fame if change.fame is not None else "Not Changed"
-            prestige = change.prestige if change.prestige is not None else "Not Changed"
+        if change.fame_change is not None or change.prestige_change is not None:
+            fame = change.fame if change.fame else "Not Changed"
+            prestige = change.prestige if change.prestige else "Not Changed"
+            fame_change = change.fame_change if change.fame_change else "Not Changed"
+            prestige_change = change.prestige_change if change.prestige_change else "Not Changed"
+
             embed.add_field(
                 name="Fame and Prestige",
                 value=(
-                    f"**Total Fame**: {total_fame}\n"
-                    f"**Received Fame**: {fame}\n"
-                    f"**Total Prestige**: {total_prestige}\n"
-                    f"**Received Prestige**: {prestige}"
+                    f"**Total Fame**: {fame}\n"
+                    f"**Received Fame**: {fame_change}\n"
+                    f"**Total Prestige**: {prestige}\n"
+                    f"**Received Prestige**: {prestige_change}"
                 )
             )
 
@@ -1449,7 +1496,7 @@ async def patch_wa_article(guild_id: int, article_id: str, overview: str) -> Opt
         return updated_page
     except Exception as e:
         # I haven't ever gotten a proper exception from the World Anvil API, so this is a catch-all until I can specify it down. https://pypi.org/project/pywaclient/#exceptions has them, but I'm not sure how to catch them yet.
-        logging.exception(f"Error in article creation for article '{article_id}': {e}")
+        logging.exception(f"Error in article patch for article '{article_id}': {e}")
         return None
 
 
@@ -1490,7 +1537,7 @@ async def put_wa_report(guild_id: int, session_id: int, overview: str, author: s
                     await cursor.execute(
                         "SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Participants as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
                         (session_id, author))
-                    characters = cursor.fetchall()
+                    characters = await cursor.fetchall()
                 else:
                     characters = characters
                 related_persons_block = []
@@ -2100,9 +2147,13 @@ class DualView(discord.ui.View):
     async def send_initial_message(self):
         """Send the initial message with the view."""
         try:
+            print("oh")
             await self.update_results()
+            print("here")
             await self.create_embed()
+            print("I")
             await self.update_buttons()
+            print("AM")
             self.message = await self.interaction.followup.send(
                 content=self.content,
                 embed=self.embed,

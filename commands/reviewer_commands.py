@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 from decimal import Decimal
@@ -300,15 +301,15 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                     await cursor.execute(
                         """INSERT INTO Player_Characters (Player_Name, Player_ID, True_Character_Name, Character_Name, 
                         Nickname, Titles, Description, Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, 
-                        Gold, Gold_Value, Gold_value_Max, Essence, Color, Mythweavers, Image_Link, Fame, Prestige) VALUES (
+                        Gold, Gold_Value, Gold_value_Max, Essence, Color, Mythweavers, Image_Link, Fame, Prestige, Accepted_Date) VALUES (
                         ?,?,?,?,
                         ?,?,?,?,?,?,?,?,?,?,
-                        ?,?,?,?,?,?,?,?, ?)""",
+                        ?,?,?,?,?,?,?,?, ?, ?)""",
                         (info_player_name, info_player_id, info_true_character_name, info_character_name,
                          info_nickname, info_titles, info_description, info_oath, starting_level[0], info_tier,
                          info_minimum_milestones, info_milestones_to_level, info_trials, info_trials_required,
                          str(gold_total), str(gold_value_total), str(gold_value_max_total), 0, info_color, info_mythweavers,
-                         info_image_link, 0, 0))
+                         info_image_link, 0, 0, datetime.datetime.utcnow()))
                     await db.commit()
                     await cursor.execute("DELETE FROM A_STG_Player_Characters WHERE Character_Name = ?",
                                          (character_name,))
@@ -344,6 +345,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                             article_url, article_id, character_embed_info[3], character_log_message.id, thread.id,
                             info_character_name))
                     await db.commit()
+                    shared_functions.autocomplete_cache.clear()
                     await interaction.followup.send(f"{character_name} has been moved to the accepted bios.",
                                                     ephemeral=True)
 

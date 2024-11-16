@@ -97,7 +97,7 @@ async def level_calculation(
     """
     try:
         logging.debug(f"Starting level calculation for character '{character_name}' in guild {guild_id}")
-
+        print(personal_cap, level, base, easy, medium, hard, deadly, misc)
         # Validate inputs
         if level < 1:
             raise ValueError("Level must be at least 1.")
@@ -133,7 +133,7 @@ async def level_calculation(
             logging.debug(f"Calculated awarded milestone total: {awarded_milestone_total}")
 
             # Determine maximum level
-            maximum_level = min(max_level, personal_cap)
+            maximum_level = min(max_level, personal_cap) if personal_cap else max_level
             logging.debug(f"Maximum level for character '{character_name}': {maximum_level}")
 
             # Get new level information
@@ -179,7 +179,8 @@ async def level_calculation(
 
 async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: int, new_level: int) -> None:
     try:
-        await cursor.execute("SELECT Level, Role_Name, Role_ID FROM Milestone_System WHERE level = ?", (new_level,))
+        await cursor.execute("SELECT Level, Level_Range_Name, Level_Range_ID FROM Milestone_System WHERE level = ?",
+                             (new_level,))
         new_role = await cursor.fetchone()
         if new_role is None:
             logging.error(f"Role not found for level {new_level}")
@@ -187,20 +188,26 @@ async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: i
         else:
             member = guild.get_member(author_id)
             new_level_range_role = guild.get_role(new_role[2])
-            member.add_roles(new_level_range_role)
-            await cursor.execute("SELECT Role_name FROM Milestone_System WHERE level = ?", (level,))
-            old_role = await cursor.fetchone()
-            if old_role is not None:
-                await cursor.execute("SELECT Min(Level), Max(Level) FROM Milestone_System where Role_Name = ?",
-                                     (old_role[0],))
-                old_role_range = await cursor.fetchone()
-                await cursor.execute(
-                    "SELECT Character_Name from Player_Characters where Player_ID = ? AND level > ? AND LEVEL < ?",
-                    (author_id, old_role_range[0], old_role_range[1]))
-                character = await cursor.fetchone()
-                if character is None:
-                    old_level_range_role = guild.get_role(old_role[0])
-                    member.remove_roles(old_level_range_role)
+            try:
+                await member.add_roles(new_level_range_role)
+                await cursor.execute("SELECT Level_Range_Name FROM Milestone_System WHERE level = ?", (level,))
+                old_role = await cursor.fetchone()
+                if old_role is not None:
+                    await cursor.execute(
+                        "SELECT Min(Level), Max(Level) FROM Milestone_System where Level_Range_Name = ?",
+                        (old_role[0],))
+                    old_role_range = await cursor.fetchone()
+                    await cursor.execute(
+                        "SELECT Character_Name from Player_Characters where Player_ID = ? AND level > ? AND LEVEL < ?",
+                        (author_id, old_role_range[0], old_role_range[1]))
+                    character = await cursor.fetchone()
+                    if character is None:
+                        old_level_range_role = guild.get_role(old_role[0])
+                        await member.remove_roles(old_level_range_role)
+            except discord.Forbidden:
+                logging.error(f"Bot does not have permissions to add roles to <@{author_id}>")
+                return None
+
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error in level ranges for <@{author_id}> with error: {e}")
         return None
@@ -465,21 +472,29 @@ def calculate_essence(character_name: str, essence: int, essence_change: int,
                       accepted_date: typing.Optional[str]):
     try:
         if accepted_date is not None:
-            start_date = datetime.datetime.strptime(accepted_date, '%Y-%m-%d %H:%M')
+            try:
+                start_date = datetime.datetime.strptime(accepted_date.split('.')[0], '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                start_date = datetime.datetime.strptime(accepted_date, '%Y-%m-%d %H:%M')
+
             current_date = datetime.datetime.now()
             date_difference = (current_date - start_date).days
+
+            # Determine the essence multiplier
             if 90 <= date_difference < 120:
                 essence_multiplier = 2
             elif date_difference >= 120:
                 essence_multiplier = 2 + floor((date_difference - 90) / 30)
-                essence_multiplier = essence_multiplier if essence_multiplier <= 4 else 4
+                essence_multiplier = min(essence_multiplier, 4)
             else:
                 essence_multiplier = 1
+
             essence_change *= essence_multiplier
+
         logging.info(f"Calculating essence for character '{character_name}'")
         essence_total = essence + essence_change
-        return_value = essence_total, essence_change
-        return return_value
+        return essence_total, essence_change
+
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error in essence calculation for {character_name} with error: {e}")
         raise CalculationAidFunctionError(f"Error in essence calculation for {character_name} with error: {e}")
@@ -949,6 +964,7 @@ class CharacterCommands(commands.Cog, name='character'):
                             await interaction.followup.send(
                                 f"{new_character_name} is already in use, please choose a different name.")
                             return
+                        shared_functions.autocomplete_cache.clear()
                         character_changes = shared_functions.CharacterChange(character_name=new_character_name,
                                                                              author=author,
                                                                              source='Character Edit')
@@ -1432,7 +1448,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                     await client.delete_inventory_item(guild_id, interaction.user.id, item_id[0])
                                     character_updates = shared_functions.UpdateCharacterData(
                                         gold_package=(
-                                        calculated_gold, calculated_gold_value, calculated_gold_value_max),
+                                            calculated_gold, calculated_gold_value, calculated_gold_value_max),
                                         character_name=character_name
                                     )
                                     await shared_functions.update_character(
@@ -1573,10 +1589,10 @@ class CharacterCommands(commands.Cog, name='character'):
                                 character_name=character_name,
                                 author=author,
                                 source=f'Entitle applying the title of {title_name}',
-                                fame=adjusted_fame,
-                                total_fame=total_fame,
-                                prestige=adjusted_prestige,
-                                total_prestige=total_prestige)
+                                fame=total_fame,
+                                fame_change=adjusted_fame,
+                                prestige=total_prestige,
+                                prestige_change=adjusted_prestige)
                             character_log = await shared_functions.log_embed(character_changes, guild,
                                                                              logging_thread_id, self.bot)
                             await interaction.followup.send(embed=character_log, ephemeral=True)
@@ -2143,8 +2159,9 @@ class CharacterCommands(commands.Cog, name='character'):
                     return
                 else:
                     (level_range_min, level_range_max) = level_range_info
-                    await cursor.execute("SELECT COUNT(Character_Name) FROM Player_Characters WHERE level between ? and ?",
-                                         (level_range_min, level_range_max))
+                    await cursor.execute(
+                        "SELECT COUNT(Character_Name) FROM Player_Characters WHERE level between ? and ?",
+                        (level_range_min, level_range_max))
                 character_count = await cursor.fetchone()
                 (character_count,) = character_count
                 view_type = 1
@@ -2236,8 +2253,12 @@ class CharacterCommands(commands.Cog, name='character'):
                                                                              logging_thread_id, self.bot)
                             await interaction.followup.send(embed=character_log, ephemeral=True)
                     else:
-                        updated_article = await shared_functions.patch_wa_article(guild_id=guild_id, article_id=article_id, overview=backstory)
-                        await interaction.followup.send(f"Backstory updated successfully for [{character_name}](<{updated_article['url']}>)!", ephemeral=True)
+                        updated_article = await shared_functions.patch_wa_article(guild_id=guild_id,
+                                                                                  article_id=article_id,
+                                                                                  overview=backstory)
+                        await interaction.followup.send(
+                            f"Backstory updated successfully for [{character_name}](<{updated_article['url']}>)!",
+                            ephemeral=True)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
                 f"an error occurred in the backstory command for '{character_name}': {e}"
@@ -2989,8 +3010,10 @@ class CharacterDisplayView(shared_functions.DualView):
                 self.embed.add_field(name=f'Information',
                                      value=f'**Level**: {level}, **Mythic Tier**: {tier}', inline=False)
                 self.embed.add_field(name=f'Total Experience',
-                                     value=f'**Milestones**: {milestones}, **Milestones Remaining**: {milestones_required}, **Trials**: {trials}, **Trials Remaining**: {trials_required}', inline=False)
-                self.embed.add_field(name=f'Current Wealth', value=f'**GP**: {gold}, **Essence**: {essence}', inline=False)
+                                     value=f'**Milestones**: {milestones}, **Milestones Remaining**: {milestones_required}, **Trials**: {trials}, **Trials Remaining**: {trials_required}',
+                                     inline=False)
+                self.embed.add_field(name=f'Current Wealth', value=f'**GP**: {gold}, **Essence**: {essence}',
+                                     inline=False)
                 linkage = ""
                 linkage += f"**Tradition**: [{tradition_name}]({tradition_link})" if tradition_name else ""
                 linkage += f" " if tradition_name and template_name else ""
@@ -3014,10 +3037,13 @@ class CharacterDisplayView(shared_functions.DualView):
                 self.embed.add_field(name=f'Information',
                                      value=f'**Level**: {level}, **Mythic Tier**: {tier}')
                 self.embed.add_field(name=f'Total Experience',
-                                     value=f'**Milestones**: {milestones}, **Milestones Remaining**: {milestones_required}, **Trials**: {trials}, **Trials Remaining**: {trials_required}', inline=False)
+                                     value=f'**Milestones**: {milestones}, **Milestones Remaining**: {milestones_required}, **Trials**: {trials}, **Trials Remaining**: {trials_required}',
+                                     inline=False)
                 self.embed.add_field(name=f'Current Wealth',
-                                     value=f'**GP**: {gold}, **Illiquid GP**: {gold_value - gold} **Essence**: {essence}', inline=False)
-                self.embed.add_field(name=f'Fame and Prestige', value=f'**Fame**: {fame}, **Prestige**: {prestige}', inline=False)
+                                     value=f'**GP**: {gold}, **Illiquid GP**: {gold_value - gold} **Essence**: {essence}',
+                                     inline=False)
+                self.embed.add_field(name=f'Fame and Prestige', value=f'**Fame**: {fame}, **Prestige**: {prestige}',
+                                     inline=False)
                 linkage = ""
                 linkage += f"**Tradition**: [{tradition_name}]({tradition_link})" if tradition_name else ""
                 linkage += f" " if tradition_name and template_name else ""
@@ -3087,7 +3113,8 @@ class LevelRangeDisplayView(shared_functions.DualView):
                                      value=f'**Level**: {level}, **Mythic Tier**: {tier}')
                 self.embed.add_field(name=f'Total Experience',
                                      value=f'**Milestones**: {milestones}, **Milestones Remaining**: {milestones_required}, **Trials**: {trials}, **Trials Remaining**: {trials_required}')
-                self.embed.add_field(name=f'Current Wealth', value=f'**GP**: {gold}, **Essence**: {essence}', inline=False)
+                self.embed.add_field(name=f'Current Wealth', value=f'**GP**: {gold}, **Essence**: {essence}',
+                                     inline=False)
                 linkage = ""
                 linkage += f"**Tradition**: [{tradition_name}]({tradition_link})" if tradition_name else ""
                 linkage += f" " if tradition_name and template_name else ""
@@ -3114,7 +3141,8 @@ class LevelRangeDisplayView(shared_functions.DualView):
                                      value=f'**Milestones**: {milestones}, **Milestones Remaining**: {milestones_required}, **Trials**: {trials}, **Trials Remaining**: {trials_required}')
                 self.embed.add_field(name=f'Current Wealth',
                                      value=f'**GP**: {gold}, **Illiquid GP**: {gold_value - gold} **Essence**: {essence}')
-                self.embed.add_field(name=f'Fame and Prestige', value=f'**Fame**: {fame}, **Prestige**: {prestige}', inline=False)
+                self.embed.add_field(name=f'Fame and Prestige', value=f'**Fame**: {fame}, **Prestige**: {prestige}',
+                                     inline=False)
                 linkage = ""
                 linkage += f"**Tradition**: [{tradition_name}]({tradition_link})" if tradition_name else ""
                 linkage += f" " if tradition_name and template_name else ""
@@ -3135,8 +3163,9 @@ class LevelRangeDisplayView(shared_functions.DualView):
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT COUNT(*) FROM Player_Characters WHERE Level BETWEEN ? AND ?",
-                                          (self.level_range_min, self.level_range_max))
+                await cursor.execute(
+                    "SELECT COUNT(*) FROM Player_Characters WHERE Level BETWEEN ? AND ?",
+                    (self.level_range_min, self.level_range_max))
                 count = await cursor.fetchone()
                 self.max_items = count[0]
                 return self.max_items
@@ -3205,8 +3234,8 @@ class PropositionViewRecipient(shared_functions.RecipientAcknowledgementView):
             character_changes = shared_functions.CharacterChange(character_name=self.character_name,
                                                                  author=self.requester_name,
                                                                  source=f'Prestige Request',
-                                                                 prestige=-abs(self.prestige_cost),
-                                                                 total_prestige=self.prestige - self.prestige_cost)
+                                                                 prestige_change=-abs(self.prestige_cost),
+                                                                 prestige=self.prestige - self.prestige_cost)
             await shared_functions.log_embed(character_changes, guild=interaction.guild, thread=self.logging_thread,
                                              bot=self.bot)
 
@@ -3263,7 +3292,8 @@ class GoldSendView(shared_functions.RecipientAcknowledgementView):
             reason: str,
             interaction: discord.Interaction
     ):
-        super().__init__(allowed_user_id=allowed_user_id, interaction=interaction, content=f"<@{allowed_user_id}>, please accept or request this transaction.")
+        super().__init__(allowed_user_id=allowed_user_id, interaction=interaction,
+                         content=f"<@{allowed_user_id}>, please accept or request this transaction.")
         self.guild_id = guild_id
         self.requester_name = requester_name
         self.requester_id = requester_id
@@ -3366,7 +3396,8 @@ class GoldSendView(shared_functions.RecipientAcknowledgementView):
                                                  thread=self.source_logging_thread, bot=self.bot)
                 await conn.execute(
                     "UPDATE Player_Characters SET Gold = ?, Gold_Value = ?, Gold_Value_max = ? WHERE Character_Name = ?",
-                    (str(recipient_calc_gold_total), str(recipient_calc_gold_value_total), str(recipient_calc_gold_max_total),
+                    (str(recipient_calc_gold_total), str(recipient_calc_gold_value_total),
+                     str(recipient_calc_gold_max_total),
                      self.recipient_name)
                 )
                 await conn.commit()
@@ -3421,7 +3452,7 @@ class GoldSendView(shared_functions.RecipientAcknowledgementView):
 
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     filename='pathparser.log',  # Specify the log file name

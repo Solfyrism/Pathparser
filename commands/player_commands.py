@@ -482,17 +482,31 @@ async def player_signup(guild: discord.Guild, thread_id: int, session_name: str,
         async with aiosqlite.connect(f"Pathparser_{guild.id}_test.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
-                "Select True_Character_Name, title, level, tier, gold, gold_value, tradition_name, tradition_link, template_name, template_link, mythweavers, image_link, color, description from Player_Characters where Player_ID = ? and Character_Name = ?",
+                """Select 
+                player_name, True_Character_Name, title, 
+                level, tier, 
+                gold, gold_value, 
+                tradition_name, tradition_link, template_name, template_link, 
+                mythweavers, image_link, color, 
+                description, titles,
+                essence, oath from Player_Characters where Player_ID = ? and Character_Name = ?""",
                 (player_id, character_name))
             character_info = await cursor.fetchone()
             if character_info:
-                (character_name, level, tier, gold, gold_value, tradition_name, tradition_link, template_name,
-                 template_link, mythweavers, image_link, color, description, titles, flux, oath) = character_info
+                (player_name, character_name, title,
+                 level, tier,
+                 gold, gold_value,
+                 tradition_name, tradition_link, template_name, template_link,
+                 mythweavers, image_link, color,
+                 description, titles,
+                 essence, oath) = character_info
+                print(character_info)
                 await cursor.execute(
-                    """INSERT INTO Sessions_Signups (Session_ID, Session_Name, Player_Name, Player_ID, Character_Name, Level, Gold_Value, Tier, Notification_Warning) Values (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (session_id, session_name, player_id, character_name, level, gold_value, tier, warning_duration)
+                    """INSERT INTO Sessions_Signups (Session_ID, Session_Name, Player_Name, Player_ID, Character_Name, Level, Effective_Wealth, Tier, Notification_Warning) Values (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (session_id, session_name, player_name, player_id, character_name, level, gold_value - gold, tier, warning_duration)
                 )
                 await db.commit()
+                print(thread_id)
                 thread = guild.get_thread(thread_id)
                 if not thread:
                     thread = await guild.fetch_channel(thread_id)
@@ -532,7 +546,7 @@ def signup_embed(character_name: str, title: str, level: int, tier: int, gold: i
         logging.exception(f"Failed to create signup embed for character {character_name}: {e}")
 
 
-async def player_leave_session(guild: discord.Guild, session_id: int, player_name: str) -> bool:
+async def player_leave_session(guild: discord.Guild, session_id: int, player_name: str, player: bool = True) -> bool:
     try:
         async with aiosqlite.connect(f"Pathparser_{guild.id}_test.sqlite") as db:
             cursor = await db.cursor()
@@ -546,7 +560,7 @@ async def player_leave_session(guild: discord.Guild, session_id: int, player_nam
                 (session_id, player_name)
             )
             await db.commit()
-            await cursor.execute("Select Thread_ID from Sessions where Session_ID = ?", (session_id,))
+            await cursor.execute("Select Session_Thread from Sessions where Session_ID = ?", (session_id,))
             session_info = await cursor.fetchone()
             if session_info:
                 thread_id = session_info[0]
@@ -554,8 +568,12 @@ async def player_leave_session(guild: discord.Guild, session_id: int, player_nam
                 if not thread:
                     thread = await guild.fetch_channel(thread_id)
                 if thread:
-                    await thread.send(f"{player_name} has decided against participating in the session!")
-                    return True
+                    if player: 
+                        await thread.send(f"{player_name} has decided against participating in the session!")
+                        return True
+                    else: 
+                        await thread.send(f"Has been removed from the session!")
+                        return True
                 else:
                     raise ValueError(f"Thread {thread_id} not found in guild {guild.id}")
             return True
@@ -577,7 +595,7 @@ async def update_report(guild_id: int, overview: str, world_id: str, article_id:
             )
             overview = shared_functions.drive_word_document(overview)
 
-            specific_article = client.article.get(article_id)
+            specific_article = client.article.get(article_id, granularity=1)
 
             new_overview = f'{specific_article["reportNotes"]} [br] [br] {author_name} [br] {character_name} - {time} [br] {overview}' if \
                 specific_article["reportNotes"] is not None else f'{character_name} - {time} [br] {overview}'
@@ -715,19 +733,19 @@ class PlayerCommands(commands.Cog, name='Player'):
                    notification: typing.Optional[discord.app_commands.Choice[int]]):
         """Offer your Participation in a session."""
         warning_duration = -1 if notification is None else notification.value
-        await interaction.followup.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
-                    "SELECT Session_Name, Play_location, Play_Time, game_link, Session_Range_ID, Session_Range, Session_Thread, overflow FROM Sessions WHERE Session_ID = ? AND IsActive = 1",
+                    "SELECT Session_Name, Play_location, hammer_time, game_link, Session_Range_ID, Session_Range, Session_Thread, overflow FROM Sessions WHERE Session_ID = ? AND IsActive = 1",
                     (session_id,)
                 )
                 session_info = await cursor.fetchone()
                 if session_info is None:
                     await interaction.followup.send(f"No active session with Session ID: {session_id} can be found!")
                 else:
-                    (session_name, play_location, play_time, game_link, session_range_id, session_range, session_thread,
+                    (session_name, play_location, hammer_time, game_link, session_range_id, session_range, session_thread,
                      overflow) = session_info
                     await cursor.execute(
                         "SELECT Level from Player_Characters WHERE Player_ID = ? AND Character_Name = ?",
@@ -750,11 +768,11 @@ class PlayerCommands(commands.Cog, name='Player'):
                                                                                          overflow=overflow,
                                                                                          session_range_id=session_range_id)
                             await cursor.execute(
-                                "Select min(level), max(level) FROM Milestone_System  Level_Range_ID in (? , ?)",
+                                "Select min(level), max(level) FROM Milestone_System WHERE  Level_Range_ID in (? , ?)",
                                 (secondary_role.id, session_range_id))
                         elif overflow == 1:
                             await cursor.execute(
-                                "Select min(level), max(level) Role_Name from Level_Range WHERE Role_ID = ?",
+                                "Select min(level), max(level) Role_Name from Milestone_System WHERE Level_Range_ID = ?",
                                 (session_range_id,))
                         level_range_info = await cursor.fetchone()
                         if overflow == 4:
@@ -816,7 +834,7 @@ class PlayerCommands(commands.Cog, name='Player'):
                                     ephemeral=True)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
-                f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id}:{e}")
+                f"Failed to sign up player {interaction.user.name} for session with id: ({session_id}:{e}")
 
     @sessions_group.command(name='notify', description='Update your notification time for a session')
     @app_commands.choices(notification=[
@@ -827,7 +845,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     async def join(self, interaction: discord.Interaction, session_id: int,
                    notification: typing.Optional[discord.app_commands.Choice[int]]):
         warning_duration = -1 if notification is None else notification.value
-        await interaction.followup.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -849,12 +867,12 @@ class PlayerCommands(commands.Cog, name='Player'):
 
     @sessions_group.command(name='leave', description='Rescind your Participation in a session')
     async def leave(self, interaction: discord.Interaction, session_id: int):
-        await interaction.followup.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
-                    "SELECT Session_Name, Play_location, Play_Time, Game_Link FROM Sessions WHERE Session_ID = ?",
+                    "SELECT Session_Name, Play_location, hammer_time, Game_Link FROM Sessions WHERE Session_ID = ?",
                     (session_id,))
                 session_info = await cursor.fetchone()
                 if session_info is None:
@@ -894,7 +912,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     async def display(self, interaction: discord.Interaction, session_id: int,
                       group: discord.app_commands.Choice[int] = 1, page_number: int = 1):
         """ALL: THIS COMMAND DISPLAYS SESSION INFORMATION"""
-        await interaction.followup.defer(thinking=True)
+        await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -942,7 +960,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def report(self, interaction: discord.Interaction, session_id: int, summary: str, character_name: str):
         """Report on a session"""
-        await interaction.followup.defer(thinking=True)
+        await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -979,7 +997,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     async def create_group(self, interaction: discord.Interaction, character_name: str, group_name: str,
                            description: str):
         """Open a session Request"""
-        await interaction.followup.defer(thinking=True)
+        await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -1000,9 +1018,9 @@ class PlayerCommands(commands.Cog, name='Player'):
             await interaction.followup.send(f"Failed to add a session request for {interaction.user.name}")
 
     @group_group.command(name='delete', description='delete your group')
-    async def create_group(self, interaction: discord.Interaction):
+    async def delete_group(self, interaction: discord.Interaction):
         """Delete a session Request"""
-        await interaction.followup.defer(thinking=True)
+        await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -1022,7 +1040,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @app_commands.autocomplete(group_id=shared_functions.group_id_autocompletion)
     async def group_join(self, interaction: discord.Interaction, group_id: int):
         """Sync your Groups up for a GM to view whose in a session request group."""
-        await interaction.followup.defer(thinking=True)
+        await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -1053,7 +1071,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @app_commands.autocomplete(group_id=shared_functions.group_id_autocompletion)
     async def group_leave(self, interaction: discord.Interaction, group_id: int):
         """leave a group because you hate everyone inside."""
-        await interaction.followup.defer(thinking=True)
+        await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -1084,7 +1102,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     async def display_groups(self, interaction: discord.Interaction, group_id: typing.Optional[int],
                              page_number: int = 1):
         """Display all participants and signups for a group"""
-        await interaction.followup.defer(thinking=True)
+        await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as conn:
                 cursor = await conn.cursor()

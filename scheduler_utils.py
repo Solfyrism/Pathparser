@@ -13,6 +13,12 @@ scheduler.start()
 scheduled_jobs = {}
 
 
+# Initialize the scheduler
+scheduler = AsyncIOScheduler()
+scheduler.start()
+scheduled_jobs = {}
+
+
 async def remind_users(session_id: int, guild_id: int, thread_id: int, time: int, bot: discord.Client) -> None:
     try:
         content = f"Reminder: The event is starting in {time} minutes."
@@ -42,8 +48,8 @@ def session_reminders(
         scheduler, remind_users, scheduled_jobs, session_id: int, thread_id: int, hammer_time: str, guild_id: int,
         bot: discord.Client
 ) -> None:
-    now = datetime.utcnow()
-    session_start_time = parse_hammer_time(hammer_time)
+    now = datetime.now(timezone.utc)  # Make 'now' timezone-aware
+    session_start_time = parse_hammer_time(hammer_time)  # Ensure this is timezone-aware
     time_difference = session_start_time - now
     remaining_minutes = time_difference.total_seconds() / 60
     reminder_time_periods = [0, 30, 60]
@@ -61,9 +67,11 @@ def session_reminders(
 
 
 def parse_hammer_time(hammer_time_str: str) -> datetime:
-    # If the input is a Unix timestamp in seconds (10 characters), convert it directly
     if len(hammer_time_str) == 10:
-        print(hammer_time_str)
+        # Unix timestamp, return aware datetime
         return datetime.fromtimestamp(int(hammer_time_str), tz=timezone.utc)
-    # Otherwise, parse it as a standard date-time string
-    return datetime.strptime(hammer_time_str, '%Y-%m-%d %H:%M:%S')
+    else:
+        # Parse string and set timezone to UTC
+        dt_naive = datetime.strptime(hammer_time_str, '%Y-%m-%d %H:%M:%S')
+        dt_aware = dt_naive.replace(tzinfo=timezone.utc)
+        return dt_aware
