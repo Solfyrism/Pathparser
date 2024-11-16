@@ -78,12 +78,24 @@ europe_regions = {
                         'Spain', 'Vatican City'],
 }
 
+north_america_regions = {
+    'Northern America': ['Bermuda', 'Canada', 'Greenland', 'Mexico', 'United States'],
+    'Central America': ['Belize', 'Costa Rica', 'El Salvador', 'Guatemala', 'Honduras', 'Nicaragua', 'Panama'],
+    'Caribbean': ['Antigua and Barbuda', 'Bahamas', 'Barbados', 'Cuba', 'Dominica', 'Dominican Republic',
+                  'Grenada', 'Haiti', 'Jamaica', 'Saint Kitts and Nevis', 'Saint Lucia', 'Saint Vincent and the Grenadines',
+                  'Trinidad and Tobago', 'Puerto Rico']
+}
+# Update the continent_regions mapping
 continent_regions = {
     'Africa': africa_regions,
     'Asia': asia_regions,
     'Europe': europe_regions,
+    'North America': north_america_regions,  # Add this line
     # Other continents can be added here if needed
 }
+
+
+
 
 # Create a mapping of regions to their respective timezones
 region_timezones = {region: [tz for tz in timezone_cache if tz.startswith(f"{region}/")] for region in regions}
@@ -109,6 +121,7 @@ def parse_time_input(time_str: str) -> Optional[datetime.time]:
 
 
 # Build mapping from continents to country codes and names
+# Build mapping from continents to country codes and names
 continent_to_countries = {}
 
 for country in pycountry.countries:
@@ -120,6 +133,15 @@ for country in pycountry.countries:
     except KeyError:
         continue  # Skip countries where mapping is not available
 
+    # Map 'Americas' to 'North America' or 'South America' based on country
+    if continent_name == 'Americas':
+        # Use country codes to differentiate North and South America
+        if country_name in north_america_regions['Northern America'] + \
+                north_america_regions['Central America'] + \
+                north_america_regions['Caribbean']:
+            continent_name = 'North America'
+        else:
+            continent_name = 'South America'
     # Initialize continent list if not already
     if continent_name not in continent_to_countries:
         continent_to_countries[continent_name] = []
@@ -170,6 +192,7 @@ class RegionSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         try:
             self.view.region = self.values[0]
+            logging.info(f"Region selected: {self.view.region}")
             await self.view.update_country_select(interaction)
         except Exception as e:
             logging.exception("Error in RegionSelect callback")
@@ -177,7 +200,6 @@ class RegionSelect(discord.ui.Select):
                 "An error occurred while selecting your region.", ephemeral=True
             )
             self.view.stop()
-
 
 class CountrySelect(discord.ui.Select):
     def __init__(self, options: List[discord.SelectOption]):
@@ -349,6 +371,7 @@ class FinishButton(discord.ui.Button):
 class AvailabilityView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=600)
+        self.region = None
         self.continent: Optional[str] = None
         self.country_code: Optional[str] = None
         self.state: Optional[str] = None
@@ -368,17 +391,25 @@ class AvailabilityView(discord.ui.View):
             self.clear_items()
             continent_name = self.continent
             logging.info(f"Continent: {continent_name}")
-            logging.info(f"Region: {self.region}")
 
             if continent_name in continent_regions:
+                # For continents with regions
+                logging.info(f"Region: {self.region}")
                 regions = continent_regions[continent_name]
+                if self.region is None:
+                    await interaction.response.send_message(
+                        "Please select a region first.", ephemeral=True
+                    )
+                    return
                 countries = regions.get(self.region, [])
             else:
+                # For continents without regions
                 countries = [country['name'] for country in continent_to_countries[continent_name]]
+                logging.info(f"No region selection needed for continent {continent_name}")
 
             if not countries:
                 await interaction.response.send_message(
-                    "No countries found for the selected region.", ephemeral=True
+                    "No countries found for the selected region or continent.", ephemeral=True
                 )
                 self.stop()
                 return
@@ -387,8 +418,18 @@ class AvailabilityView(discord.ui.View):
             countries_sorted = sorted(countries)
             # Create options for the select menu
             options = [
-                discord.SelectOption(label=country) for country in countries_sorted[:24]
+                discord.SelectOption(label=country) for country in countries_sorted[:25]
             ]
+            if len(countries_sorted) > 25:
+                options.append(discord.SelectOption(label='Other...', value='other'))
+            self.add_item(CountrySelect(options=options))
+            await interaction.response.edit_message(content="Select your country:", view=self)
+        except Exception as e:
+            logging.exception("Error in update_country_select")
+            await interaction.response.send_message(
+                "An error occurred while updating country selection.", ephemeral=True
+            )
+            self.stop()
 
             if not options:
                 await interaction.response.send_message(
