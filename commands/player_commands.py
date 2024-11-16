@@ -1,6 +1,8 @@
 import math
 import typing
 import discord
+import pycountry
+import pycountry_convert
 from discord.ext import commands
 from discord import app_commands
 from typing import List, Optional
@@ -38,6 +40,49 @@ regions = {
     'Australia', 'Europe', 'Indian', 'Pacific', 'Etc'
 }
 
+
+africa_regions = {
+    'Northern Africa': ['Algeria', 'Egypt', 'Libya', 'Morocco', 'Sudan', 'Tunisia', 'Western Sahara'],
+    'Western Africa': ['Benin', 'Burkina Faso', 'Cabo Verde', 'Côte d\'Ivoire', 'Gambia', 'Ghana', 'Guinea',
+                       'Guinea-Bissau', 'Liberia', 'Mali', 'Mauritania', 'Niger', 'Nigeria', 'Senegal', 'Sierra Leone',
+                       'Togo'],
+    'Central Africa': ['Angola', 'Cameroon', 'Central African Republic', 'Chad', 'Congo', 'Democratic Republic of the Congo',
+                       'Equatorial Guinea', 'Gabon', 'São Tomé and Príncipe'],
+    'Eastern Africa': ['Burundi', 'Comoros', 'Djibouti', 'Eritrea', 'Ethiopia', 'Kenya', 'Madagascar', 'Malawi',
+                       'Mauritius', 'Mozambique', 'Rwanda', 'Seychelles', 'Somalia', 'South Sudan', 'Tanzania',
+                       'Uganda', 'Zambia', 'Zimbabwe'],
+    'Southern Africa': ['Botswana', 'Eswatini', 'Lesotho', 'Namibia', 'South Africa'],
+}
+
+asia_regions = {
+    'Western Asia': ['Armenia', 'Azerbaijan', 'Bahrain', 'Cyprus', 'Georgia', 'Iraq', 'Israel', 'Jordan', 'Kuwait',
+                     'Lebanon', 'Oman', 'Qatar', 'Saudi Arabia', 'State of Palestine', 'Syria', 'Turkey', 'United Arab Emirates', 'Yemen'],
+    'Central Asia': ['Kazakhstan', 'Kyrgyzstan', 'Tajikistan', 'Turkmenistan', 'Uzbekistan'],
+    'South Asia': ['Afghanistan', 'Bangladesh', 'Bhutan', 'India', 'Iran', 'Maldives', 'Nepal', 'Pakistan', 'Sri Lanka'],
+    'East Asia': ['China', 'Japan', 'Mongolia', 'North Korea', 'South Korea', 'Taiwan'],
+    'Southeast Asia': ['Brunei', 'Cambodia', 'Indonesia', 'Laos', 'Malaysia', 'Myanmar', 'Philippines', 'Singapore',
+                       'Thailand', 'Timor-Leste', 'Vietnam'],
+}
+
+europe_regions = {
+    'Northern Europe': ['Denmark', 'Estonia', 'Finland', 'Iceland', 'Ireland', 'Latvia', 'Lithuania', 'Norway',
+                        'Sweden', 'United Kingdom'],
+    'Western Europe': ['Austria', 'Belgium', 'France', 'Germany', 'Liechtenstein', 'Luxembourg', 'Monaco',
+                       'Netherlands', 'Switzerland'],
+    'Eastern Europe': ['Belarus', 'Bulgaria', 'Czech Republic', 'Hungary', 'Moldova', 'Poland', 'Romania',
+                       'Russia', 'Slovakia', 'Ukraine'],
+    'Southern Europe': ['Albania', 'Andorra', 'Bosnia and Herzegovina', 'Croatia', 'Greece', 'Italy', 'Kosovo',
+                        'North Macedonia', 'Malta', 'Montenegro', 'Portugal', 'San Marino', 'Serbia', 'Slovenia',
+                        'Spain', 'Vatican City'],
+}
+
+continent_regions = {
+    'Africa': africa_regions,
+    'Asia': asia_regions,
+    'Europe': europe_regions,
+    # Other continents can be added here if needed
+}
+
 # Create a mapping of regions to their respective timezones
 region_timezones = {region: [tz for tz in timezone_cache if tz.startswith(f"{region}/")] for region in regions}
 
@@ -61,21 +106,56 @@ def parse_time_input(time_str: str) -> Optional[datetime.time]:
         return None
 
 
+# Build mapping from continents to country codes and names
+continent_to_countries = {}
+
+
+for country in pycountry.countries:
+    country_code = country.alpha_2
+    country_name = country.name
+    try:
+        continent_code = pycountry_convert.country_alpha2_to_continent_code(country_code)
+        continent_name = pycountry_convert.convert_continent_code_to_continent_name(continent_code)
+    except KeyError:
+        continue  # Skip countries where mapping is not available
+
+    # Initialize continent list if not already
+    if continent_name not in continent_to_countries:
+        continent_to_countries[continent_name] = []
+
+    continent_to_countries[continent_name].append({'code': country_code, 'name': country_name})
+
+
 # Custom Select Menus
+
 class ContinentSelect(discord.ui.Select):
     def __init__(self):
-        options = [
-            discord.SelectOption(label='Africa'),
-            discord.SelectOption(label='America'),
-            discord.SelectOption(label='Antarctica'),
-            discord.SelectOption(label='Asia'),
-            discord.SelectOption(label='Atlantic'),
-            discord.SelectOption(label='Australia'),
-            discord.SelectOption(label='Europe'),
-            discord.SelectOption(label='Indian'),
-            discord.SelectOption(label='Pacific'),
-            discord.SelectOption(label='Etc'),
-        ]
+        options = [discord.SelectOption(label=continent) for continent in continent_to_countries.keys()]
+        super().__init__(
+            placeholder="Select your continent...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            self.view.continent = self.values[0]
+            if self.view.continent in continent_regions:
+                await self.view.update_region_select(interaction)
+            else:
+                await self.view.update_country_select(interaction)
+        except Exception as e:
+            logging.exception("Error in ContinentSelect callback")
+            await interaction.response.send_message(
+                "An error occurred while selecting your continent.", ephemeral=True
+            )
+            self.view.stop()
+class RegionSelect(discord.ui.Select):
+    def __init__(self, continent: str, regions: typing.Dict[str, List[str]]):
+        self.continent = continent
+        self.regions = regions
+        options = [discord.SelectOption(label=region) for region in regions.keys()]
         super().__init__(
             placeholder="Select your region...",
             min_values=1,
@@ -86,19 +166,55 @@ class ContinentSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         try:
             self.view.region = self.values[0]
-            await self.view.update_timezone_select(interaction)
+            await self.view.update_country_select(interaction)
         except Exception as e:
-            logging.exception("Error in ContinentSelect callback")
+            logging.exception("Error in RegionSelect callback")
             await interaction.response.send_message(
                 "An error occurred while selecting your region.", ephemeral=True
             )
             self.view.stop()
 
 
+class CountrySelect(discord.ui.Select):
+    def __init__(self, options: List[discord.SelectOption]):
+        super().__init__(
+            placeholder="Select your country...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            selected_country_name = self.values[0]
+            if selected_country_name == 'other':
+                await interaction.response.send_message(
+                    "Please enter your country manually using the `/timesheet` command with your country.",
+                    ephemeral=True
+                )
+                self.view.stop()
+                return
+            # Map country name back to country code
+            country = pycountry.countries.get(name=selected_country_name)
+            if not country:
+                # Try searching by common name
+                country = pycountry.countries.search_fuzzy(selected_country_name)[0]
+            self.view.country_code = country.alpha_2
+            if self.view.country_code == 'US':
+                await self.view.update_region_select_us(interaction)
+            else:
+                await self.view.update_timezone_select(interaction)
+        except Exception as e:
+            logging.exception("Error in CountrySelect callback")
+            await interaction.response.send_message(
+                "An error occurred while selecting your country.", ephemeral=True
+            )
+            self.view.stop()
+
 class TimezoneSelect(discord.ui.Select):
     def __init__(self, options: List[discord.SelectOption]):
         super().__init__(
-            placeholder="Select your timezone...",
+            placeholder="Select your time zone...",
             min_values=1,
             max_values=1,
             options=options
@@ -107,7 +223,7 @@ class TimezoneSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         try:
             selected_timezone = self.values[0]
-            if selected_timezone == "more":
+            if selected_timezone == "other":
                 # Prompt user to enter their timezone manually
                 await interaction.response.send_message(
                     "Please enter your timezone manually using the `/timesheet` command with your timezone.",
@@ -121,7 +237,7 @@ class TimezoneSelect(discord.ui.Select):
         except Exception as e:
             logging.exception("Error in TimezoneSelect callback")
             await interaction.response.send_message(
-                "An error occurred while selecting your timezone.", ephemeral=True
+                "An error occurred while selecting your time zone.", ephemeral=True
             )
             self.view.stop()
 
@@ -227,8 +343,10 @@ class FinishButton(discord.ui.Button):
 # Enhanced AvailabilityView with Multiple Time Slots
 class AvailabilityView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=600)  # Extended timeout for multiple entries
-        self.region: Optional[str] = None
+        super().__init__(timeout=600)
+        self.continent: Optional[str] = None
+        self.country_code: Optional[str] = None
+        self.state: Optional[str] = None
         self.timezone: Optional[str] = None
         self.day: Optional[str] = None
         self.start_time: Optional[str] = None
@@ -239,6 +357,95 @@ class AvailabilityView(discord.ui.View):
 
         # Start with continent selection
         self.add_item(ContinentSelect())
+
+    async def update_country_select(self, interaction: discord.Interaction):
+        try:
+            self.clear_items()
+            continent_name = self.continent
+            # Check if continent requires region selection
+            if continent_name in continent_regions:
+                # Get countries from the selected region
+                regions = continent_regions[continent_name]
+                countries = regions.get(self.region, [])
+            else:
+                # Get all countries in the continent
+                countries = [country['name'] for country in continent_to_countries[continent_name]]
+
+            if not countries:
+                await interaction.response.send_message(
+                    "No countries found for the selected region.", ephemeral=True
+                )
+                self.stop()
+                return
+
+            # Sort countries alphabetically
+            countries_sorted = sorted(countries)
+            # Create options for the select menu
+            options = [
+                discord.SelectOption(label=country) for country in countries_sorted[:25]
+            ]
+            if len(countries_sorted) > 25:
+                options.append(discord.SelectOption(label='Other...', value='other'))
+            self.add_item(CountrySelect(options=options))
+            await interaction.response.edit_message(content="Select your country:", view=self)
+        except Exception as e:
+            logging.exception("Error in update_country_select")
+            await interaction.response.send_message(
+                "An error occurred while updating country selection.", ephemeral=True
+            )
+            self.stop()
+
+    async def update_region_select(self, interaction: discord.Interaction):
+        try:
+            self.clear_items()
+            regions = continent_regions.get(self.continent)
+            if not regions:
+                await interaction.response.send_message(
+                    "No regions found for the selected continent.", ephemeral=True
+                )
+                self.stop()
+                return
+            # Create a RegionSelect with the regions of the continent
+            self.add_item(RegionSelect(continent=self.continent, regions=regions))
+            await interaction.response.edit_message(content="Select your region:", view=self)
+        except Exception as e:
+            logging.exception("Error in update_region_select")
+            await interaction.response.send_message(
+                "An error occurred while updating region selection.", ephemeral=True
+            )
+            self.stop()
+
+    async def update_timezone_select(self, interaction: discord.Interaction):
+        try:
+            # Remove previous items
+            self.clear_items()
+            if self.country_code == 'other':
+                await interaction.response.send_message(
+                    "Please enter your country manually using the `/timesheet` command with your country.",
+                    ephemeral=True
+                )
+                self.stop()
+                return
+            # Get time zones for the selected country
+            timezones = pytz.country_timezones.get(self.country_code)
+            if not timezones:
+                await interaction.response.send_message("No time zones found for the selected country.", ephemeral=True)
+                self.stop()
+                return
+            # Create options for the select menu
+            options = [
+                discord.SelectOption(label=tz, value=tz) for tz in timezones[:25]
+            ]
+            if len(timezones) > 25:
+                options.append(discord.SelectOption(label='Other...', value='other'))
+            self.add_item(TimezoneSelect(options=options))
+            await interaction.response.edit_message(content="Select your time zone:", view=self)
+        except Exception as e:
+            logging.exception("Error in update_timezone_select")
+            await interaction.response.send_message(
+                "An error occurred while updating time zone selection.", ephemeral=True
+            )
+            self.view.stop()
 
     async def on_timeout(self):
         """Disable all components when the view times out."""
@@ -257,31 +464,6 @@ class AvailabilityView(discord.ui.View):
             return False
         return True
 
-    async def update_timezone_select(self, interaction: discord.Interaction):
-        try:
-            # Remove the continent select menu
-            self.clear_items()
-            # Get filtered timezones from the cached mapping
-            filtered_timezones = region_timezones.get(self.region, [])
-            if not filtered_timezones:
-                await interaction.response.send_message("No timezones found for the selected region.", ephemeral=True)
-                self.stop()
-                return
-
-            # Limit to 24 options and add "More..." as the 25th option
-            display_timezones = filtered_timezones[:24]
-            options = [discord.SelectOption(label=tz, value=tz) for tz in display_timezones]
-            if len(filtered_timezones) > 24:
-                options.append(discord.SelectOption(label="More...", value="more"))
-
-            self.add_item(TimezoneSelect(options=options))
-            await interaction.response.edit_message(content="Select your timezone:", view=self)
-        except Exception as e:
-            logging.exception("Error in update_timezone_select")
-            await interaction.response.send_message(
-                "An error occurred while updating timezone selection.", ephemeral=True
-            )
-            self.stop()
 
     async def update_day_select(self, interaction: discord.Interaction):
         try:
@@ -521,7 +703,8 @@ async def player_signup(guild: discord.Guild, thread_id: int, session_name: str,
                 print(character_info)
                 await cursor.execute(
                     """INSERT INTO Sessions_Signups (Session_ID, Session_Name, Player_Name, Player_ID, Character_Name, Level, Effective_Wealth, Tier, Notification_Warning) Values (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (session_id, session_name, player_name, player_id, character_name, level, gold_value - gold, tier, warning_duration)
+                    (session_id, session_name, player_name, player_id, character_name, level, gold_value - gold, tier,
+                     warning_duration)
                 )
                 await db.commit()
                 print(thread_id)
@@ -586,10 +769,10 @@ async def player_leave_session(guild: discord.Guild, session_id: int, player_nam
                 if not thread:
                     thread = await guild.fetch_channel(thread_id)
                 if thread:
-                    if player: 
+                    if player:
                         await thread.send(f"{player_name} has decided against participating in the session!")
                         return True
-                    else: 
+                    else:
                         await thread.send(f"Has been removed from the session!")
                         return True
                 else:
@@ -763,7 +946,8 @@ class PlayerCommands(commands.Cog, name='Player'):
                 if session_info is None:
                     await interaction.followup.send(f"No active session with Session ID: {session_id} can be found!")
                 else:
-                    (session_name, play_location, hammer_time, game_link, session_range_id, session_range, session_thread,
+                    (session_name, play_location, hammer_time, game_link, session_range_id, session_range,
+                     session_thread,
                      overflow) = session_info
                     await cursor.execute(
                         "SELECT Level from Player_Characters WHERE Player_ID = ? AND Character_Name = ?",
@@ -1190,7 +1374,6 @@ class PlayerCommands(commands.Cog, name='Player'):
             logging.exception(f"An error occurred whilst displaying session information: {e}")
             await interaction.followup.send(
                 "An error occurred whilst displaying session information. Please try again later.")
-
 
     @timesheet_group.command(name="set", description="Set your availability for a day of the week")
     async def timesheet_creation(self, interaction: discord.Interaction):
