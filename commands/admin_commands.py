@@ -300,6 +300,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     else:
                         (info_true_character_name, info_character_name, info_fame, info_prestige,
                          info_thread_id) = player_info
+                        print(info_fame, info_prestige, fame, prestige)
                         fame_calculation = await character_commands.calculate_fame(
                             character_name=character_name,
                             fame=info_fame,
@@ -307,18 +308,18 @@ class AdminCommands(commands.Cog, name='admin'):
                             prestige=info_prestige,
                             prestige_change=prestige
                         )
-                        (Fame, fame_change, prestige, prestige_change) = fame_calculation
+                        (total_fame, fame_change, total_prestige, prestige_change) = fame_calculation
                         character_updates = shared_functions.UpdateCharacterData(
                             character_name=character_name,
-                            fame_package=(Fame, prestige))
+                            fame_package=(total_fame, total_prestige))
                         await shared_functions.update_character(
                             guild_id=guild.id,
                             change=character_updates)
                         character_changes = shared_functions.CharacterChange(
                             character_name=character_name,
                             author=interaction.user.name,
-                            fame=fame,
-                            fame_change=fame_change,
+                            fame=total_fame,
+                            fame_change=total_prestige,
                             prestige=prestige,
                             prestige_change=prestige_change,
                             source=f"admin adjusted fame by {fame_change} and prestige by {prestige_change} for {character_name}")

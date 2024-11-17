@@ -85,6 +85,73 @@ north_america_regions = {
                   'Grenada', 'Haiti', 'Jamaica', 'Saint Kitts and Nevis', 'Saint Lucia', 'Saint Vincent and the Grenadines',
                   'Trinidad and Tobago', 'Puerto Rico']
 }
+
+us_regions = {
+    'Northeast': ['Connecticut', 'Maine', 'Massachusetts', 'New Hampshire', 'Rhode Island', 'Vermont',
+                  'New Jersey', 'New York', 'Pennsylvania'],
+    'Midwest': ['Indiana', 'Illinois', 'Michigan', 'Ohio', 'Wisconsin',
+                'Iowa', 'Kansas', 'Minnesota', 'Missouri', 'Nebraska', 'North Dakota', 'South Dakota'],
+    'South': ['Delaware', 'Florida', 'Georgia', 'Maryland', 'North Carolina', 'South Carolina', 'Virginia',
+              'District of Columbia', 'West Virginia', 'Alabama', 'Kentucky', 'Mississippi', 'Tennessee',
+              'Arkansas', 'Louisiana', 'Oklahoma', 'Texas'],
+    'West': ['Arizona', 'Colorado', 'Idaho', 'Montana', 'Nevada', 'New Mexico', 'Utah', 'Wyoming',
+             'Alaska', 'California', 'Hawaii', 'Oregon', 'Washington'],
+}
+# Mapping of US states to their time zones
+us_state_timezones = {
+    'Alabama': ['Central Time'],
+    'Alaska': ['Alaska Time'],
+    'Arizona': ['Mountain Time'],
+    'Arkansas': ['Central Time'],
+    'California': ['Pacific Time'],
+    'Colorado': ['Mountain Time'],
+    'Connecticut': ['Eastern Time'],
+    'Delaware': ['Eastern Time'],
+    'Florida': ['Eastern Time', 'Central Time'],
+    'Georgia': ['Eastern Time'],
+    'Hawaii': ['Hawaii Time'],
+    'Idaho': ['Mountain Time', 'Pacific Time'],
+    'Illinois': ['Central Time'],
+    'Indiana': ['Eastern Time', 'Central Time'],
+    'Iowa': ['Central Time'],
+    'Kansas': ['Central Time', 'Mountain Time'],
+    'Kentucky': ['Eastern Time', 'Central Time'],
+    'Louisiana': ['Central Time'],
+    'Maine': ['Eastern Time'],
+    'Maryland': ['Eastern Time'],
+    'Massachusetts': ['Eastern Time'],
+    'Michigan': ['Eastern Time', 'Central Time'],
+    'Minnesota': ['Central Time'],
+    'Mississippi': ['Central Time'],
+    'Missouri': ['Central Time'],
+    'Montana': ['Mountain Time'],
+    'Nebraska': ['Central Time', 'Mountain Time'],
+    'Nevada': ['Pacific Time', 'Mountain Time'],
+    'New Hampshire': ['Eastern Time'],
+    'New Jersey': ['Eastern Time'],
+    'New Mexico': ['Mountain Time'],
+    'New York': ['Eastern Time'],
+    'North Carolina': ['Eastern Time'],
+    'North Dakota': ['Central Time', 'Mountain Time'],
+    'Ohio': ['US/Eastern'],
+    'Oklahoma': ['Central Time'],
+    'Oregon': ['Pacific Time', 'Mountain Time'],
+    'Pennsylvania': ['Eastern Time'],
+    'Rhode Island': ['Eastern Time'],
+    'South Carolina': ['Eastern Time'],
+    'South Dakota': ['Central Time', 'Mountain Time'],
+    'Tennessee': ['Central Time', 'Eastern Time'],
+    'Texas': ['Central Time', 'Mountain Time'],
+    'Utah': ['Mountain Time'],
+    'Vermont': ['US/Eastern'],
+    'Virginia': ['Eastern Time'],
+    'Washington': ['Pacific Time'],
+    'West Virginia': ['Eastern Time'],
+    'Wisconsin': ['Central Time'],
+    'Wyoming': ['Mountain Time'],
+    'District of Columbia': ['Eastern Time'],
+}
+
 # Update the continent_regions mapping
 continent_regions = {
     'Africa': africa_regions,
@@ -201,6 +268,29 @@ class RegionSelect(discord.ui.Select):
             )
             self.view.stop()
 
+
+class USRegionSelect(discord.ui.Select):
+    def __init__(self, regions: typing.Dict[str, List[str]]):
+        self.regions = regions
+        options = [discord.SelectOption(label=region) for region in regions.keys()]
+        super().__init__(
+            placeholder="Select your US region...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            self.view.us_region = self.values[0]
+            await self.view.update_state_select(interaction)
+        except Exception as e:
+            logging.exception("Error in USRegionSelect callback")
+            await interaction.response.send_message(
+                "An error occurred while selecting your US region.", ephemeral=True
+            )
+            self.view.stop()
+
 class CountrySelect(discord.ui.Select):
     def __init__(self, options: List[discord.SelectOption]):
         super().__init__(
@@ -215,8 +305,7 @@ class CountrySelect(discord.ui.Select):
             selected_country_name = self.values[0]
             if selected_country_name == 'other':
                 await interaction.response.send_message(
-                    "Please enter your country manually using the `/timesheet` command with your country.",
-                    ephemeral=True
+                    "Please enter your country manually using the `/timesheet` command with your country.", ephemeral=True
                 )
                 self.view.stop()
                 return
@@ -330,7 +419,68 @@ class TimeSelect(discord.ui.Select):
             )
             self.view.stop()
 
+class HourSelect(discord.ui.Select):
+    def __init__(self, time_type: str):
+        self.time_type = time_type  # "start" or "end"
+        options = [
+            discord.SelectOption(label=f"{hour:02d}", value=str(hour)) for hour in range(0, 24)
+        ]
+        super().__init__(
+            placeholder="Select the hour...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
 
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            selected_hour = int(self.values[0])
+            if self.time_type == "start":
+                self.view.start_hour = selected_hour
+            else:
+                self.view.end_hour = selected_hour
+            await self.view.update_minute_select(interaction, self.time_type)
+        except Exception as e:
+            logging.exception("Error in HourSelect callback")
+            await interaction.response.send_message(
+                "An error occurred while selecting the hour.", ephemeral=True
+            )
+            self.view.stop()
+
+class MinuteSelect(discord.ui.Select):
+    def __init__(self, time_type: str):
+        self.time_type = time_type  # "start" or "end"
+        options = [
+            discord.SelectOption(label=f"{minute:02d}", value=str(minute)) for minute in [0, 30]
+        ]
+        super().__init__(
+            placeholder="Select the minutes...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            selected_minute = int(self.values[0])
+            if self.time_type == "start":
+                self.view.start_minute = selected_minute
+                # Combine hour and minute to form start_time
+                self.view.start_time = f"{self.view.start_hour:02d}:{self.view.start_minute:02d}"
+                # Proceed to select end time
+                await self.view.update_time_select(interaction, "end")
+            else:
+                self.view.end_minute = selected_minute
+                # Combine hour and minute to form end_time
+                self.view.end_time = f"{self.view.end_hour:02d}:{self.view.end_minute:02d}"
+                # Proceed to process availability
+                await self.view.process_availability(interaction)
+        except Exception as e:
+            logging.exception("Error in MinuteSelect callback")
+            await interaction.response.send_message(
+                "An error occurred while selecting the minutes.", ephemeral=True
+            )
+            self.view.stop()
 # Custom Buttons for Adding Multiple Time Slots
 class AddAnotherSlotButton(discord.ui.Button):
     def __init__(self):
@@ -341,17 +491,35 @@ class AddAnotherSlotButton(discord.ui.Button):
             # Reset the view to allow adding another time slot
             self.view.clear_items()
             self.view.add_item(DaySelect())
-            self.view.add_item(TimeSelect(label="Select Start Time", time_type="start"))
             await interaction.response.edit_message(content="Select the day of the week for the new time slot:",
                                                     view=self.view)
         except Exception as e:
-            logging.exception("Error in AddAnotherSlotButton callback")
+            logging.exception(f"Error in AddAnotherSlotButton callback: {e}")
             await interaction.response.send_message(
                 "An error occurred while adding another time slot.", ephemeral=True
             )
             self.view.stop()
 
 
+class StateSelect(discord.ui.Select):
+    def __init__(self, options: List[discord.SelectOption]):
+        super().__init__(
+            placeholder="Select your state...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            self.view.state = self.values[0]
+            await self.view.update_timezone_select_us(interaction)
+        except Exception as e:
+            logging.exception("Error in StateSelect callback")
+            await interaction.response.send_message(
+                "An error occurred while selecting your state.", ephemeral=True
+            )
+            self.view.stop()
 class FinishButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="Finish", style=discord.ButtonStyle.success)
@@ -369,22 +537,30 @@ class FinishButton(discord.ui.Button):
 
 # Enhanced AvailabilityView with Multiple Time Slots
 class AvailabilityView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, timezone: typing.Optional[str]):
         super().__init__(timeout=600)
-        self.region = None
+        self.region: Optional[str] = None
         self.continent: Optional[str] = None
         self.country_code: Optional[str] = None
+        self.us_region: Optional[str] = None
         self.state: Optional[str] = None
-        self.timezone: Optional[str] = None
+        self.timezone = timezone
         self.day: Optional[str] = None
         self.start_time: Optional[str] = None
         self.end_time: Optional[str] = None
         self.guild_id: Optional[int] = None
         self.user_id: Optional[int] = None
         self.time_slots: List[dict] = []
+        self.start_hour: Optional[int] = None
+        self.start_minute: Optional[int] = None
+        self.end_hour: Optional[int] = None
+        self.end_minute: Optional[int] = None
 
         # Start with continent selection
-        self.add_item(ContinentSelect())
+        if not self.timezone:
+            self.add_item(ContinentSelect())
+        else:
+            self.add_item(DaySelect())
 
     async def update_country_select(self, interaction: discord.Interaction):
         try:
@@ -470,6 +646,72 @@ class AvailabilityView(discord.ui.View):
             )
             self.stop()
 
+    async def update_state_select(self, interaction: discord.Interaction):
+        try:
+            self.clear_items()
+            if self.country_code == 'US':
+                # Get states for the selected US region
+                states_in_region = us_regions.get(self.us_region, [])
+                if not states_in_region:
+                    await interaction.response.send_message(
+                        "No states found for the selected region.", ephemeral=True
+                    )
+                    self.stop()
+                    return
+                # Create options for states in the region
+                options = [
+                    discord.SelectOption(label=state) for state in sorted(states_in_region)
+                ]
+                self.add_item(StateSelect(options=options))
+                await interaction.response.edit_message(content="Select your state:", view=self)
+            else:
+                # Handle other countries if necessary
+                pass
+        except Exception as e:
+            logging.exception("Error in update_state_select")
+            await interaction.response.send_message(
+                "An error occurred while updating state selection.", ephemeral=True
+            )
+            self.stop()
+
+    async def update_region_select_us(self, interaction: discord.Interaction):
+        try:
+            self.clear_items()
+            # Assuming you have us_regions defined as before
+            regions = us_regions  # Make sure us_regions is defined
+            # Create a USRegionSelect for US regions
+            self.add_item(USRegionSelect(regions=regions))
+            await interaction.response.edit_message(content="Select your US region:", view=self)
+        except Exception as e:
+            logging.exception("Error in update_region_select_us")
+            await interaction.response.send_message(
+                "An error occurred while updating US region selection.", ephemeral=True
+            )
+            self.stop()
+
+    async def update_timezone_select_us(self, interaction: discord.Interaction):
+        try:
+            self.clear_items()
+            state_timezones = us_state_timezones.get(self.state)
+            if not state_timezones:
+                await interaction.response.send_message(
+                    "No time zones found for the selected state.", ephemeral=True
+                )
+                self.stop()
+                return
+            # Create options for time zones
+            options = [
+                discord.SelectOption(label=tz, value=tz) for tz in state_timezones
+            ]
+            self.add_item(TimezoneSelect(options=options))
+            await interaction.response.edit_message(content="Select your time zone:", view=self)
+        except Exception as e:
+            logging.exception("Error in update_timezone_select_us")
+            await interaction.response.send_message(
+                "An error occurred while updating time zone selection.", ephemeral=True
+            )
+            self.stop()
+
     async def update_timezone_select(self, interaction: discord.Interaction):
         try:
             # Remove previous items
@@ -535,17 +777,11 @@ class AvailabilityView(discord.ui.View):
 
     async def update_time_select(self, interaction: discord.Interaction, time_type: str):
         try:
-            # Remove previous time select menus
+            # Remove previous items
             self.clear_items()
-            # Add time select menus based on time_type
-            if time_type == "start":
-                self.add_item(TimeSelect(label="Select Start Time", time_type="start"))
-                await interaction.response.edit_message(content="Select your start time:", view=self)
-            elif time_type == "end":
-                self.add_item(TimeSelect(label="Select End Time", time_type="end"))
-                # Add Finish button after selecting end time
-                self.add_item(FinishButton())
-                await interaction.response.edit_message(content="Select your end time:", view=self)
+            # Add HourSelect
+            self.add_item(HourSelect(time_type=time_type))
+            await interaction.response.edit_message(content=f"Select your {time_type} time (hour):", view=self)
         except Exception as e:
             logging.exception("Error in update_time_select")
             await interaction.response.send_message(
@@ -553,10 +789,26 @@ class AvailabilityView(discord.ui.View):
             )
             self.stop()
 
+    async def update_minute_select(self, interaction: discord.Interaction, time_type: str):
+        try:
+            # Remove previous items
+            self.clear_items()
+            # Add MinuteSelect
+            self.add_item(MinuteSelect(time_type=time_type))
+            await interaction.response.edit_message(content=f"Select your {time_type} time (minutes):", view=self)
+        except Exception as e:
+            logging.exception("Error in update_minute_select")
+            await interaction.response.send_message(
+                "An error occurred while updating minute selection.", ephemeral=True
+            )
+            self.stop()
+
     async def process_availability(self, interaction: discord.Interaction):
         try:
             # All selections have been made, process the data
-            if not all([self.timezone, self.day, self.start_time, self.end_time]):
+            print("Processing availability...")
+            print(f"Timezone: {self.timezone} Day: {self.day}, Start: {self.start_hour}, {self.start_minute}, End: {self.end_hour}, {self.end_minute}  ")
+            if not all([self.timezone, self.day]) and self.start_hour is None and self.start_minute is None and self.end_hour is None and self.end_minute is None:
                 await interaction.response.send_message(
                     "Incomplete availability information.", ephemeral=True
                 )
@@ -575,9 +827,12 @@ class AvailabilityView(discord.ui.View):
                 )
                 return
 
+            start_time_str = f"{self.start_hour:02d}:{self.start_minute:02d}"
+            end_time_str = f"{self.end_hour:02d}:{self.end_minute:02d}"
+
             # Parse times
-            start_time_parsed = parse_time_input(self.start_time)
-            end_time_parsed = parse_time_input(self.end_time)
+            start_time_parsed = parse_time_input(start_time_str)
+            end_time_parsed = parse_time_input(end_time_str)
             if not start_time_parsed or not end_time_parsed:
                 await interaction.response.send_message(
                     "Invalid start or end time format.", ephemeral=True
@@ -622,7 +877,12 @@ class AvailabilityView(discord.ui.View):
             })
 
             # Reset selections for another entry
+            # Reset selections for another entry
             self.day = None
+            self.start_hour = None
+            self.start_minute = None
+            self.end_hour = None
+            self.end_minute = None
             self.start_time = None
             self.end_time = None
             self.timezone = None
@@ -641,6 +901,8 @@ class AvailabilityView(discord.ui.View):
                 "An unexpected error occurred while processing your availability.", ephemeral=True
             )
             self.stop()
+
+
 
     async def process_all_availability(self, interaction: discord.Interaction):
         try:
@@ -1433,7 +1695,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     async def timesheet_creation(self, interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
         try:
-            view = AvailabilityView()
+            view = AvailabilityView(timezone='US/Eastern')
             await interaction.followup.send(content="This is a test", view=view)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"An error occurred whilst displaying session information: {e}")
