@@ -2377,10 +2377,6 @@ class Managed_Events(commands.Cog):
             validation = 1
             if player_exists[0] != 7:
                 print(player_exists[0])
-                # Uncomment and adjust the following lines if needed
-                # if player_exists[0] > 0:
-                #     cursor.execute("DELETE FROM Player_Timecard WHERE Player_Name = ?", (author,))
-                #     db.commit()
                 x = 1
                 entries = []  # List to store the entries to insert
                 while x < 8:

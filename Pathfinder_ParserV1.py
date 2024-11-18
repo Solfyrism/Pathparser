@@ -528,8 +528,6 @@ def fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset):
                 select_columns.append(f'pt2."{col}"')
         select_clause = ', '.join(select_columns)
         day_two = adjust_day(day, 23, -4)
-        print(f" DAY ONE IS {day} DAY TWO IS {day_two}")
-        print(f"The select clause is {select_clause}", f"the day is day {day_two}")
         cursor.execute(
             f"SELECT {select_clause} FROM Player_Timecard PT1 Left Join Player_Timecard PT2 on PT1.Player_Name = PT2.Player_Name where PT1.Player_Name = ? and PT1.Day = ? AND PT2.Day = ?",
             (player_name, day, day_two))
@@ -604,7 +602,7 @@ async def create_timecard_plot(guild_id, player_name, day, utc_offset):
                             top=0.85)  # Adjust bottom and top margins to give room for the x-labels and title
 
         plt.tight_layout()
-    elif type(player_name) == type(test):  # Correct
+    elif isinstance(player_name, tuple):  # Correct
         player_list = []  # Initialize an empty list to store player names
         player_availability = []  # Initialize an empty list to store all players' availability data
         group_name = None
