@@ -2220,7 +2220,7 @@ class MythicDisplayView(shared_functions.ShopView):
                 self.max_items = count[0]
         return self.max_items
 
-
+# *** DUAL VIEWS ***
 class ArchiveDisplayView(shared_functions.DualView):
     def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, player_name: str, character_name: str,
                  view_type: int, interaction: discord.Interaction):
@@ -2349,7 +2349,6 @@ class ArchiveDisplayView(shared_functions.DualView):
             self.limit = 1  # Change the limit to 1 for the detailed view
 
 
-# *** DUAL VIEWS ***
 class SettingDisplayView(shared_functions.DualView):
     def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, view_type: int,
                  interaction: discord.Interaction):
