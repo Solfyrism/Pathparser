@@ -1,15 +1,22 @@
+import asyncio
 import datetime
+from dataclasses import dataclass, field
+from typing import Dict, Tuple
+
 import aiosqlite
 import discord
 from discord.ext import commands
 import os
-
+import json
+import difflib
 from commands.reviewer_commands import ReviewerCommands
 from test_functions import TestCommands
 from commands.character_commands import CharacterCommands
 from commands.admin_commands import AdminCommands
 from commands.gamemaster_commands import GamemasterCommands
 from commands.player_commands import PlayerCommands
+from commands.RP_Commands import RPCommands
+import commands.RP_Commands
 import logging
 import shared_functions
 from commands import gamemaster_commands
@@ -24,7 +31,6 @@ intents.message_content = True
 intents.members = True
 os.chdir("C:\\pathparser")
 bot = commands.Bot(command_prefix="!", intents=intents)
-
 
 
 
@@ -103,15 +109,41 @@ async def on_ready():
     await bot.add_cog(GamemasterCommands(bot))
     await bot.add_cog(PlayerCommands(bot))
     await bot.add_cog(ReviewerCommands(bot))
+    await bot.add_cog(RPCommands(bot))
     await bot.tree.sync()
     await reinstate_reminders(bot)
     await reinstate_session_buttons(bot)
+    await reinstate_cache(bot)
 
 
 @bot.event
 async def on_disconnect():
     print("Bot is disconnecting.")
 
+# User model (modify to match your existing users table)
+class User(Base):
+    __tablename__ = 'users'
+    user_id = Column(BigInteger, primary_key=True)
+    # Existing fields...
+    balance = Column(Integer, default=0)
+    last_post_time = Column(DateTime)
+    recent_posts = Column(Text, default='[]')  # Stores recent posts as a JSON string
+
+# Event handler for all messages
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return  # Ignore messages from bots
+
+    session = Session()
+    # Check if the message is in an RP channel
+    is_rp_channel = session.query(RPChannel).filter_by(channel_id=message.channel.id).first()
+    session.close()
+
+    if is_rp_channel:
+        await RPCommands.handle_rp_message(message)
+    else:
+        await bot.process_commands(message)  # Ensure other commands still work
 
 bot.run(os.getenv("DISCORD_TOKEN_V2"))
 bot.loop.create_task(shared_functions.clear_autocomplete_cache())

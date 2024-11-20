@@ -1,4 +1,6 @@
+import json
 import logging
+import random
 import typing
 import math
 from math import floor
@@ -22,6 +24,32 @@ os.chdir("C:\\pathparser")
 
 class CalculationAidFunctionError(Exception):
     pass
+
+
+def safe_int(value, default=0):
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def safe_int_atk(value, default=0):
+    try:
+        try:
+            value = int(value)
+        except ValueError:
+            start_index = value.find('+')
+            end_index_slash = value.find('/') if '/' in value else 0
+            end_index_space = value.find(' ') if ' ' in value else 0
+            end_index = min(end_index_slash, end_index_space) if end_index_slash and end_index_space else max(
+                end_index_slash, end_index_space) if end_index_slash or end_index_space else None
+            if start_index != -1 and end_index:
+                value = int(value[start_index + 1:end_index])
+            else:
+                value = 0
+        return int(value)
+    except (ValueError, TypeError):
+        return default
 
 
 # LEVEL INFORMATION
@@ -2657,6 +2685,280 @@ class CharacterCommands(commands.Cog, name='character'):
             await interaction.followup.send(f"An error occurred in the claim command: {e}")
             logging.exception(f"An error occurred in the claim command: {e}")
 
+    mythweavers_group = discord.app_commands.Group(
+        name='mythweavers',
+        description='Commands for managing gold on a character',
+        parent=character_group
+    )
+
+    @mythweavers_group.command(name='upload',
+                               description='Upload the Abilities and skills from your mythweavers sheet.')
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def upload(self, interaction: discord.Interaction, character_name: str, mythweavers: discord.Attachment):
+        try:
+            await interaction.response.defer(thinking=True)
+            guild_id = interaction.guild_id
+            async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
+                cursor = await conn.cursor()
+                await cursor.execute(
+                    "SELECT Character_Name FROM Player_Characters where Player_Name = ? AND (Character_Name = ? or Nickname = ?)",
+                    (interaction.user.name, character_name, character_name)
+                )
+                player_info = await cursor.fetchone()
+                if not player_info:
+                    await interaction.followup.send(
+                        f"Character '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+                else:
+                    (character_name_db,) = player_info
+                    await cursor.execute("DELETE from Player_Characters_Attributes where Character_Name = ?",
+                                         (character_name_db,))
+                    await conn.commit()
+                    await cursor.execute("DELETE from Player_Characters_Skills where Character_Name = ?",
+                                         (character_name_db,))
+                    await conn.commit()
+                    file_content = await mythweavers.read()
+                    # Check if the file is a json file
+                    try:
+                        skills_data = json.loads(file_content)
+                    except json.JSONDecodeError as e:
+                        await interaction.followup.send(
+                            f"An error occurred while reading the uploaded file: {e}",
+                            ephemeral=True
+                        )
+                        return
+
+                    # Extract and safely convert Attributes
+                    attributes = {
+                        'strength': safe_int(skills_data.get('Str')),
+                        'strength_mod': safe_int(skills_data.get('StrMod')),
+                        'dexterity': safe_int(skills_data.get('Dex')),
+                        'dexterity_mod': safe_int(skills_data.get('DexMod')),
+                        'constitution': safe_int(skills_data.get('Con')),
+                        'constitution_mod': safe_int(skills_data.get('ConMod')),
+                        'intelligence': safe_int(skills_data.get('Int')),
+                        'intelligence_mod': safe_int(skills_data.get('IntMod')),
+                        'wisdom': safe_int(skills_data.get('Wis')),
+                        'wisdom_mod': safe_int(skills_data.get('WisMod')),
+                        'charisma': safe_int(skills_data.get('Cha')),
+                        'charisma_mod': safe_int(skills_data.get('ChaMod')),
+                        'fortitude': safe_int(skills_data.get('Fort')),
+                        'reflex': safe_int(skills_data.get('Reflex')),
+                        'will': safe_int(skills_data.get('Will')),
+                        'initiative': safe_int(skills_data.get('Init')),
+                        'hit_points': safe_int(skills_data.get('HP')),
+                        'armor_class': safe_int(skills_data.get('AC')),
+                        'touch_armor_class': safe_int(skills_data.get('ACTouch')),
+                        'cmd': safe_int(skills_data.get('CMD')),
+                        'ranged': safe_int_atk(skills_data.get('RBAB')),
+                        'melee': safe_int_atk(skills_data.get('MBAB')),
+                        'cmb': safe_int_atk(skills_data.get('CMB')),
+                    }
+
+                    await cursor.execute(
+                        '''
+                        INSERT OR REPLACE INTO Player_Characters_Attributes (
+                            character_name, strength, strength_mod, dexterity, dexterity_mod,
+                            constitution, constitution_mod, intelligence, intelligence_mod,
+                            wisdom, wisdom_mod, charisma, charisma_mod, fortitude,
+                            reflex, will, initiative, hit_points, armor_class,
+                            touch_armor_class, cmd, Melee, Ranged, CMB
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''',
+                        (
+                            character_name, attributes['strength'], attributes['strength_mod'],
+                            attributes['dexterity'], attributes['dexterity_mod'],
+                            attributes['constitution'], attributes['constitution_mod'],
+                            attributes['intelligence'], attributes['intelligence_mod'],
+                            attributes['wisdom'], attributes['wisdom_mod'],
+                            attributes['charisma'], attributes['charisma_mod'],
+                            attributes['fortitude'], attributes['reflex'], attributes['will'],
+                            attributes['initiative'], attributes['hit_points'],
+                            attributes['armor_class'], attributes['touch_armor_class'],
+                            attributes['cmd'], attributes['melee'], attributes['ranged'], attributes['cmb']
+                        )
+                    )
+
+                    # Process skills
+                    for i in range(1, 36):
+                        skill_key = f"Skill{i:02}"
+                        if skill_key in skills_data:
+                            skill_name = skills_data.get(skill_key)
+                            ability = skills_data.get(f"{skill_key}Ab", "Unknown")
+                            skill_rank = safe_int(skills_data.get(f"{skill_key}Rank"))
+                            ability_mod = attributes.get(f"{ability.lower()}_mod", 0)
+                            skill_modifier = ability_mod + skill_rank
+
+                            # Insert or replace skill
+                            await cursor.execute(
+                                '''
+                                INSERT OR REPLACE INTO Player_Characters_Skills (
+                                    character_name, skill_name, ability, skill_rank, skill_modifier
+                                ) VALUES (?, ?, ?, ?, ?)
+                                ''',
+                                (
+                                    character_name, skill_name, ability, skill_rank, skill_modifier
+                                )
+                            )
+                    await conn.commit()
+                    await interaction.followup.send(
+                        f"Mythweavers sheet uploaded successfully for {character_name}.",
+                        ephemeral=True)
+
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            await interaction.followup.send(f"An error occurred in the upload command: {e}")
+            logging.exception(f"An error occurred in the upload command: {e}")
+
+    @mythweavers_group.command(name="combat", description="display the combat stats from your mythweavers sheet.")
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def combat(self, interaction: discord.Interaction, character_name: str):
+        try:
+            await interaction.response.defer(thinking=True)
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as conn:
+                cursor = await conn.cursor()
+                await cursor.execute(
+                    "SELECT Fortitude, Reflex, Will, Initiative, Hit_Points, Armor_Class, Touch_Armor_Class, CMD, Melee, Ranged, CMB FROM Player_Characters_Attributes WHERE Character_Name = ?",
+                    (character_name,)
+                )
+                attributes = await cursor.fetchone()
+                if not attributes:
+                    await interaction.followup.send(
+                        f"Character '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+                else:
+                    (fortitude, reflex, will, initiative, hit_points, armor_class, touch_armor_class, cmd, melee, ranged, cmb) = attributes
+                    embed = discord.Embed(
+                        title=f"Defences for {character_name}",
+                        description=f"**Hit Points**: {hit_points}\n"
+                                    f"**Armor Class**: {armor_class} **Touch Armor Class**: {touch_armor_class} **CMD**: {cmd}\n"
+                                    f"**Fortitude**: {fortitude} **Reflex**: {reflex} **Will**: {will}\n"
+                                    f"**Initiative**: {initiative}\n"
+                                    f"**Melee**: {melee} **Ranged**: {ranged} **CMB**: {cmb}"
+                    )
+                    await interaction.followup.send(embed=embed)
+                    combat_dict= {
+                        'Fortitude': fortitude,
+                        'Reflex': reflex,
+                        'Will': will,
+                        'Initiative': initiative,
+                        'cmb': cmb,
+                        'Melee': melee,
+                        'Ranged': ranged
+                    }
+                    view = AttributesView(
+                        user_id=interaction.user.id,
+                        guild_id=interaction.guild_id,
+                        modifiers=combat_dict
+                    )
+                    await interaction.followup.send(embed=embed, view=view)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            await interaction.followup.send(f"An error occurred in the defences command: {e}")
+            logging.exception(f"An error occurred in the defences command: {e}")
+
+    @mythweavers_group.command(name="skills", description="display the skills from your mythweavers sheet.")
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    @app_commands.choices(ability=[discord.app_commands.Choice(name='Strength', value='str'),
+                                   discord.app_commands.Choice(name='Dexterity', value='dex'),
+                                   discord.app_commands.Choice(name='Constitution', value='con'),
+                                   discord.app_commands.Choice(name='Intelligence', value='int'),
+                                   discord.app_commands.Choice(name='Wisdom', value='wis'),
+                                   discord.app_commands.Choice(name='Charisma', value='cha')])
+    async def skills(self, interaction: discord.Interaction, character_name: str,
+                     ability: discord.app_commands.Choice[str]):
+        try:
+            ability_name = ability if isinstance(ability, str) else ability.value
+            await interaction.response.defer(thinking=True)
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as conn:
+                cursor = await conn.cursor()
+                print(character_name, ability_name)
+                await cursor.execute(
+                    "SELECT Character_Name, Skill_Name, Ability, Skill_Rank, Skill_Modifier FROM Player_Characters_Skills WHERE Character_Name = ? AND Ability = ?",
+                    (character_name, ability_name.title())
+                )
+                skills = await cursor.fetchall()
+                if not skills:
+                    await interaction.followup.send(
+                        f"Character '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+                else:
+                    embed = discord.Embed(
+                        title=f"Skills for {character_name}",
+                        description=f"**{ability_name} skills**\n"
+                    )
+                    skill_dictionary = {}
+                    for skill in skills:
+                        (character_name, skill_name, ability, skill_rank, skill_modifier) = skill
+                        skill_dictionary[skill_name] = skill_modifier
+                        embed.add_field(
+                            name=f"{skill_name}",
+                            value=f"**Rank**: {skill_rank} **Modifier**: {skill_modifier}",
+                            inline=False
+                        )
+                    view = AttributesView(
+                        user_id=interaction.user.id,
+                        guild_id=interaction.guild_id,
+                        modifiers=skill_dictionary
+                    )
+                    await interaction.followup.send(embed=embed, view=view)
+
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            await interaction.followup.send(f"An error occurred in the skills command: {e}")
+            logging.exception(f"An error occurred in the skills command: {e}")
+
+    @mythweavers_group.command(name="attributes", description="display the attributes from your mythweavers sheet.")
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    async def attributes(self, interaction: discord.Interaction, character_name: str):
+        try:
+            await interaction.response.defer(thinking=True)
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as conn:
+                cursor = await conn.cursor()
+                await cursor.execute(
+                    "SELECT Character_Name, Strength, Strength_Mod, Dexterity, Dexterity_Mod, Constitution, Constitution_Mod, Intelligence, Intelligence_Mod, Wisdom, Wisdom_Mod, Charisma, Charisma_Mod FROM Player_Characters_Attributes WHERE Character_Name = ?",
+                    (character_name,)
+                )
+                attributes = await cursor.fetchone()
+                if not attributes:
+                    await interaction.followup.send(
+                        f"Character '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+                else:
+                    (character_name, strength, strength_mod, dexterity, dexterity_mod, constitution, constitution_mod,
+                     intelligence, intelligence_mod, wisdom, wisdom_mod, charisma, charisma_mod) = attributes
+                    attributes_dict = {
+                        'Strength': strength_mod,
+                        'Dexterity': dexterity_mod,
+                        'Constitution': constitution_mod,
+                        'Intelligence': intelligence_mod,
+                        'Wisdom': wisdom_mod,
+                        'Charisma': charisma_mod
+                    }
+                    embed = discord.Embed(
+                        title=f"Attributes for {character_name}",
+                        description=f"**Strength**: Score: {strength} Modifier: {strength_mod}\n"
+                                    f"**Dexterity**: Score: {dexterity} Modifier: {dexterity_mod}\n"
+                                    f"**Constitution**: Score: {constitution} Modifier: {constitution_mod}\n"
+                                    f"**Intelligence**: Score: {intelligence} Modifier: {intelligence_mod} \n"
+                                    f"**Wisdom**: Score: {wisdom} Modifier: {wisdom_mod}\n"
+                                    f"**Charisma**: Score: {charisma} Modifier: {charisma_mod} \n"
+                    )
+                    view = AttributesView(
+                        user_id=interaction.user.id,
+                        guild_id=interaction.guild_id,
+                        modifiers=attributes_dict
+                    )
+                    await interaction.followup.send(embed=embed, view=view)
+        except(aiosqlite.Error, TypeError, ValueError) as e:
+            await interaction.followup.send(f"An error occurred in the attributes command: {e}")
+            logging.exception(f"An error occurred in the attributes command: {e}")
+
 
 # Modified RetirementView with character deletion
 class RetirementView(shared_functions.SelfAcknowledgementView):
@@ -3449,6 +3751,46 @@ class GoldSendView(shared_functions.RecipientAcknowledgementView):
         )
         self.embed.set_author(name=self.requester_name)
         self.embed.set_footer(text="Please accept or reject this transaction before it expires.")
+
+
+# Mythweavers Views
+class AttributesView(discord.ui.View):
+    def __init__(self, user_id: int, guild_id: int, modifiers: dict):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.modifiers = modifiers  # Dictionary of attribute names and their modifiers
+
+        # Dynamically create buttons and add callbacks
+        for attribute in self.modifiers.keys():
+            button = discord.ui.Button(
+                label=attribute.capitalize(),
+                style=discord.ButtonStyle.primary
+            )
+            button.callback = self.create_roll_callback(attribute)  # Assign callback
+            self.add_item(button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Ensure that only the user who initiated the view can interact with the buttons."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "You cannot interact with this button.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    def create_roll_callback(self, attribute: str):
+        """Generate a callback function for rolling the given attribute."""
+
+        async def callback(interaction: discord.Interaction):
+            roll = random.randint(1, 20)
+            content =f"**Rolling :game_die: {attribute.capitalize()}** base: {roll}: total: {roll + self.modifiers[attribute]}"
+            content += ":broken_heart: **Critical Failure**" if roll == 1 else ""
+            content += ":sparkles: **Critical Success**" if roll == 20 else ""
+            await interaction.response.send_message(content=content)
+
+        return callback
 
 
 logging.basicConfig(

@@ -175,7 +175,7 @@ async def search_timezones(interaction: discord.Interaction, current: str) -> ty
     # Check if timezone cache is initialized
     # Filter timezones based on current input
     filtered_timezones = [tz for tz in timezone_cache if current.lower() in tz.lower()]
-    print(filtered_timezones)
+
     # Return list of app_commands.Choice objects (maximum 25 choices for Discord autocomplete)
     return [
         app_commands.Choice(name=tz, value=tz)
@@ -265,6 +265,99 @@ async def fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset):
         logging.error(f"Error fetching timecard data for {player_name}: {e}")
 
 
+async def fetch_group_availability_from_db(guild_id, group_id, day, utc_offset):
+    time_labels = [
+        "00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30",
+        "04:00", "04:30", "05:00", "05:30", "06:00", "06:30", "07:00", "07:30",
+        "08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
+        "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
+        "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30",
+        "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
+    ]
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("SELECT Player_Name from Sessions_Group_Presign where Group_id = ?", (group_id,))
+            players = await cursor.fetchall()
+
+            player_list = [group_id]
+            player_list.extend(player[0] for player in players)
+
+            # Build the list of placeholders for the player names
+            select_list = ', '.join('?' for _ in players)  # Ensure the number of '?' matches player_list length
+            joined_labels = ['?']
+            utc_offset_time = get_utc_offset(utc_offset)
+            # Fetch the player's timezone from the database
+            if utc_offset_time == 0:
+                # Fetch the player's timecard data for the specified day, they're in UTC so the UTEasy.
+                joined_labels.extend([f'"SUM({label})"' for label in time_labels])
+                joined_labels = ', '.join(joined_labels)
+                sql_statement = f"SELECT {joined_labels} FROM Player_Timecard WHERE Player_Name in ({select_list}) AND Day = ?"
+
+                await cursor.execute(sql_statement,
+                    (player_list, day))
+                row = await cursor.fetchone()
+            else:
+                # get next instance of day occurring
+                start_time = datetime.datetime.now(tz=pytz.utc)
+                days_ahead = day - start_time.weekday() if day - start_time.weekday() >= 0 else 7 + day - start_time.weekday()
+                start_time = start_time + datetime.timedelta(days=days_ahead)
+
+                # get the start and end of the day
+                day_start_start_time = datetime.datetime.combine(start_time.date(), datetime.time.min)
+                day_end_start_time = datetime.datetime.combine(start_time.date(), datetime.time.max)
+
+                # adjust the hour and minute of the day start and end to the player's timezone
+                day_start_timezone = day_start_start_time.astimezone(pytz.timezone(utc_offset))
+                day_end_timezone = day_end_start_time.astimezone(pytz.timezone(utc_offset))
+                day_start_timezone = day_start_timezone - datetime.timedelta(
+                    minutes=day_start_timezone.utcoffset().total_seconds() / 60)
+                day_end_timezone = day_end_timezone - datetime.timedelta(
+                    minutes=day_end_timezone.utcoffset().total_seconds() / 60)
+
+                # Because the timecard is stored in UTC, we need to extract the UTC Times based off of the Player's Timezones
+                end_time = 1440
+                start_time = 0
+                day_start_minutes = day_start_timezone.hour * 60 + day_start_timezone.minute
+                day_end_minutes = day_end_timezone.hour * 60 + day_end_timezone.minute
+
+                # Select the columns based on the player's timezone
+                select_statement = []
+                select_statement.extend('?')
+                for col in time_labels:
+                    col_minutes = time_to_minutes(col)
+                    if day_start_minutes <= col_minutes <= end_time:
+                        select_statement.append(f'sum(pt1."{col}")')
+                for col in time_labels:
+                    col_minutes = time_to_minutes(col)
+                    if start_time <= col_minutes <= day_end_minutes:
+                        select_statement.append(f'sum(pt2."{col}")')
+                joined_labels = ', '.join(select_statement)
+
+                # Append the additional parameters (ensure order matches the placeholders in the SQL statement)
+                additional_params = [day_start_timezone.weekday(), day_end_timezone.weekday()]
+                params = player_list + additional_params  # Combine player_list with additional params
+
+                # Fetch the player's timecard data for the specified day using a left join statement to combine hte results.
+                sql_statement = f"""
+                    SELECT {joined_labels} 
+                    FROM Player_Timecard PT1 
+                    LEFT JOIN Player_Timecard PT2 
+                    ON PT1.Player_Name = PT2.Player_Name  
+                    WHERE PT1.Player_Name IN ({select_list}) 
+                    AND PT1.Day = ? AND PT2.Day = ?
+                """
+
+                await cursor.execute(
+                    sql_statement, params)
+                row = await cursor.fetchone()
+
+            # If the player's data is found, return the row
+            return row
+    except aiosqlite.Error as e:
+        logging.error(f"Error fetching timecard data for {group_id}: {e}")
+
+
 # Function to plot and save the graph as an image
 async def create_timecard_plot(guild_id, player_name, day, utc_offset):
     # Time intervals (x-axis)
@@ -280,7 +373,7 @@ async def create_timecard_plot(guild_id, player_name, day, utc_offset):
 
     if isinstance(player_name, str):
         row = await fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset)
-        print(f"This is {row}")
+
         if row:
             player_availability = row
         else:
@@ -388,80 +481,78 @@ async def create_timecard_plot(guild_id, player_name, day, utc_offset):
     plt.close()
 
 
-async def create_timecard_group_plot(guild_id: int, user_id: int, group_name: str, group_info: list, day: int, utc_offset: str):
+async def create_timecard_group_plot(guild_id: int, user_id: int, group_name: str, group_info: list, day: int,
+                                     utc_offset: str):
     # Time intervals (x-axis)
-    time_labels = [
-        "00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30",
-        "04:00", "04:30", "05:00", "05:30", "06:00", "06:30", "07:00", "07:30",
-        "08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
-        "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
-        "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30",
-        "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
-    ]
-    print(guild_id, user_id, group_info, day, utc_offset)
+    time_labels = [f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in (0, 30)]
+
     daysdict = {1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday', 7: 'Sunday'}
-    player_list = []  # Initialize an empty list to store player names
-    player_availability = []  # Initialize an empty list to store all players' availability data
+    player_list = []
+    player_availability = []
+
+    # Fetch availability data for each player
     for player in group_info:
+        # Assuming 'player' is a string containing the player's name
         row = await fetch_timecard_data_from_db(guild_id, player, day, utc_offset)
 
         if row:
-            player_list.append(player[0])  # Append the player name to the list
-            availability = [int(x) if str(x).isdigit() else 0 for x in row]  # Process row data
-            player_availability.append(availability)  # Add the player's availability to the list
-    # Convert the list of lists into a 2D numpy array for plotting
+            player_list.append(player)  # Append the player name to the list
+            availability = [int(x) if str(x).isdigit() else 0 for x in row]
+            player_availability.append(availability)
+        else:
+            # Handle case where no data is available for the player
+            logging.info(f"No availability data found for {player}.")
+
+    if not player_availability:
+        logging.info("No availability data found for any player.")
+        return
+
+    # Convert to numpy array
     player_availability = np.array(player_availability)
-    group_availability = np.sum(player_availability, axis=0)  # Summing along the player axis
+    group_availability = np.sum(player_availability, axis=0)
 
-    # Use the updated colormap call to avoid deprecation warning
-    cmap = plt.colormaps.get_cmap('RdYlGn')
-
-    # Create a plot with larger size to fit everything
-    min_height = max(3, len(group_info) * 0.5)  # Minimum height of 3 inches
-    fig, ax1 = plt.subplots(figsize=(14, min_height))  # ax1 will be used for the player availability heatmap
+    # Set up the plot
+    cmap = plt.get_cmap('RdYlGn')
+    min_height = max(3, len(player_list) * 0.5)
+    fig, ax1 = plt.subplots(figsize=(14, min_height))
 
     # Plot the player availability heatmap
     heatmap1 = ax1.imshow(player_availability, cmap=cmap, aspect='auto')
 
-    # Rotate the x-axis labels and align them properly
-    midpoints = np.arange(len(time_labels)) - 0.5  # Shift ticks by -0.5 to place grid between labels
+    # Configure x-axis
     ax1.set_xticks(np.arange(len(time_labels)))
     ax1.set_xticklabels(time_labels, rotation=90, ha="center", fontsize=8)
-
-    # Set y-axis ticks to show player names
-    player_list = [p[2] for p in group_info]  # Extract player names from player_name tuple
-    ax1.set_yticks(np.arange(len(player_list)))
-    ax1.set_yticklabels(player_list)
-
-    # Add a grid between x-axis labels
+    midpoints = np.arange(len(time_labels) + 1) - 0.5
     ax1.set_xticks(midpoints, minor=True)
     ax1.grid(which='minor', color='white', linestyle='-', linewidth=2)
 
-    # Add color bar for player availability heatmap
+    # Configure y-axis
+    ax1.set_yticks(np.arange(len(player_list)))
+    ax1.set_yticklabels(player_list)
+
+    # Add color bar
     cbar1 = plt.colorbar(heatmap1, ax=ax1, pad=0.02)
     cbar1.set_label('Red = Unavailable, Green = Available', fontsize=10)
 
-    # Create a second axis (ax2) to plot the group availability heatmap
-    ax2 = ax1.twinx()  # Create a twin axis sharing the same x-axis
-    ax2.set_yticks([])  # Hide y-axis ticks for ax2, since it's just an overlay
-
-    # Plot the group availability as a secondary plot on ax2
-    # You can use a different colormap to distinguish between individual and group heatmaps
+    # Plot group availability
+    ax2 = ax1.twinx()
+    ax2.set_yticks([])
     ax2.plot(group_availability, color='blue', linewidth=2, label='Group Availability')
-
-    # Add a legend for group availability
     ax2.legend(loc='upper right')
 
-    # Add a title with an increased font size
-    ax1.set_title(f"{group_name} Availability for {daysdict[day]}", fontsize=14)
+    # Add title
+    day_name = daysdict.get(day, "Unknown Day")
+    ax1.set_title(f"{group_name} Availability for {day_name}", fontsize=14)
 
-    # Adjust the layout to fit the x-axis labels and title
+    # Adjust layout
     plt.subplots_adjust(bottom=0.3, top=0.85)
+    plt.tight_layout(rect=[0, 0, 0.95, 1])
 
-    plt.tight_layout(rect=[0, 0, 0.95, 1])  # Adjust the right margin to fit the color bar
-
-    # Save the plot as an image file
-    plt.savefig(f'C:\\Pathparser\\plots\\timecard_{user_id}_plot.png')  # Ensure the path is correct for your system
+    # Save the plot
+    plot_dir = os.path.join('C:', 'Pathparser', 'plots')
+    os.makedirs(plot_dir, exist_ok=True)
+    plot_path = os.path.join(plot_dir, f'timecard_{user_id}_plot.png')
+    plt.savefig(plot_path)
     plt.close()
 
 
@@ -544,7 +635,7 @@ class ContinentSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         try:
             self.view.continent = self.values[0]
-            print(f"Continent selected: {self.view.continent}")
+
             if self.view.continent == 'cancel':
                 self.view.clear_items()
                 self.view.stop()
@@ -735,49 +826,64 @@ class DaySelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         try:
             self.view.day = self.values[0]
-            await self.view.update_time_select(interaction, time_type="start")
+            # Check if time_style is already set
+            if not self.view.time_style:
+                # Present the TimeStyleSelect
+                self.view.clear_items()
+                self.view.add_item(TimeStyleSelect())
+                self.view.add_navigation_buttons()
+                await interaction.response.edit_message(content="Select your preferred time format:", view=self.view)
+                self.view.current_step = "time_style_select"
+            else:
+                # Proceed to time selection
+                await self.view.update_time_select(interaction, time_type="start")
         except Exception as e:
-            logging.exception(f"Error in DaySelect callback: {e}")
+            logging.exception("Error in DaySelect callback")
             await interaction.response.send_message(
                 "An error occurred while selecting the day.", ephemeral=True
             )
             self.view.stop()
 
 
-class TimeStyle(discord.ui.Select):
+class TimeStyleSelect(discord.ui.Select):
     def __init__(self):
-        options = discord.SelectOption(label="12-hour", value="12-hour"), discord.SelectOption(label="24-hour",
-                                                                                               value="24-hour")
+        options = [
+            discord.SelectOption(label="12-hour (AM/PM)", value="12-hour"),
+            discord.SelectOption(label="24-hour", value="24-hour")
+        ]
         super().__init__(
-            placeholder="Select your time style, choose between 12 hour AM/PM or 24 Hour Military Time",
+            placeholder="Select your preferred time format",
+            min_values=1,
+            max_values=1,
             options=options
         )
 
     async def callback(self, interaction: discord.Interaction):
         try:
-            selected_time = self.values[0]
-            if self.time_type == "start":
-                self.view.start_time = selected_time
-                await self.view.update_time_select(interaction, time_type="end")
-            elif self.time_type == "end":
-                self.view.end_time = selected_time
-                await self.view.process_availability(interaction)
+            self.view.time_style = self.values[0]
+            # Proceed to time selection
+            await self.view.update_time_select(interaction, time_type="start")
         except Exception as e:
-            logging.exception(f"Error in TimeSelect callback: {e}")
+            logging.exception(f"Error in TimeStyleSelect callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while selecting the time.", ephemeral=True
+                "An error occurred while selecting the time format.", ephemeral=True
             )
             self.view.stop()
 
 
 class HourSelect(discord.ui.Select):
-    def __init__(self, time_type: str):
+    def __init__(self, time_type: str, time_style: str):
         self.time_type = time_type  # "start" or "end"
-        options = [
-            discord.SelectOption(label=f"{hour:02d}", value=str(hour)) for hour in range(0, 24)
-        ]
+        self.time_style = time_style
+        if time_style == "12-hour":
+            hours = [str(hour) for hour in range(1, 13)]  # 1 to 12
+        else:  # "24-hour"
+            hours = [f"{hour:02d}" for hour in range(0, 24)]  # 00 to 23
+        options = [discord.SelectOption(label=hour, value=hour) for hour in hours]
         super().__init__(
             placeholder="Select the hour...",
+            min_values=1,
+            max_values=1,
             options=options
         )
 
@@ -786,13 +892,51 @@ class HourSelect(discord.ui.Select):
             selected_hour = int(self.values[0])
             if self.time_type == "start":
                 self.view.start_hour = selected_hour
+                if self.time_style == "12-hour":
+                    await self.view.update_am_pm_select(interaction, self.time_type)
+                else:
+                    await self.view.update_minute_select(interaction, self.time_type)
             else:
                 self.view.end_hour = selected_hour
-            await self.view.update_minute_select(interaction, self.time_type)
+                if self.time_style == "12-hour":
+                    await self.view.update_am_pm_select(interaction, self.time_type)
+                else:
+                    await self.view.update_minute_select(interaction, self.time_type)
         except Exception as e:
-            logging.exception(f"Error in HourSelect callback: {e}")
+            logging.exception("Error in HourSelect callback")
             await interaction.response.send_message(
                 "An error occurred while selecting the hour.", ephemeral=True
+            )
+            self.view.stop()
+
+
+class AMPMSelect(discord.ui.Select):
+    def __init__(self, time_type: str):
+        self.time_type = time_type  # "start" or "end"
+        options = [
+            discord.SelectOption(label="AM", value="AM"),
+            discord.SelectOption(label="PM", value="PM")
+        ]
+        super().__init__(
+            placeholder="Select AM or PM",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            am_pm = self.values[0]
+            if self.time_type == "start":
+                self.view.start_am_pm = am_pm
+                await self.view.update_minute_select(interaction, self.time_type)
+            else:
+                self.view.end_am_pm = am_pm
+                await self.view.update_minute_select(interaction, self.time_type)
+        except Exception as e:
+            logging.exception("Error in AMPMSelect callback")
+            await interaction.response.send_message(
+                "An error occurred while selecting AM/PM.", ephemeral=True
             )
             self.view.stop()
 
@@ -834,17 +978,28 @@ class MinuteSelect(discord.ui.Select):
 # Custom Buttons for Adding Multiple Time Slots
 class AddAnotherSlotButton(discord.ui.Button):
     def __init__(self):
-        super().__init__(label="Add Another Time Slot")
+        super().__init__(label="Add Another Time Slot", style=discord.ButtonStyle.primary)
 
     async def callback(self, interaction: discord.Interaction):
         try:
-            # Reset the view to allow adding another time slot
             self.view.clear_items()
-            self.view.add_item(DaySelect())
-            await interaction.response.edit_message(content="Select the day of the week for the new time slot:",
-                                                    view=self.view)
+            # Reset day and time selections but keep time_style
+            self.view.day = None
+            self.view.start_hour = None
+            self.view.start_minute = None
+            self.view.end_hour = None
+            self.view.end_minute = None
+            self.view.start_am_pm = None
+            self.view.end_am_pm = None
+            self.view.start_time = None
+            self.view.end_time = None
+            self.view.timezone = None
+
+            # Proceed to day selection
+            self.add_item(DaySelect())
+            await interaction.response.edit_message(content="Select the day you are available:", view=self.view)
         except Exception as e:
-            logging.exception(f"Error in AddAnotherSlotButton callback: {e}")
+            logging.exception("Error in AddAnotherSlotButton callback")
             await interaction.response.send_message(
                 "An error occurred while adding another time slot.", ephemeral=True
             )
@@ -893,6 +1048,39 @@ class FinishButton(discord.ui.Button):
             self.view.stop()
 
 
+class BackButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Back", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.view.go_back(interaction)
+
+
+class CancelButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Cancel", style=discord.ButtonStyle.danger)
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.view.cancel(interaction)
+
+
+class ChangeTimeFormatButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Change Time Format", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            self.view.clear_items()
+            self.view.add_item(TimeStyleSelect())
+            await interaction.response.edit_message(content="Select your preferred time format:", view=self.view)
+        except Exception as e:
+            logging.exception("Error in ChangeTimeFormatButton callback")
+            await interaction.response.send_message(
+                "An error occurred while changing time format.", ephemeral=True
+            )
+            self.view.stop()
+
+
 class TimezoneCompleteButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="Finish", style=discord.ButtonStyle.success)
@@ -913,6 +1101,8 @@ class TimezoneCompleteButton(discord.ui.Button):
 class AvailabilityView(discord.ui.View):
     def __init__(self, timezone: typing.Optional[str], prompt_day_update: bool = False):
         super().__init__(timeout=600)
+        self.start_am_pm = None
+        self.end_am_pm = None
         self.region: Optional[str] = None
         self.continent: Optional[str] = None
         self.country_code: Optional[str] = None
@@ -929,12 +1119,17 @@ class AvailabilityView(discord.ui.View):
         self.start_minute: Optional[int] = None
         self.end_hour: Optional[int] = None
         self.end_minute: Optional[int] = None
+        self.time_style: Optional[str] = None  # Will be set to "12-hour" or "24-hour"
         self.prompt_day_update = prompt_day_update
         # Start with continent selection
         if not self.timezone:
             self.add_item(ContinentSelect())
         else:
             self.add_item(DaySelect())
+
+    def add_navigation_buttons(self):
+        self.add_item(BackButton())
+        self.add_item(CancelButton())
 
     async def update_country_select(self, interaction: discord.Interaction):
         try:
@@ -975,7 +1170,6 @@ class AvailabilityView(discord.ui.View):
             options.append(discord.SelectOption(label='Cancel', value='cancel'))
             options.append(discord.SelectOption(label='Return', value='return'))
             self.add_item(CountrySelect(options=options))
-            await interaction.response.edit_message(content="Select your country:", view=self)
 
             if not options:
                 await interaction.response.send_message(
@@ -1166,15 +1360,37 @@ class AvailabilityView(discord.ui.View):
             )
             self.stop()
 
+    async def update_am_pm_select(self, interaction: discord.Interaction, time_type: str):
+        try:
+            self.clear_items()
+            self.add_item(AMPMSelect(time_type=time_type))
+            self.add_navigation_buttons()
+            await interaction.response.edit_message(content=f"Select AM or PM for your {time_type} time:", view=self)
+            # Update current_step
+            if time_type == "start":
+                self.current_step = "am_pm_select_start"
+            else:
+                self.current_step = "am_pm_select_end"
+        except Exception as e:
+            logging.exception("Error in update_am_pm_select")
+            await interaction.response.send_message(
+                "An error occurred while updating AM/PM selection.", ephemeral=True
+            )
+            self.stop()
+
     async def update_time_select(self, interaction: discord.Interaction, time_type: str):
         try:
-            # Remove previous items
             self.clear_items()
-            # Add HourSelect
-            self.add_item(HourSelect(time_type=time_type))
+            self.add_item(HourSelect(time_type=time_type, time_style=self.time_style))
+            self.add_navigation_buttons()
             await interaction.response.edit_message(content=f"Select your {time_type} time (hour):", view=self)
+            # Update current_step
+            if time_type == "start":
+                self.current_step = "hour_select_start"
+            else:
+                self.current_step = "hour_select_end"
         except Exception as e:
-            logging.exception(f"Error in update_time_select: {e}")
+            logging.exception("Error in update_time_select")
             await interaction.response.send_message(
                 "An error occurred while updating time selection.", ephemeral=True
             )
@@ -1182,13 +1398,17 @@ class AvailabilityView(discord.ui.View):
 
     async def update_minute_select(self, interaction: discord.Interaction, time_type: str):
         try:
-            # Remove previous items
             self.clear_items()
-            # Add MinuteSelect
             self.add_item(MinuteSelect(time_type=time_type))
+            self.add_navigation_buttons()
             await interaction.response.edit_message(content=f"Select your {time_type} time (minutes):", view=self)
+            # Update current_step
+            if time_type == "start":
+                self.current_step = "minute_select_start"
+            else:
+                self.current_step = "minute_select_end"
         except Exception as e:
-            logging.exception(f"Error in update_minute_select: {e}")
+            logging.exception("Error in update_minute_select")
             await interaction.response.send_message(
                 "An error occurred while updating minute selection.", ephemeral=True
             )
@@ -1197,14 +1417,20 @@ class AvailabilityView(discord.ui.View):
     async def process_availability(self, interaction: discord.Interaction):
         try:
             # All selections have been made, process the data
-            print(
-                f"Timezone: {self.timezone} Day: {self.day}, Start: {self.start_hour}, {self.start_minute}, End: {self.end_hour}, {self.end_minute}  ")
-            if not all([self.timezone,
-                        self.day]) and self.start_hour is None and self.start_minute is None and self.end_hour is None and self.end_minute is None:
+            required_fields = [self.timezone, self.day]
+            if self.time_style == "12-hour":
+                required_fields.extend([self.start_am_pm, self.end_am_pm])
+
+            if not all(
+                    required_fields) and self.start_hour is None and self.start_minute is None and self.end_hour is None and self.end_minute is None:
                 await interaction.response.send_message(
                     "Incomplete availability information.", ephemeral=True
                 )
                 return
+
+            if self.time_style == "12-hour":
+                self.start_hour = self.convert_to_24_hour(self.start_hour, self.start_am_pm)
+                self.end_hour = self.convert_to_24_hour(self.end_hour, self.end_am_pm)
 
             # Convert day string to integer
             days = {
@@ -1278,7 +1504,8 @@ class AvailabilityView(discord.ui.View):
             self.end_minute = None
             self.start_time = None
             self.end_time = None
-            self.timezone = None
+            self.start_am_pm = None
+            self.end_am_pm = None
 
             # Ask if the user wants to add another time slot
             self.clear_items()
@@ -1315,6 +1542,7 @@ class AvailabilityView(discord.ui.View):
                     # Parse times
                     start_time_parsed = parse_time_input(slot['start_time'])
                     end_time_parsed = parse_time_input(slot['end_time'])
+
                     if not start_time_parsed or not end_time_parsed:
                         await interaction.response.send_message(
                             f"Invalid time format for {slot['day']}. Skipping.", ephemeral=True
@@ -1336,16 +1564,16 @@ class AvailabilityView(discord.ui.View):
 
                     start_datetime = datetime.datetime.combine(next_date, start_time_parsed, tzinfo=tzinfo)
                     end_datetime = datetime.datetime.combine(next_date, end_time_parsed, tzinfo=tzinfo)
-                    print(f"start_datetime = {start_datetime}, end_datetime: {end_datetime}")
+
                     # Adjust end time if it's before start time
                     # Convert to UTC
                     start_datetime_utc = start_datetime.astimezone(datetime.timezone.utc)
                     end_datetime_utc = end_datetime.astimezone(datetime.timezone.utc)
-                    print(f"start_datetimeutc = {start_datetime_utc}, end_datetimeutc: {end_datetime_utc}")
+
                     utc_offset = start_datetime.utcoffset().total_seconds()
-                    print(f"utc_offset = {utc_offset}")
+
                     if end_datetime <= start_datetime:
-                        print(f"{utc_offset} was less than 0")
+
                         end_datetime += datetime.timedelta(days=1)
                     # Extract hours and minutes for storage
                     start_hours = start_datetime_utc.hour
@@ -1364,8 +1592,7 @@ class AvailabilityView(discord.ui.View):
                     columns_to_nullify = []
                     start_combined = start_hours * 60 + start_minutes
                     end_combined = end_hours * 60 + end_minutes
-                    print(f"start date = {start_datetime_utc.isoweekday()}, end date = {end_datetime_utc.isoweekday()}")
-                    print(f"start_combined = {start_combined}, end_combined = {end_combined}")
+
                     if end_datetime_utc.isoweekday() != start_datetime_utc.isoweekday():
                         end_time = 1440
                         start_time = 0
@@ -1381,7 +1608,7 @@ class AvailabilityView(discord.ui.View):
                             SET {set_clause}
                             WHERE Player_Name = ? and Day = ?
                             """
-                        print(sql)
+
                         await cursor.execute(sql,
                                              (user_name, end_datetime_utc.isoweekday()))
                         await db.commit()
@@ -1396,7 +1623,7 @@ class AvailabilityView(discord.ui.View):
                         SET {set_clause}
                         WHERE Player_Name = ? and Day = ?
                         """
-                        print(sql)
+
                         await cursor.execute(sql,
                                              (user_name, end_datetime_utc.isoweekday()))
                         await db.commit()
@@ -1411,7 +1638,7 @@ class AvailabilityView(discord.ui.View):
                         SET {set_clause}
                         WHERE Player_Name = ? and Day = ?
                         """
-                        print(sql)
+
                         await cursor.execute(sql,
                                              (user_name, start_datetime.isoweekday()))
                         await db.commit()
@@ -1428,6 +1655,77 @@ class AvailabilityView(discord.ui.View):
             logging.exception(f"Error in process_all_availability: {e}")
             await interaction.response.send_message(
                 "An unexpected error occurred while finalizing your availability.", ephemeral=True
+            )
+            self.stop()
+
+    def convert_to_24_hour(self, hour: int, am_pm: str) -> int:
+        """Convert 12-hour format to 24-hour format."""
+        if am_pm == "AM":
+            return hour % 12  # 12 AM is 0 hours
+        else:
+            return (hour % 12) + 12  # 12 PM is 12 hours
+    async def cancel(self, interaction: discord.Interaction):
+        try:
+            await interaction.response.send_message("Availability setup has been canceled.", ephemeral=True)
+            self.stop()
+        except Exception as e:
+            logging.exception("Error in cancel")
+            self.stop()
+    async def go_back(self, interaction: discord.Interaction):
+        try:
+            # Determine the previous step based on current_step
+            if self.current_step == "minute_select_end":
+                # Go back to end time hour selection
+                await self.update_time_select(interaction, time_type="end")
+                self.current_step = "hour_select_end"
+            elif self.current_step == "hour_select_end":
+                # Go back to start time minute selection
+                await self.update_minute_select(interaction, time_type="start")
+                self.current_step = "minute_select_start"
+            elif self.current_step == "minute_select_start":
+                # Go back to start time hour selection
+                await self.update_time_select(interaction, time_type="start")
+                self.current_step = "hour_select_start"
+            elif self.current_step == "hour_select_start":
+                if self.time_style == "12-hour":
+                    # Go back to AM/PM selection if in 12-hour format
+                    await self.update_am_pm_select(interaction, time_type="start")
+                    self.current_step = "am_pm_select_start"
+                else:
+                    # Go back to day selection
+                    self.clear_items()
+                    self.add_item(DaySelect())
+                    self.add_navigation_buttons()
+                    await interaction.response.edit_message(content="Select the day you are available:", view=self)
+                    self.current_step = "day_select"
+            elif self.current_step == "am_pm_select_start":
+                # Go back to hour selection
+                await self.update_time_select(interaction, time_type="start")
+                self.current_step = "hour_select_start"
+            elif self.current_step == "day_select":
+                # Go back to time style selection if it was selected
+                if self.time_style:
+                    # Already selected, cannot go back further
+                    await interaction.response.send_message("You are at the first step and cannot go back further.",
+                                                            ephemeral=True)
+                else:
+                    # Go back to time style selection
+                    self.clear_items()
+                    self.add_item(TimeStyleSelect())
+                    self.add_navigation_buttons()
+                    await interaction.response.edit_message(content="Select your preferred time format:", view=self)
+                    self.current_step = "time_style_select"
+            elif self.current_step == "time_style_select":
+                # Cannot go back further
+                await interaction.response.send_message("You are at the first step and cannot go back further.",
+                                                        ephemeral=True)
+            else:
+                # Default case
+                await interaction.response.send_message("Cannot go back from here.", ephemeral=True)
+        except Exception as e:
+            logging.exception("Error in go_back")
+            await interaction.response.send_message(
+                "An error occurred while going back to the previous step.", ephemeral=True
             )
             self.stop()
 
@@ -1494,9 +1792,7 @@ class UnavailabilityView(discord.ui.View):
     async def process_availability(self, interaction: discord.Interaction):
         try:
             # All selections have been made, process the data
-            print("Processing availability...")
-            print(
-                f"Timezone: {self.timezone} Day: {self.day}, Start: {self.start_hour}, {self.start_minute}, End: {self.end_hour}, {self.end_minute}  ")
+
             if not all([self.timezone,
                         self.day]) and self.start_hour is None and self.start_minute is None and self.end_hour is None and self.end_minute is None:
                 await interaction.response.send_message(
@@ -1746,14 +2042,14 @@ async def player_signup(guild: discord.Guild, thread_id: int, session_name: str,
                  mythweavers, image_link, color,
                  description, titles,
                  essence, oath) = character_info
-                print(character_info)
+
                 await cursor.execute(
                     """INSERT INTO Sessions_Signups (Session_ID, Session_Name, Player_Name, Player_ID, Character_Name, Level, Effective_Wealth, Tier, Notification_Warning) Values (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (session_id, session_name, player_name, player_id, character_name, level, gold_value - gold, tier,
                      warning_duration)
                 )
                 await db.commit()
-                print(thread_id)
+
                 thread = guild.get_thread(thread_id)
                 if not thread:
                     thread = await guild.fetch_channel(thread_id)
@@ -1891,14 +2187,14 @@ async def create_new_group(
             group_id = await cursor.fetchone()
             group_name_with_id = f"{group_id[0]}: {group_name}"
             role = await guild.create_role(name=group_name_with_id)
-            print(role, role.id, role.name, role.guild, group_id[0])
+
             await cursor.execute("INSERT INTO Sessions_Group_Presign(Group_ID, Player_Name) VALUES (?, ?)",
                                  (group_id[0], player_name))
             await db.commit()
             await cursor.execute("UPDATE Sessions_Group SET Role_ID = ? WHERE Group_ID = ?", (role.id, group_id[0]))
             await db.commit()
             await guild.get_member(player_id).add_roles(role)
-            print(role)
+
             return role
     except aiosqlite.Error as e:
         logging.exception(f"Failed to delete group {group_id} in guild {guild.id}: {e}.")
@@ -2578,10 +2874,10 @@ class PlayerCommands(commands.Cog, name='Player'):
             player = interaction.user.name if player is None else player.name
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute(f"Select UTC_Offset from Player_Timecard where Player_Name = ?",
+                await cursor.execute("Select UTC_Offset from Player_Timecard where Player_Name = ?",
                                      (interaction.user.name,))
                 host_utc_offset = await cursor.fetchone()
-                await cursor.execute(f"select UTC_Offset from Player_Timecard where Player_Name = ?", (player,))
+                await cursor.execute("Select UTC_Offset from Player_Timecard where Player_Name = ?", (player,))
                 player_utc_offset = await cursor.fetchone()
                 utc_offset = host_utc_offset[0] if host_utc_offset is not None else 'Universal'
                 if player_utc_offset is not None:
@@ -2618,7 +2914,7 @@ class PlayerCommands(commands.Cog, name='Player'):
             else:
                 async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
                     cursor = await db.cursor()
-                    await cursor.execute(f"Select UTC_Offset from Player_Timecard where Player_Name = ?",
+                    await cursor.execute("Select UTC_Offset from Player_Timecard where Player_Name = ?",
                                          (interaction.user.name,))
                     host_utc_offset = await cursor.fetchone()
                     view = DisplayGroupTimesheet(
@@ -2633,6 +2929,8 @@ class PlayerCommands(commands.Cog, name='Player'):
             logging.exception(f"An error occurred whilst handling timesheet!: {e}")
             await interaction.followup.send(
                 "An error occurred whilst handling timesheet. Please try again later.")
+
+
 
 
 class GroupManyView(shared_functions.ShopView):
@@ -2722,7 +3020,7 @@ class GroupView(shared_functions.ShopView):
         """Get the total number of titles."""
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
-                cursor = await db.execute("SELECT COUNT(*) FROM Session_Group",
+                cursor = await db.execute("SELECT COUNT(*) FROM Sessions_Group",
                                           (self.group_id,))
                 count = await cursor.fetchone()
                 self.max_items = count[0]
@@ -2755,7 +3053,7 @@ class DisplayGroupTimesheet(discord.ui.View):
         self.embed = None
         self.max_range_id = None
         self.utc_offset = utc_offset
-        self.user_ud = interaction.user.id
+        self.user_id = interaction.user.id
 
         # Initialize buttons
         self.first_page_button = discord.ui.Button(label='First Page', style=discord.ButtonStyle.primary)
@@ -2853,13 +3151,10 @@ class DisplayGroupTimesheet(discord.ui.View):
     async def send_initial_message(self):
         """Send the initial message with the view."""
         try:
-            print("oh")
+
             await self.update_results()
-            print("here")
             await self.create_embed()
-            print("I")
             await self.update_buttons()
-            print("AM")
             with open(f'C:\\Pathparser\\plots\\timecard_{self.user_id}_plot.png', 'rb') as f:
                 picture = discord.File(f)
             self.message = await self.interaction.followup.send(
@@ -3026,7 +3321,7 @@ class DisplayGroupTimesheet(discord.ui.View):
     async def create_embed(self):
         """Create the embed for the current page. To be implemented in subclasses."""
         try:
-            print(self.host_results, len(self.host_results), len(self.results))
+
             results_tuple = []
             for result in self.results:
                 results_tuple.append(result[0])
@@ -3051,11 +3346,13 @@ class DisplayGroupTimesheet(discord.ui.View):
 
     async def get_max_items(self):
         """Get the total number of items. To be implemented in subclasses."""
-        print("I AM HERE")
+
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute("SELECT COUNT(*) FROM Sessions_Group""")
             count = await cursor.fetchone()
-            print(count)
+
             self.max_range_id = count[0]
             return self.max_range_id
+
+

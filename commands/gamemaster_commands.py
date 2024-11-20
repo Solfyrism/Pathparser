@@ -11,6 +11,8 @@ import aiosqlite
 import discord
 from discord import app_commands, Embed, TextChannel
 from discord.ext import commands
+from matplotlib import pyplot as plt
+
 import commands.character_commands as character_commands
 import commands.player_commands as player_commands
 import shared_functions
@@ -19,6 +21,56 @@ from shared_functions import name_fix
 
 # *** GLOBAL VARIABLES *** #
 os.chdir("C:\\pathparser")
+
+
+async def create_group_timecard_plot(guild_id, dataset, day, user_id):
+    try:
+        # Time intervals (x-axis)
+        # Time intervals (x-axis)
+        time_labels = [
+            "00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30",
+            "04:00", "04:30", "05:00", "05:30", "06:00", "06:30", "07:00", "07:30",
+            "08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
+            "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30",
+            "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00", "19:30",
+            "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
+        ]
+        daysdict = {1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday', 7: 'Sunday'}
+        day = daysdict[day]
+        # Prepare data
+        group_numbers = []
+        group_availability = []
+
+        for entry in dataset:
+            group_numbers.append(entry[0])  # First element is the group number
+            group_availability.append([0 if x is None else x for x in entry[1:]])  # Replace None with 0 for plotting
+
+        # Explicitly define x-axis indices for categorical data
+        x_indices = range(len(time_labels))
+
+        # Create the plot
+        plt.figure(figsize=(10, 6))  # Adjust the figure size as needed
+
+        # Iterate through each group and plot their availability
+        for group_idx, group_data in enumerate(group_availability):
+            group_name = f"Group {group_numbers[group_idx]}"
+            plt.plot(x_indices, group_data, label=group_name)
+
+        # Add labels and legend
+        plt.title(f"Group Availability Throughout {day}")
+        plt.xlabel("Time")
+        plt.ylabel("Availability")
+        plt.xticks(x_indices, time_labels, rotation=45, fontsize=8)  # Use x_indices for x-ticks
+        plt.yticks(range(0, max(map(max, group_availability)) + 1))  # Adjust y-ticks dynamically
+        plt.legend(title="Groups")
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+        # Save the plot
+        plt.savefig(f'C:\\Pathparser\\plots\\group_{user_id}_plot.png')  # Ensure the path is correct for your system
+        plt.close()
+
+    except Exception as e:
+        logging.exception(f"An error occurred while creating the group timecard plot: {e}")
 
 
 async def session_reward_reversal(
@@ -618,7 +670,7 @@ async def player_accept(guild_id: int, session_name, session_id: int, player_id:
                 select ?, ?, Player_Name, Player_ID, Character_Name, Level, Effective_Wealth, Tier, Notification_Warning from Sessions_Signups where Player_ID = ? and Session_ID = ?""",
                                            (session_name, session_id, player_id, session_id))
             await db.commit()
-            print(player_id, session_id)
+
             await cursor.execute("DELETE from Sessions_Signups where Player_ID = ? and Session_ID = ?",
                                  (player_id, session_id))
             await db.commit()
@@ -1530,7 +1582,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                         player_reward_content.append(essence_content)
                                     if session_reward_embed.fame or session_reward_embed.prestige:
                                         fame_content = f"has received {session_reward_embed.fame} fame and {session_reward_embed.prestige} prestige!\r\n"
-                                        fame_content += f"New Total: {session_reward_embed.total_prestige} Fame and {session_reward_embed.total_prestige} Prestige"
+                                        fame_content += f"New Total: {session_reward_embed.prestige} Fame and {session_reward_embed.prestige} Prestige"
                                         player_reward_content.append(fame_content)
                                     if session_reward_embed.alternate_reward:
                                         alt_reward_all_content = f"has received {session_reward_embed.alternate_reward}"
@@ -1620,8 +1672,9 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                     # Check if the player is participating in the session
                     if player_id in archive_dict:
                         character_name = archive_dict[player_id]
-                        await cursor.execute("SELECT Thread_ID, True_Character_Name FROM Player_Characters WHERE Character_Name = ?",
-                                             (character_name,))
+                        await cursor.execute(
+                            "SELECT Thread_ID, True_Character_Name FROM Player_Characters WHERE Character_Name = ?",
+                            (character_name,))
                         thread_id = await cursor.fetchone()
                         if thread_id:
                             logging_info = shared_functions.CharacterChange(
@@ -1635,9 +1688,11 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                 guild=interaction.guild,
                                 thread=thread_id[0])
                             player_rewards.remove((player_id, reward))
-                            await cursor.execute("UPDATE Sessions_Archive SET Alt_Reward_Personal = ? where Player_ID = ? and Session_ID = ?",(
-                                reward, player_id, session_id
-                            ))
+                            await cursor.execute(
+                                "UPDATE Sessions_Archive SET Alt_Reward_Personal = ? where Player_ID = ? and Session_ID = ?",
+                                (
+                                    reward, player_id, session_id
+                                ))
                             await db.commit()
                             content += f"\r\n<@{player_id}>'s {thread_id[1]} has been endowed with {reward}!"
                         else:
@@ -1977,8 +2032,58 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                     )
                     await interaction.followup.send(f"Session Report for {session_info[1]} has been edited.")
 
+    @group_group.command(name="display", description="display the overall availability of a group!")
+    @app_commands.choices(
+        day=[discord.app_commands.Choice(name='Monday', value=1), discord.app_commands.Choice(name='Tuesday', value=2),
+             discord.app_commands.Choice(name='Wednesday', value=3),
+             discord.app_commands.Choice(name='Thursday', value=4),
+             discord.app_commands.Choice(name='Friday', value=5), discord.app_commands.Choice(name='Saturday', value=6),
+             discord.app_commands.Choice(name='Sunday', value=7)])
+    async def group_availability(
+            self,
+            interaction: discord.Interaction,
+            day: discord.app_commands.Choice[int],
+            page_number: int = 1):
+        """Display the overall availability of a range of groups"""
+        guild_id = interaction.guild_id
+        await interaction.response.defer(thinking=True)
+        day_value = day.value
+        try:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
+                cursor = await conn.cursor()
 
+                # Decide which query to execute based on whether 'name' is provided
+                await cursor.execute("SELECT COUNT(Group_ID) FROM Sessions_Group")
+                item_count = await cursor.fetchone()
+                item_count = item_count[0]
+                await cursor.execute("SELECT Distinct(UTC_Offset) from Player_Timecard where Player_Name = ?",
+                                     (interaction.user.name,))
+                host_offset = await cursor.fetchone()
+                host_utc_offset = host_offset[0] if host_offset else 'UTC'
+                # Set up pagination variables
+                page_number = min(max(page_number, 1), math.ceil(item_count / 20))
+                items_per_page = 20
 
+                # Create and send the view with the results
+                view = DisplayTimeGroupView(
+                    user_id=interaction.user.id,
+                    guild_id=guild_id,
+                    interaction=interaction,
+                    day=day_value,
+                    utc_offset=host_utc_offset
+                )
+                await view.update_results()
+                await view.create_embed()
+                await interaction.followup.send(embed=view.embed, view=view)
+
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(
+                f"an error occurred displaying milestones: {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred whilst fetching data. Please try again later.",
+                ephemeral=True
+            )
 
 
 # Base Views for displaying a session
@@ -2131,7 +2236,6 @@ class ReplaceRewardsView(shared_functions.SelfAcknowledgementView):
             color=discord.Color.green()
         )
 
-
     async def create_embed(self):
         """Dummy because this breaks without it, but just sets the embed to the one I made outside so I don't have to pass as many variables in."""
         self.embed = self.embed
@@ -2172,7 +2276,6 @@ class RemoveRewardsView(shared_functions.SelfAcknowledgementView):
             await shared_functions.log_embed(change=reversal_dataclass, guild=interaction.guild, thread=thread_id,
                                              bot=self.bot)
             await shared_functions.character_embed(character_name=self.character_name, guild=interaction.guild, )
-
 
     async def rejected(self, interaction: discord.Interaction):
         """Handle the rejection logic."""
@@ -2428,6 +2531,295 @@ class ReminderPreferenceView(discord.ui.View):
                 f"Failed to update notification warning for user {interaction.user.id} in guild {interaction.guild.id}: {e}")
 
         # Add the character to the session participants in the database
+
+
+class DisplayTimeGroupView(discord.ui.View):
+    def __init__(
+            self,
+            user_id: int,
+            guild_id: int,
+            day: int,
+            utc_offset: str,
+            interaction: discord.Interaction):
+        super().__init__(timeout=180)
+        self.group_results = None
+        self.range_id = None
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.day = day
+        self.view_type = 1
+        self.message = None
+        self.interaction = interaction
+        self.results = []
+        self.embed = None
+        self.max_range_id = None
+        self.utc_offset = utc_offset
+        self.user_id = interaction.user.id
+
+        # Initialize buttons
+        self.first_page_button = discord.ui.Button(label='First Page', style=discord.ButtonStyle.primary)
+        self.previous_page_button = discord.ui.Button(label='Previous Page', style=discord.ButtonStyle.primary)
+        self.change_view_button = discord.ui.Button(label='Change View', style=discord.ButtonStyle.primary)
+        self.next_page_button = discord.ui.Button(label='Next Page', style=discord.ButtonStyle.primary)
+        self.last_page_button = discord.ui.Button(label='Last Page', style=discord.ButtonStyle.primary)
+
+        self.first_page_button.callback = self.first_page
+        self.previous_page_button.callback = self.previous_page
+        self.change_view_button.callback = self.change_view
+        self.next_page_button.callback = self.next_page
+        self.last_page_button.callback = self.last_page
+
+        self.add_item(self.first_page_button)
+        self.add_item(self.previous_page_button)
+        self.add_item(self.change_view_button)
+        self.add_item(self.next_page_button)
+        self.add_item(self.last_page_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Ensure that only the user who initiated the view can interact with the buttons."""
+        try:
+            if interaction.user.id != self.user_id:
+                await interaction.response.send_message(
+                    "You cannot interact with this button.",
+                    ephemeral=True
+                )
+                return False
+            return True
+        except Exception as e:
+            logging.error(f"Failed to check interaction: {e}")
+            raise
+
+    async def first_page(self, interaction: discord.Interaction):
+        """Handle moving to the first page."""
+        try:
+            await interaction.response.defer()
+            if self.view_type == 0:
+                if self.day == 1:
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
+                    return
+                else:
+                    self.day = 1
+            else:
+                if self.range_id == 0:
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
+                    return
+                else:
+                    self.range_id = 0
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.message.edit(
+                embed=self.embed,
+                view=self
+            )
+            with open(f'C:\\Pathparser\\plots\\group_{self.user_id}_plot.png', 'rb') as f:
+                picture = discord.File(f)
+                await interaction.followup.send(file=picture, ephemeral=True)
+        except Exception as e:
+            logging.error(f"Failed to move to the first page: {e}")
+            raise
+
+    async def previous_page(self, interaction: discord.Interaction):
+        """Handle moving to the previous page."""
+        try:
+            await interaction.response.defer()
+            if self.view_type == 0:
+                if self.day == 1:
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
+                    return
+                else:
+                    self.day -= 1
+            else:
+                if self.range_id == 0:
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
+                    return
+                else:
+                    self.range_id -= 5 if self.range_id > 5 else 0
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.message.edit(
+                embed=self.embed,
+                view=self
+            )
+            with open(f'C:\\Pathparser\\plots\\group_{self.user_id}_plot.png', 'rb') as f:
+                picture = discord.File(f)
+                await interaction.followup.send(file=picture, ephemeral=True)
+        except Exception as e:
+            logging.error(f"Failed to move to the previous page: {e}")
+            raise
+
+    async def send_initial_message(self):
+        """Send the initial message with the view."""
+        try:
+
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            with open(f'C:\\Pathparser\\plots\\group_{self.user_id}_plot.png', 'rb') as f:
+                picture = discord.File(f)
+            self.message = await self.interaction.followup.send(
+                embed=self.embed,
+                view=self, file=picture, ephemeral=True
+            )
+
+        except discord.HTTPException as e:
+            logging.error(
+                f"Failed to send message due to HTTPException: {e} in guild {self.interaction.guild.id} for {self.user_id}")
+        except Exception as e:
+            logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
+
+    async def on_timeout(self):
+        """Disable buttons when the view times out."""
+        try:
+            os.remove(f'C:\\Pathparser\\plots\\timecard_{self.user_id}_plot.png')
+            for child in self.children:
+                child.disabled = True
+            if self.message:
+                await self.message.edit(view=self)
+        except Exception as e:
+            logging.error(f"Failed to disable buttons: {e}")
+            raise
+
+    async def change_view(self, interaction: discord.Interaction):
+        """Change the view type."""
+        await interaction.response.defer()
+        try:
+            self.view_type = 1 if self.view_type == 0 else 0
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.message.edit(
+                embed=self.embed,
+                view=self
+            )
+        except Exception as e:
+            logging.error(f"Failed to change view: {e}")
+            raise
+
+    async def next_page(self, interaction: discord.Interaction):
+        """Handle moving to the next page."""
+        try:
+            await interaction.response.defer()
+            if self.view_type == 0:
+                if self.day == 7:
+                    await interaction.followup.send("You are on the last page.", ephemeral=True)
+                    return
+                else:
+                    self.day += 1
+            else:
+                if self.range_id == self.max_range_id:
+                    await interaction.followup.send("You are on the last page.", ephemeral=True)
+                    return
+                else:
+                    self.range_id += 5 if self.range_id + 5 <= self.max_range_id else self.max_range_id
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.message.edit(
+                embed=self.embed,
+                view=self
+            )
+            with open(f'C:\\Pathparser\\plots\\group_{self.user_id}_plot.png', 'rb') as f:
+                picture = discord.File(f)
+                await interaction.followup.send(file=picture, ephemeral=True)
+        except Exception as e:
+            logging.error(f"Failed to move to the next page: {e}")
+            raise
+
+    async def last_page(self, interaction: discord.Interaction):
+        """Handle moving to the last page."""
+        try:
+            await interaction.response.defer()
+            if self.view_type == 0:
+                if self.day == 7:
+                    await interaction.followup.send("You are on the last page.", ephemeral=True)
+                    return
+                else:
+                    self.day = 7
+            else:
+                if self.range_id >= self.max_range_id:
+
+                    await interaction.followup.send("You are on the last  page.", ephemeral=True)
+                    return
+                else:
+                    self.range_id = self.max_range_id
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.message.edit(
+                embed=self.embed,
+                view=self
+            )
+            with open(f'C:\\Pathparser\\plots\\group_{self.user_id}_plot.png', 'rb') as f:
+                picture = discord.File(f)
+                await interaction.followup.send(file=picture, ephemeral=True)
+        except Exception as e:
+            logging.error(f"Failed to move to the last page: {e}")
+            raise
+
+    async def update_buttons(self):
+        """Update the enabled/disabled state of buttons based on the current page."""
+        try:
+            if self.view_type == 0:
+                first_page = 1
+                last_page = 7
+            else:
+                first_page = 0
+                last_page = self.max_range_id
+
+            self.first_page_button.disabled = first_page
+            self.previous_page_button.disabled = first_page
+            self.next_page_button.disabled = last_page
+            self.last_page_button.disabled = last_page
+        except Exception as e:
+            logging.error(f"Failed to update buttons: {e}")
+            raise
+
+    async def update_results(self):
+        """Fetch the history of prestige request  for the current page."""
+
+        statement = """
+                        SELECT Group_ID, Group_Name, Role_ID, Player_Name, Host_Character, Description
+                        FROM Sessions_Group Order by Group_ID Limit ? Offset ? 
+                    """
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
+            cursor = await db.execute(statement, (5, self.range_id))
+            self.results = await cursor.fetchall()
+
+            self.group_results = []
+            for group_id in self.results:
+                group_availability = await player_commands.fetch_group_availability_from_db(
+                    guild_id=self.guild_id,
+                    day=self.day,
+                    group_id=group_id[0],
+                    utc_offset=self.utc_offset)
+
+                self.group_results.append(group_availability)
+
+            await create_group_timecard_plot(guild_id=self.guild_id, dataset=self.group_results, user_id=self.interaction.user.name, day=self.day)
+
+    async def create_embed(self):
+        """Create the embed for the titles."""
+        current_page = ((self.offset - 1) // self.limit) + 1
+        total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+        self.embed = discord.Embed(
+            title=f"Group Requests",
+            description=f"Page {current_page} of {total_pages}")
+        for item in self.results:
+            (group_id, group_name, role_id, host_player_name, host_character, description) = item
+            self.embed.add_field(name=f'**Group**: {group_id}: {group_name} Role: <@{role_id}>',
+                                 value=f'**Host**: {host_player_name}, **Character**: {host_character}\r\n**Description**: {description}',
+                                 inline=False)
+
+    async def get_max_items(self):
+        """Get the total number of titles."""
+        if self.max_items is None:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
+                cursor = await db.execute("SELECT COUNT(*) FROM Sessions_Group")
+                count = await cursor.fetchone()
+                self.max_range_id = count[0]
+        return self.max_range_id
 
 
 logging.basicConfig(
