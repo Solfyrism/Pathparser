@@ -93,6 +93,18 @@ def create_progress_bar(current, total, bar_length=20):
     return f"[{'█' * progress}{'-' * (bar_length - progress)}] {current}/{total}"
 
 
+async def add_item_to_store(guild_id, item_name, price, description, stock, inventory, usable, sellable):
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
+            cursor = await conn.cursor()
+            await cursor.execute("INSERT INTO store_items (name, price, description, stock_remaining, inventory, usable, sellable) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (item_name, price, description, stock, inventory, usable, sellable))
+            await conn.commit()
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(
+            f"an error occurred whilst adding an item to the store': {e}")
+        return f"An error occurred whilst adding an item to the store. Error: {e}."
+
 
 async def session_log_player(cursor: aiosqlite.Cursor,
                              interaction: discord.Interaction,
@@ -2139,6 +2151,146 @@ class AdminCommands(commands.Cog, name='admin'):
                 )
 
 
+
+    roleplay_group = discord.app_commands.Group(
+        name='roleplay',
+        description='Roleplay commands for the bot',
+        parent=admin_group
+    )
+
+    @roleplay_group.command(name='add_channel')
+    async def add_rp_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.execute("SELECT 1 FROM A_Approved_Channels WHERE channel_id = ?", (channel.id,))
+                existing_channel = await cursor.fetchone()
+
+                if existing_channel:
+                    await interaction.followup.send(f"{channel.mention} is already an RP channel.")
+                    return
+
+                await db.execute("INSERT INTO A_Approved_Channels (channel_id) VALUES (?)", (channel.id,))
+                await db.commit()
+
+                await interaction.followup.send(f"{channel.mention} has been added to the RP channels.")
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception(
+                f"An error occurred whilst listing RP channels: {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred whilst fetching data. Please try again later.",
+                ephemeral=True
+            )
+
+
+    @roleplay_group.command(name='remove_channel')
+    async def add_rp_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.execute("SELECT 1 FROM A_Approved_Channels WHERE channel_id = ?", (channel.id,))
+                rp_channel = await cursor.fetchone()
+
+                if rp_channel:
+                    await db.execute("DELETE FROM A_Approved_Channels WHERE channel_id = ?", (channel.id,))
+                    await db.commit()
+                    await interaction.followup.send(f"{channel.mention} has been removed from the RP channels.")
+                else:
+                    await interaction.followup.send(f"{channel.mention} is not an RP channel.")
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception(
+                f"An error occurred whilst listing RP channels: {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred whilst fetching data. Please try again later.",
+                ephemeral=True
+            )
+
+    @roleplay_group.command(name='list_channels')
+    async def list_rp_channels(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.execute("SELECT channel_id FROM A_Approved_Channels")
+                rp_channels = await cursor.fetchall()
+                if rp_channels:
+                    channels = [f"<#{channel_id}>" for (channel_id,) in rp_channels]
+                    channels_list = "\n".join(channels)
+                    await interaction.followup.send(f"Current RP channels:\n{channels_list}")
+                else:
+                    await interaction.followup.send("There are no RP channels set.")
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception(
+                f"An error occurred whilst listing RP channels: {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred whilst fetching data. Please try again later.",
+                ephemeral=True
+            )
+
+    @roleplay_group.command(name='adjust_rp', description='Adjust the RP amount for a player')
+    async def adjust_rp(self, interaction: discord.Interaction, player: discord.Member, amount: int):
+        """Adjust the RP amount for a player."""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT balance from RP_Balance WHERE user_id = ?", (player.id,))
+                rp_balance = await cursor.fetchone()
+                if not rp_balance:
+                    await interaction.followup.send(f"{player.mention} does not have an RP balance.")
+                    return
+                else:
+                    await cursor.execute("UPDATE RP_Balance SET balance = balance + ? WHERE user_id = ?", (amount, player.id))
+                    await db.commit()
+                    await interaction.followup.send(f"RP balance for {player.mention} has been adjusted by {amount} they now have {rp_balance[0] + amount}.")
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception(
+                f"An error occurred whilst listing RP channels: {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred whilst fetching data. Please try again later.",
+                ephemeral=True
+            )
+
+
+
+    rp_store_group = discord.app_commands.Group(
+        name='rp_store',
+        description='Roleplay commands for the bot',
+        parent=admin_group
+    )
+
+
+    @rp_store_group.command(name='add', description='add an item to the store')
+    async def add_rp_store(self, interaction: discord.Interaction, item_name: str, item_description: str, item_cost: int):
+        ...
+
+    @rp_store_group.command(name='edit', description='edit the store by adding or editing an item')
+    async def edit_rp_store(self, interaction: discord.Interaction, item_name: str, item_description: str, item_cost: int):
+        ...
+
+    @rp_store_group.command(name='remove', description='remove an item from the store')
+    async def remove_rp_store(self, interaction: discord.Interaction, item_name: str):
+        ...
+
+    @rp_store_group.command(name='requirements', description='adjust the requirements of an item in the store')
+    async def requirements_rp_store(self, interaction: discord.Interaction, item_name: str, item_requirements: str):
+        ...
+
+
+    @rp_store_group.command(name='behavior', description='Specify the behavior of an item in the store')
+    async def behavior_rp_store(self, interaction: discord.Interaction, item_name: str, item_behavior: str):
+        ...
+
+    @rp_store_group.command(name='list', description='List all items in the store and their behavior')
+    async def list_rp_store(self, interaction: discord.Interaction, page_number: int = 1):
+        ...
+
+
+
+
 class MilestoneDisplayView(shared_functions.ShopView):
     def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, interaction: discord.Interaction):
         super().__init__(user_id, guild_id, offset, limit, content="", interaction=interaction)
@@ -2576,6 +2728,35 @@ class ArchiveCharactersView(shared_functions.SelfAcknowledgementView):
                     title='Error',
                     description=f"An error occurred whilst archiving characters. Please try again later.",
                 )
+
+class AddItemModal(discord.ui.Modal):
+    def __init__(self, guild_id):
+        super().__init__(title="Add Item to Store")
+
+        self.name = discord.ui.TextInput(label='Item Name', required=True)
+        self.price = discord.ui.TextInput(label='Price', required=True)
+        self.description = discord.ui.TextInput(label='Description', style=discord.TextStyle.paragraph, required=False)
+        self.guild_id = guild_id
+        self.add_item(self.name)
+        self.add_item(self.price)
+        self.add_item(self.description)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        item_name = self.name.value
+        price = self.price.value
+        description = self.description.value
+
+        # Validate price
+        try:
+            price = int(price)
+        except ValueError:
+            await interaction.response.send_message("Price must be a number.", ephemeral=True)
+            return
+
+        # Add the item to the store (you need to implement this function)
+        await add_item_to_store(self.guild_id, item_name, price, description)
+
+        await interaction.response.send_message(f"Item '{item_name}' added to the store.", ephemeral=True)
 
 
 logging.basicConfig(

@@ -7,16 +7,14 @@ import aiosqlite
 import discord
 from discord.ext import commands
 import os
-import json
-import difflib
+
 from commands.reviewer_commands import ReviewerCommands
 from test_functions import TestCommands
 from commands.character_commands import CharacterCommands
 from commands.admin_commands import AdminCommands
 from commands.gamemaster_commands import GamemasterCommands
 from commands.player_commands import PlayerCommands
-from commands.RP_Commands import RPCommands
-import commands.RP_Commands
+from commands.RP_Commands import RPCommands, handle_rp_message
 import logging
 import shared_functions
 from commands import gamemaster_commands
@@ -33,6 +31,26 @@ os.chdir("C:\\pathparser")
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
+@dataclass
+class ApprovedChannelCache:
+    cache: Dict[int] = field(default_factory=dict)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+async def add_guild_to_cache(guild_id: int) -> ApprovedChannelCache:
+    cache = ApprovedChannelCache()
+    async with aiosqlite.connect(f"pathparser_{guild_id}_test.sqlite") as db:
+        cursor = await db.cursor()
+        await cursor.execute("SELECT Channel_ID FROM rp_approved_Channels")
+        approved_channels = await cursor.fetchall()
+        cache.cache[guild_id] = [channel_id[0] for channel_id, in approved_channels]
+    return cache
+
+
+async def reinstate_cache(bot: commands.Bot) -> None:
+    guilds = bot.guilds
+    for guild in guilds:
+        await add_guild_to_cache(guild.id)
 
 async def reinstate_reminders(server_bot) -> None:
     guilds = server_bot.guilds
@@ -113,37 +131,21 @@ async def on_ready():
     await bot.tree.sync()
     await reinstate_reminders(bot)
     await reinstate_session_buttons(bot)
-    await reinstate_cache(bot)
+    await reinstate_rp_cache(bot)
 
 
 @bot.event
 async def on_disconnect():
     print("Bot is disconnecting.")
 
-# User model (modify to match your existing users table)
-class User(Base):
-    __tablename__ = 'users'
-    user_id = Column(BigInteger, primary_key=True)
-    # Existing fields...
-    balance = Column(Integer, default=0)
-    last_post_time = Column(DateTime)
-    recent_posts = Column(Text, default='[]')  # Stores recent posts as a JSON string
-
-# Event handler for all messages
 @bot.event
 async def on_message(message):
     if message.author.bot:
-        return  # Ignore messages from bots
-
-    session = Session()
-    # Check if the message is in an RP channel
-    is_rp_channel = session.query(RPChannel).filter_by(channel_id=message.channel.id).first()
-    session.close()
-
-    if is_rp_channel:
-        await RPCommands.handle_rp_message(message)
+        return
+    if message.channel.id in ApprovedChannelCache.cache[message.guild.id]:
+        await handle_rp_message(message)
     else:
-        await bot.process_commands(message)  # Ensure other commands still work
+        await bot.process_commands(message)
 
 bot.run(os.getenv("DISCORD_TOKEN_V2"))
 bot.loop.create_task(shared_functions.clear_autocomplete_cache())
