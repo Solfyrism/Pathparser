@@ -14,7 +14,7 @@ from commands.character_commands import CharacterCommands
 from commands.admin_commands import AdminCommands
 from commands.gamemaster_commands import GamemasterCommands
 from commands.player_commands import PlayerCommands
-from commands.RP_Commands import RPCommands, handle_rp_message
+from commands.RP_Commands import RPCommands, handle_rp_message, reinstate_rp_cache
 import logging
 import shared_functions
 from commands import gamemaster_commands
@@ -33,24 +33,28 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @dataclass
 class ApprovedChannelCache:
-    cache: Dict[int] = field(default_factory=dict)
+    cache: Dict[int, list[int]] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
-async def add_guild_to_cache(guild_id: int) -> ApprovedChannelCache:
-    cache = ApprovedChannelCache()
-    async with aiosqlite.connect(f"pathparser_{guild_id}_test.sqlite") as db:
-        cursor = await db.cursor()
-        await cursor.execute("SELECT Channel_ID FROM rp_approved_Channels")
-        approved_channels = await cursor.fetchall()
-        cache.cache[guild_id] = [channel_id[0] for channel_id, in approved_channels]
-    return cache
+approved_channel_cache = ApprovedChannelCache()
+
+
+async def add_guild_to_cache(guild_id: int) -> None:
+    async with approved_channel_cache.lock:
+        async with aiosqlite.connect(f"pathparser_{guild_id}_test.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("SELECT Channel_ID FROM rp_approved_Channels")
+            approved_channels = await cursor.fetchall()
+            # approved_channels is a list of tuples, extract the channel IDs
+            channel_ids = [channel_id[0] for channel_id in approved_channels]
+            approved_channel_cache.cache[guild_id] = channel_ids
 
 
 async def reinstate_cache(bot: commands.Bot) -> None:
-    guilds = bot.guilds
-    for guild in guilds:
+    for guild in bot.guilds:
         await add_guild_to_cache(guild.id)
+
 
 async def reinstate_reminders(server_bot) -> None:
     guilds = server_bot.guilds
@@ -102,7 +106,8 @@ async def reinstate_session_buttons(server_bot) -> None:
                 for session in sessions:
                     session_id, session_name, message_id, channel_id, hammer_time_str = session
                     session_start_time = datetime.datetime.fromtimestamp(int(hammer_time_str), datetime.timezone.utc)
-                    timeout_seconds = (session_start_time - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+                    timeout_seconds = (
+                                session_start_time - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
                     timeout_seconds = min(timeout_seconds, 12 * 3600)
 
                     # Fetch the channel and message
@@ -131,6 +136,7 @@ async def on_ready():
     await bot.tree.sync()
     await reinstate_reminders(bot)
     await reinstate_session_buttons(bot)
+    await reinstate_cache(bot)
     await reinstate_rp_cache(bot)
 
 
@@ -138,14 +144,30 @@ async def on_ready():
 async def on_disconnect():
     print("Bot is disconnecting.")
 
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
-    if message.channel.id in ApprovedChannelCache.cache[message.guild.id]:
-        await handle_rp_message(message)
-    else:
-        await bot.process_commands(message)
+
+    guild_id = message.guild.id
+    channel_id = message.channel.id
+
+    # Check if the guild is in the cache
+    async with approved_channel_cache.lock:
+        if guild_id in approved_channel_cache.cache:
+            if channel_id in approved_channel_cache.cache[guild_id]:
+                await handle_rp_message(message)
+            else:
+                await bot.process_commands(message)
+        else:
+            # Guild not in cache, add it
+            await add_guild_to_cache(guild_id)
+            if channel_id in approved_channel_cache.cache[guild_id]:
+                await handle_rp_message(message)
+            else:
+                await bot.process_commands(message)
+
 
 bot.run(os.getenv("DISCORD_TOKEN_V2"))
 bot.loop.create_task(shared_functions.clear_autocomplete_cache())

@@ -2434,7 +2434,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         discord.app_commands.Choice(name='half an hour before', value=30),
         discord.app_commands.Choice(name='session start', value=0),
         discord.app_commands.Choice(name='no reminder', value=-1)])
-    async def join(self, interaction: discord.Interaction, session_id: int,
+    async def notify_me(self, interaction: discord.Interaction, session_id: int,
                    notification: typing.Optional[discord.app_commands.Choice[int]]):
         warning_duration = -1 if notification is None else notification.value
         await interaction.response.defer(thinking=True, ephemeral=True)
@@ -2547,7 +2547,7 @@ class PlayerCommands(commands.Cog, name='Player'):
             await interaction.followup.send(
                 "An error occurred whilst displaying session information. Please try again later.")
 
-    @sessions_group.command()
+    @sessions_group.command(name='report', description='Report on a session')
     @app_commands.describe(summary="This will use a Google Drive Link if available")
     @app_commands.autocomplete(session_id=shared_functions.player_session_autocomplete)
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
@@ -2853,7 +2853,7 @@ class PlayerCommands(commands.Cog, name='Player'):
             await interaction.followup.send(
                 "An error occurred whilst handling timesheet. Please try again later.")
 
-    @timesheet_group.command(name="availability", description="Set your availability for a day of the week")
+    @timesheet_group.command(name="availability", description="Display availability for a day of the week")
     @app_commands.choices(
         day=[discord.app_commands.Choice(name='Monday', value=1), discord.app_commands.Choice(name='Tuesday', value=2),
              discord.app_commands.Choice(name='Wednesday', value=3),

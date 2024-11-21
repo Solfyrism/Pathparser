@@ -76,6 +76,136 @@ async def transaction_reverse(cursor: aiosqlite.Cursor, transaction_id: int, aut
         return return_value
 
 
+class AddItemModal(discord.ui.Modal):
+    def __init__(self, guild_id):
+        super().__init__(title="Add Item to Store")
+
+        self.name = discord.ui.TextInput(label='Item Name', required=True)
+        self.price = discord.ui.TextInput(label='Price', required=True)
+        self.description = discord.ui.TextInput(label='Description', style=discord.TextStyle.paragraph, required=False)
+        self.stock = discord.ui.TextInput(label='Stock', required=False)
+
+        self.image_link = discord.ui.TextInput(label='Image Link', required=False)
+        self.storable = discord.ui.Select(placeholder='Is the item storable? or is it used on purchase?', options=[
+            discord.SelectOption(label='Storable', value='storable'),
+            discord.SelectOption(label='consumed', value='consumed')
+        ])
+        self.sellable = discord.ui.Select(placeholder='Is the item sellable?', options=[
+            discord.SelectOption(label='Sellable', value='sellable'),
+            discord.SelectOption(label='Not Sellable', value='not_sellable')
+        ])
+        self.usable = discord.ui.Select(placeholder='Is the item usable?', options=[
+            discord.SelectOption(label='Usable', value='usable'),
+            discord.SelectOption(label='Not Usable', value='not_usable')
+        ])
+        self.custom_message = discord.ui.TextInput(label='Custom Message', style=discord.TextStyle.paragraph,
+                                                   required=False)
+        self.guild_id = guild_id
+        self.add_item(self.name)
+        self.add_item(self.price)
+        self.add_item(self.description)
+        self.add_item(self.stock)
+        self.add_item(self.storable)
+        self.add_item(self.sellable)
+        self.add_item(self.image_link)
+        self.add_item(self.custom_message)
+        self.add_item(self.usable)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        item_name = self.name.value
+        price = self.price.value
+        description = self.description.value
+        stock = self.stock.value
+        storable = self.storable.value
+        sellable = self.sellable.value
+        image_link = self.image_link
+        custom_message = self.custom_message
+        usable = self.usable
+        # Validate price
+        try:
+            price = int(price)
+        except ValueError:
+            await interaction.response.send_message("Price must be a number.", ephemeral=True)
+            return
+
+        # Add the item to the store (you need to implement this function)
+        await add_item_to_store(guild_id=self.guild_id, item_name=item_name, price=price, description=description,
+                                stock=stock, inventory=storable, sellable=sellable, image=image_link, usable=usable,
+                                custom_message=custom_message)
+
+        await interaction.response.send_message(f"Item '{item_name}' added to the store.", ephemeral=True)
+
+
+class EditItemModal(discord.ui.Modal):
+    def __init__(self, guild_id, old_item_name):
+        super().__init__(title="Add Item to Store")
+
+        self.name = discord.ui.TextInput(label='Item Name', required=False)
+        self.price = discord.ui.TextInput(label='Price', required=False)
+        self.description = discord.ui.TextInput(label='Description', style=discord.TextStyle.paragraph, required=False)
+        self.stock = discord.ui.TextInput(label='Stock', required=False)
+        self.storable = discord.ui.Select(placeholder='Is the item storable? or is it used on purchase?', options=[
+            discord.SelectOption(label='Storable', value='storable'),
+            discord.SelectOption(label='consumed', value='consumed')
+        ])
+        self.sellable = discord.ui.Select(placeholder='Is the item sellable?', options=[
+            discord.SelectOption(label='Sellable', value='sellable'),
+            discord.SelectOption(label='Not Sellable', value='not_sellable')
+        ])
+        self.usable = discord.ui.Select(placeholder='Is the item usable?', options=[
+            discord.SelectOption(label='Usable', value='usable'),
+            discord.SelectOption(label='Not Usable', value='not_usable')
+        ])
+        self.custom_message = discord.ui.TextInput(label='Custom Message', style=discord.TextStyle.paragraph,
+                                                   required=False)
+        self.image_link = discord.ui.TextInput(label='Image Link', required=False)
+        self.guild_id = guild_id
+        self.old_item_name = old_item_name
+        self.add_item(self.name)
+        self.add_item(self.price)
+        self.add_item(self.description)
+        self.add_item(self.stock)
+        self.add_item(self.image_link)
+        self.add_item(self.custom_message)
+        self.add_item(self.storable)
+        self.add_item(self.sellable)
+        self.add_item(self.usable)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        item_name = self.name.value
+        price = self.price.value
+        description = self.description.value
+        stock = self.stock.value
+        storable = self.storable.value
+        sellable = self.sellable.value
+        usable = self.usable.value
+        custom_message = self.custom_message.value
+        image_link = self.image_link
+
+        # Validate price
+        try:
+            price = int(price)
+        except ValueError:
+            await interaction.response.send_message("Price must be a number.", ephemeral=True)
+            return
+
+        # Add the item to the store (you need to implement this function)
+        await edit_item_in_store(
+            guild_id=self.guild_id,
+            old_item_name=self.old_item_name,
+            new_item_name=item_name,
+            price=price,
+            description=description,
+            stock=stock,
+            inventory=storable,
+            sellable=sellable,
+            image=image_link,
+            usable=usable,
+            custom_message=custom_message)
+
+        await interaction.response.send_message(f"Item '{item_name}' added to the store.", ephemeral=True)
+
+
 def safe_add(a, b):
     # Treat None as zero
     a = a if a is not None else 0
@@ -88,17 +218,53 @@ def safe_add(a, b):
 
     return a + b
 
+
 def create_progress_bar(current, total, bar_length=20):
     progress = int(bar_length * (current / total))
     return f"[{'█' * progress}{'-' * (bar_length - progress)}] {current}/{total}"
 
 
-async def add_item_to_store(guild_id, item_name, price, description, stock, inventory, usable, sellable):
+async def add_item_to_store(guild_id, item_name, price, description, stock, inventory, usable, sellable, image,
+                            custom_message):
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
-            await cursor.execute("INSERT INTO store_items (name, price, description, stock_remaining, inventory, usable, sellable) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (item_name, price, description, stock, inventory, usable, sellable))
+            await cursor.execute(
+                "INSERT INTO RP_Store_Items (name, price, description, stock_remaining, inventory, usable, sellable, image_link, custom_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (item_name, price, description, stock, inventory, usable, sellable, image, custom_message))
+            await conn.commit()
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(
+            f"an error occurred whilst adding an item to the store': {e}")
+        return f"An error occurred whilst adding an item to the store. Error: {e}."
+
+
+async def edit_item_in_store(guild_id, old_item_name, new_item_name, price, description, stock, inventory, usable,
+                             sellable, image, custom_message):
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
+            cursor = await conn.cursor()
+            await cursor.execute(
+                "SELECT price, description, stock_remaining, inventory, usable, sellable, image_link, Custom_message FROM RP_Store_Items WHERE name = ?",
+                (old_item_name,))
+            item_info = await cursor.fetchone()
+            if not item_info:
+                raise ValueError(f"Item '{old_item_name}' not found in the store.")
+            (old_price, old_description, old_stock, old_inventory, old_usable, old_sellable, old_image,
+             old_custom_message) = item_info
+            new_price = price if price is not None else old_price
+            new_description = description if description else old_description
+            new_stock = stock if stock is not None else old_stock
+            new_inventory = inventory if inventory else old_inventory
+            new_usable = usable if usable else old_usable
+            new_sellable = sellable if sellable else old_sellable
+            new_image = image if image else old_image
+            new_item_name = new_item_name if new_item_name else old_item_name
+            new_custom_message = custom_message if custom_message else old_custom_message
+            await cursor.execute(
+                "UPDATE RP_Store_Items SET name = ? price = ? description = ? stock_remaining = ? inventory = ? usable = ? sellable = ? image_link = ? Custom_Message = ? WHERE name = ?",
+                (new_item_name, new_price, new_description, new_stock, new_inventory, new_usable, new_sellable,
+                 new_image, new_custom_message, old_item_name))
             await conn.commit()
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(
@@ -1516,7 +1682,7 @@ class AdminCommands(commands.Cog, name='admin'):
         name='level_range',
         description='Adjust the stored level ranges of levels in the server.'
     )
-#    @checks.has_permissions(administrator=True)
+    #    @checks.has_permissions(administrator=True)
     async def level_range(
             self,
             interaction: discord.Interaction,
@@ -1665,6 +1831,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 "An unexpected error occurred. Please contact the administrator.",
                 ephemeral=True
             )
+
     @level_group.command(name='display',
                          description='Display milestone settings')
     async def display_milestones(self, interaction: discord.Interaction, page_number: int = 1):
@@ -2150,8 +2317,6 @@ class AdminCommands(commands.Cog, name='admin'):
                     ephemeral=True
                 )
 
-
-
     roleplay_group = discord.app_commands.Group(
         name='roleplay',
         description='Roleplay commands for the bot',
@@ -2183,9 +2348,8 @@ class AdminCommands(commands.Cog, name='admin'):
                 ephemeral=True
             )
 
-
     @roleplay_group.command(name='remove_channel')
-    async def add_rp_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+    async def remove_rp_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
         await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
@@ -2242,9 +2406,11 @@ class AdminCommands(commands.Cog, name='admin'):
                     await interaction.followup.send(f"{player.mention} does not have an RP balance.")
                     return
                 else:
-                    await cursor.execute("UPDATE RP_Balance SET balance = balance + ? WHERE user_id = ?", (amount, player.id))
+                    await cursor.execute("UPDATE RP_Balance SET balance = balance + ? WHERE user_id = ?",
+                                         (amount, player.id))
                     await db.commit()
-                    await interaction.followup.send(f"RP balance for {player.mention} has been adjusted by {amount} they now have {rp_balance[0] + amount}.")
+                    await interaction.followup.send(
+                        f"RP balance for {player.mention} has been adjusted by {amount} they now have {rp_balance[0] + amount}.")
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(
                 f"An error occurred whilst listing RP channels: {e}"
@@ -2254,7 +2420,60 @@ class AdminCommands(commands.Cog, name='admin'):
                 ephemeral=True
             )
 
+    @roleplay_group.command(name="update", description="Update the server RP generation settings")
+    @app_commands.describe(similarity_threshold="The similarity threshold for RP generation 90 is 90% 10 is 10%")
+    @app_commands.describe(reward_multiplier="The reward multiplier for RP generation, 1 generates 1 coin per 10 words")
+    async def update_rp(self, interaction: discord.Interaction, minimum_length: int, similarity_threshold: int,
+                        minimum_reward: int, maximum_reward: int, reward_multiplier: int):
+        """Update the RP generation settings for the server."""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute(
+                    "Select Minimum_Post_Length_In_Characters, Similarity_Threshold, Minimum_Reward, Maximum_Reward, Reward_Multiplier FROM RP_Guild_Info")
+                await cursor.execute(
+                    "UPDATE RP_Guild_Info SET Minimum_Post_Length_In_Characters = ?, Similarity_Threshold = ?, Minimum_Reward = ?, maximum_reward = ?, Reward_Multiplier = ?",
+                    (minimum_length, similarity_threshold, minimum_reward, maximum_reward, reward_multiplier))
+                await db.commit()
+                await interaction.followup.send("RP settings have been updated.")
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception(
+                f"An error occurred whilst updating RP settings: {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred whilst updating RP settings. Please try again later.",
+                ephemeral=True
+            )
 
+    @roleplay_group.command(name="list", description="List all RP settings for the server")
+    async def list_rp(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute(
+                    "Select Minimum_Post_Length_In_Characters, Similarity_Threshold, Minimum_Reward, Maximum_Reward, Reward_Multiplier FROM RP_Guild_Info")
+                rp_settings = await cursor.fetchone()
+                if rp_settings:
+                    (minimum_length, similarity_threshold, minimum_reward, maximum_reward,
+                     reward_multiplier) = rp_settings
+                    await interaction.followup.send(f"RP Settings:\n"
+                                                    f"Minimum Post Length: {minimum_length}\n"
+                                                    f"Similarity Threshold: {similarity_threshold}\n"
+                                                    f"Minimum Reward: {minimum_reward}\n"
+                                                    f"Maximum Reward: {maximum_reward}\n"
+                                                    f"Reward Multiplier: {reward_multiplier}")
+                else:
+                    await interaction.followup.send("There are no RP settings set.")
+        except(aiosqlite.Error, ValueError) as e:
+            logging.exception(
+                f"An error occurred whilst listing RP settings: {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred whilst fetching data. Please try again later.",
+                ephemeral=True
+            )
 
     rp_store_group = discord.app_commands.Group(
         name='rp_store',
@@ -2262,33 +2481,285 @@ class AdminCommands(commands.Cog, name='admin'):
         parent=admin_group
     )
 
-
     @rp_store_group.command(name='add', description='add an item to the store')
-    async def add_rp_store(self, interaction: discord.Interaction, item_name: str, item_description: str, item_cost: int):
-        ...
+    async def add_rp_store(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                modal = AddItemModal(guild_id=interaction.guild.id)
+                await interaction.followup.send_modal(modal)
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception("an issue occurred in trying to send a modal in the add_rp_store command")
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later.")
 
     @rp_store_group.command(name='edit', description='edit the store by adding or editing an item')
-    async def edit_rp_store(self, interaction: discord.Interaction, item_name: str, item_description: str, item_cost: int):
-        ...
+    @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
+    async def edit_rp_store(self, interaction: discord.Interaction, item_name: str):
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                modal = EditItemModal(guild_id=interaction.guild.id, item_name=item_name)
+                await interaction.followup.send_modal(modal)
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception("an issue occurred in trying to send a modal in the edit_rp_store command")
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later.")
 
     @rp_store_group.command(name='remove', description='remove an item from the store')
+    @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
     async def remove_rp_store(self, interaction: discord.Interaction, item_name: str):
-        ...
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT 1 FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                item = await cursor.fetchone()
+                if not item:
+                    await interaction.followup.send(f"{item_name} is not in the store.")
+                    return
+                await cursor.execute("DELETE FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                await db.commit()
+                await interaction.followup.send(f"{item_name} has been removed from the store.")
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception("an issue occurred in trying to remove an item from the store")
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later.")
 
     @rp_store_group.command(name='requirements', description='adjust the requirements of an item in the store')
-    async def requirements_rp_store(self, interaction: discord.Interaction, item_name: str, item_requirements: str):
-        ...
+    @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
+    @app_commands.choices(requirement=[discord.app_commands.Choice(name='slot 1', value=1),
+                                       discord.app_commands.Choice(name='slot 2', value=2),
+                                       discord.app_commands.Choice(name='slot 3', value=3)])
+    @app_commands.choices(requirement_type=[discord.app_commands.Choice(name='role', value=1),
+                                            discord.app_commands.Choice(name='balance', value=2),
+                                            discord.app_commands.Choice(name='item', value=3)])
+    async def requirements_rp_store(self, interaction: discord.Interaction, item_name: str,
+                                    requirement_type: discord.app_commands.Choice[int],
+                                    requirement: discord.app_commands.Choice[int], value: int):
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT 1 FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                item = await cursor.fetchone()
+                if not item:
+                    await interaction.followup.send(f"{item_name} is not in the store.")
+                    return
+                try:
+                    value = int(value)
+                except ValueError:
+                    await interaction.followup.send(f"Value must be an integer.")
+                    return
+                if requirement_type.value == 1:
+                    get_role = interaction.guild.get_role(value)
+                    if not get_role:
+                        await interaction.followup.send(f"Role not found.")
+                        return
+                elif requirement_type.value == 3:
+                    await cursor.execute("Select 1 from rp_store_items WHERE Item_ID = ?", (value,))
+                    item = await cursor.fetchone()
+                    if not item:
+                        await interaction.followup.send(f"Item not found.")
+                        return
+                else:
+                    if value < 0:
+                        await interaction.followup.send(f"Value must be a positive integer.")
+                        return
+                requirement_value = requirement if isinstance(requirement, int) else requirement.value
+                requirement_type_value = requirement_type if isinstance(requirement_type, int) else requirement_type.value
+                if requirement_value == 1:
+                    await cursor.execute(
+                        "UPDATE rp_store_items SET Requirements_1_type = ?, Requirements_1_pair = ? WHERE Item_Name = ?",
+                        (requirement_type_value, value, item_name))
+                elif requirement_value == 2:
+                    await cursor.execute(
+                        "UPDATE rp_store_items SET Requirements_2_type = ?, Requirements_2_pair = ? WHERE Item_Name = ?",
+                        (requirement_type_value, value, item_name))
+                else:
+                    await cursor.execute(
+                        "UPDATE rp_store_items SET Requirements_3_type = ?, Requirements_3_pair = ? WHERE Item_Name = ?",
+                        (requirement_type_value, value, item_name))
+                await db.commit()
+                await interaction.followup.send(f"Requirements for {item_name} have been updated.")
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception("an issue occurred in trying to send a modal in the requirements_rp_store_items command")
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later.")
 
+    @rp_store_group.command(name='matching', description='Specify the matching requirements of an item in the store')
+    @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
+    @app_commands.choices(matching=[discord.app_commands.Choice(name='All Match', value=1),
+                                    discord.app_commands.Choice(name='Any Match', value=2),
+                                    discord.app_commands.Choice(name='Not Match', value=3)])
+    async def matching_rp_store(self, interaction: discord.Interaction, item_name: str,
+                                matching: discord.app_commands.Choice[int]):
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT 1 FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                item = await cursor.fetchone()
+                if not item:
+                    await interaction.followup.send(f"{item_name} is not in the store.")
+                    return
+                matching_value = matching if isinstance(matching, int) else matching.value
+                await cursor.execute("UPDATE rp_store_items SET Matching_Requirements = ? WHERE Item_Name = ?",
+                                     (matching_value, item_name))
+                await db.commit()
+                await interaction.followup.send(f"Matching requirements for {item_name} have been updated.")
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception("an issue occurred in the matching_rp_store_items command")
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later.")
 
     @rp_store_group.command(name='behavior', description='Specify the behavior of an item in the store')
-    async def behavior_rp_store(self, interaction: discord.Interaction, item_name: str, item_behavior: str):
-        ...
+    @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
+    @app_commands.choices(slot=[discord.app_commands.Choice(name='slot 1', value=1),
+                                discord.app_commands.Choice(name='slot 2', value=2),
+                                discord.app_commands.Choice(name='slot 3', value=3)])
+    @app_commands.choices(behavior=[discord.app_commands.Choice(name='Edit_Roles', value=1),
+                                    discord.app_commands.Choice(name='Edit_Balance', value=2),
+                                    discord.app_commands.Choice(name='Edit_Items', value=3)])
+    @app_commands.choices(change=[discord.app_commands.Choice(name='Add', value=1),
+                                  discord.app_commands.Choice(name='Remove', value=2)])
+    async def behavior_rp_store(self, interaction: discord.Interaction, item_name: str,
+                                slot: discord.app_commands.Choice[int], behavior: discord.app_commands.Choice[int],
+                                change: discord.app_commands.Choice[int], value: int):
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT 1 FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                item = await cursor.fetchone()
+                if not item:
+                    await interaction.followup.send(f"{item_name} is not in the store.")
+                    return
+                behavior_value = behavior if isinstance(behavior, int) else behavior.value
+                change_value = change if isinstance(change, int) else change.value
+                slot_value = slot if isinstance(slot, int) else slot.value
+                if behavior_value == 1:
+                    get_role = interaction.guild.get_role(value)
+                    if not get_role:
+                        await interaction.followup.send(f"Role not found.")
+                        return
+                elif behavior_value == 3:
+                    await cursor.execute("Select 1 from rp_store_items WHERE Item_ID = ?", (value,))
+                    item = await cursor.fetchone()
+                    if not item:
+                        await interaction.followup.send(f"Item not found.")
+                        return
+                if slot_value == 1:
+                    await cursor.execute(
+                        "UPDATE rp_store_items SET Action_1_Type = ? Action_1_Subtype = ? action_1_behavior = ? WHERE Item_Name = ?",
+                        (behavior_value, change_value, value, item_name))
+                elif slot_value == 2:
+                    await cursor.execute(
+                        "UPDATE rp_store_items SET Action_2_Type = ? Action_2_Subtype = ? action_2_behavior = ? WHERE Item_Name = ?",
+                        (behavior_value, change_value, value, item_name))
+                else:
+                    await cursor.execute(
+                        "UPDATE rp_store_items SET Action_3_Type = ? Action_3_Subtype = ? action_3_behavior = ? WHERE Item_Name = ?",
+                        (behavior_value, change_value, value, item_name))
+                await db.commit()
+
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception("an issue occurred in the behavior_rp_store_items command")
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later.")
+
+    @rp_store_group.command(name='cancel_requirement', description='cancel a requirement for a shop item')
+    @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
+    @app_commands.choices(requirement=[discord.app_commands.Choice(name='slot 1', value=1),
+                                       discord.app_commands.Choice(name='slot 2', value=2),
+                                       discord.app_commands.Choice(name='slot 3', value=3)])
+    async def cancel_requirement_rp_store(self, interaction: discord.Interaction, item_name: str,
+                                          requirement: discord.app_commands.Choice[int]):
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT 1 FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                item = await cursor.fetchone()
+                if not item:
+                    await interaction.followup.send(f"{item_name} is not in the store.")
+                    return
+                requirement_value = requirement if isinstance(requirement, int) else requirement.value
+                if requirement_value == 1:
+                    await cursor.execute(
+                        "UPDATE rp_store_items SET Requirements_1_type = NULL, Requirements_1_pair = NULL WHERE Item_Name = ?",
+                        (item_name,))
+                elif requirement_value == 2:
+                    await cursor.execute(
+                        "UPDATE rp_store_items SET Requirements_2_type = NULL, Requirements_2_pair = NULL WHERE Item_Name = ?",
+                        (item_name,))
+                else:
+                    await cursor.execute(
+                        "UPDATE rp_store_items SET Requirements_3_type = NULL, Requirements_3_pair = NULL WHERE Item_Name = ?",
+                        (item_name,))
+                await db.commit()
+                await interaction.followup.send(f"Requirement for {item_name} has been cancelled.")
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception("an issue occurred in the cancel_requirement_rp_store_items command")
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later.")
+
+    @rp_store_group.command(name='cancel_behavior', description='cancel a matching requirement for a shop item')
+    @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
+    @app_commands.choices(requirement=[discord.app_commands.Choice(name='slot 1', value=1),
+                                       discord.app_commands.Choice(name='slot 2', value=2),
+                                       discord.app_commands.Choice(name='slot 3', value=3)])
+    async def cancel_behavior_rp_store(self, interaction: discord.Interaction, item_name: str,
+                                       requirement: discord.app_commands.Choice[int]):
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT 1 FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                item = await cursor.fetchone()
+                if not item:
+                    await interaction.followup.send(f"{item_name} is not in the store.")
+                    return
+                requirement_value = requirement if isinstance(requirement, int) else requirement.value
+                if requirement_value == 1:
+                    await cursor.execute(
+                        "UPDATE rp_store_items SET Action_1_Type = NULL, Action_1_Subtype = NULL, action_1_behavior = NULL WHERE Item_Name = ?",
+                        (item_name,))
+                elif requirement_value == 2:
+                    await cursor.execute(
+                        "UPDATE rp_store_items SET Action_2_Type = NULL, Action_2_Subtype = NULL, action_2_behavior = NULL WHERE Item_Name = ?",
+                        (item_name,))
+                else:
+                    await cursor.execute(
+                        "UPDATE rp_store_items SET Action_3_Type = NULL, Action_3_Subtype = NULL, action_3_behavior = NULL WHERE Item_Name = ?",
+                        (item_name,))
+                await db.commit()
+                await interaction.followup.send(f"Behavior for {item_name} has been cancelled.")
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception("an issue occurred in the cancel_behavior_rp_store_items command")
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later.")
 
     @rp_store_group.command(name='list', description='List all items in the store and their behavior')
     async def list_rp_store(self, interaction: discord.Interaction, page_number: int = 1):
-        ...
-
-
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT COUNT(Item_Name) FROM rp_store_items")
+                item_count = await cursor.fetchone()
+                (item_count,) = item_count
+                page_number = min(max(page_number, 1), ceil(item_count / 10))
+                offset = (page_number - 1) * 5
+                view = RPStoreView(user_id=interaction.user.id, guild_id=interaction.guild.id, offset=offset, limit=10,
+                                   interaction=interaction)
+                await view.update_results()
+                await view.create_embed()
+                await interaction.followup.send(embed=view.embed, view=view)
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception("an issue occurred in the list_rp_store_items command")
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later.")
 
 
 class MilestoneDisplayView(shared_functions.ShopView):
@@ -2371,6 +2842,75 @@ class MythicDisplayView(shared_functions.ShopView):
                 count = await cursor.fetchone()
                 self.max_items = count[0]
         return self.max_items
+
+
+class RPStoreView(shared_functions.ShopView):
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, interaction: discord.Interaction):
+        super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, content="",
+                         interaction=interaction)
+        self.max_items = None  # Cache total number of items
+
+    async def update_results(self):
+        """fetch the level information."""
+        statement = """
+            SELECT Item_ID, name, price, description, stock_remaining, inventory, usable, sellable, custom_message,
+            Requirements_Match, Requirements_1_type, Requirements_1_pair, Requirements_2_type, Requirements_2_pair, Requirements_3_type, Requirements_3_pair,
+            actions_1_type, actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype, actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior,
+            image_link
+            FROM RP_Store_Items
+            ORDER BY Item_ID ASC LIMIT ? OFFSET ?
+        """
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
+            cursor = await db.execute(statement, (self.limit, self.offset - 1))
+            self.results = await cursor.fetchall()
+
+    async def create_embed(self):
+        """Create the embed for the levels."""
+
+        current_page = ((self.offset - 1) // self.limit) + 1
+        total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+        self.embed = discord.Embed(title=f"Item List System",
+                                   description=f"Page {current_page} of {total_pages}")
+        for item in self.results:
+            (item_ID, name, price, description, stock_remaining, inventory, usable, sellable, custom_message,
+             requirements_Match, requirements_1_type, requirements_1_pair, requirements_2_type, requirements_2_pair,
+             requirements_3_type, requirements_3_pair,
+             actions_1_type, actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype,
+             actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior,
+             image_link) = item
+            content = f'**Price**: {price}, **Stock Remaining**: {stock_remaining}, **Inventory**: {inventory}\r\n' \
+                      f'**Usable**: {usable}, **Sellable**: {sellable}\r\n'
+            content += f'**Custom Message On Use**: {custom_message}\r\n'
+            self.embed.add_field(name=f'**Item Name**: {name}: **ID**: {item_ID}',
+                                 value=content, inline=False)
+            requirements_group = (
+            requirements_1_type, requirements_2_type, requirements_3_type, requirements_1_pair, requirements_2_pair,
+            requirements_3_pair)
+            actions_group = (
+            actions_1_type, actions_2_type, actions_3_type, actions_1_subtype, actions_2_subtype, actions_3_subtype,
+            actions_1_behavior, actions_2_behavior, actions_3_behavior)
+            additional_content = ""
+            if any(requirements_group):
+                additional_content += "**Requirements**: {requirements_Match}\r\n"
+                additional_content += f'**Requirement 1**: {requirements_1_type}, {requirements_1_pair}\r\n' if requirements_1_type else ""
+                additional_content += f'**Requirement 2**: {requirements_2_type}, {requirements_2_pair}\r\n' if requirements_2_type else ""
+                additional_content += f'**Requirement 3**: {requirements_3_type}, {requirements_3_pair}\r\n' if requirements_3_type else ""
+            if any(actions_group):
+                additional_content += f'**Action 1**: {actions_1_type}, {actions_1_subtype}, {actions_1_behavior}\r\n' if actions_1_type else ""
+                additional_content += f'**Action 2**: {actions_2_type}, {actions_2_subtype}, {actions_2_behavior}\r\n' if actions_2_type else ""
+                additional_content += f'**Action 3**: {actions_3_type}, {actions_3_subtype}, {actions_3_behavior}\r\n' if actions_3_type else ""
+            self.embed.add_field(name=f'**Additional Info**',
+                                 value=additional_content, inline=False)
+
+    async def get_max_items(self):
+        """Get the total number of levels."""
+        if self.max_items is None:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
+                cursor = await db.execute("SELECT COUNT(*) FROM RP_Store_Items")
+                count = await cursor.fetchone()
+                self.max_items = count[0]
+        return self.max_items
+
 
 # *** DUAL VIEWS ***
 class ArchiveDisplayView(shared_functions.DualView):
@@ -2728,35 +3268,6 @@ class ArchiveCharactersView(shared_functions.SelfAcknowledgementView):
                     title='Error',
                     description=f"An error occurred whilst archiving characters. Please try again later.",
                 )
-
-class AddItemModal(discord.ui.Modal):
-    def __init__(self, guild_id):
-        super().__init__(title="Add Item to Store")
-
-        self.name = discord.ui.TextInput(label='Item Name', required=True)
-        self.price = discord.ui.TextInput(label='Price', required=True)
-        self.description = discord.ui.TextInput(label='Description', style=discord.TextStyle.paragraph, required=False)
-        self.guild_id = guild_id
-        self.add_item(self.name)
-        self.add_item(self.price)
-        self.add_item(self.description)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        item_name = self.name.value
-        price = self.price.value
-        description = self.description.value
-
-        # Validate price
-        try:
-            price = int(price)
-        except ValueError:
-            await interaction.response.send_message("Price must be a number.", ephemeral=True)
-            return
-
-        # Add the item to the store (you need to implement this function)
-        await add_item_to_store(self.guild_id, item_name, price, description)
-
-        await interaction.response.send_message(f"Item '{item_name}' added to the store.", ephemeral=True)
 
 
 logging.basicConfig(

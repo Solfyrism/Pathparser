@@ -359,20 +359,17 @@ async def player_session_autocomplete(
 async def fame_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
-    cursor = db.cursor()
-    current = unidecode(str.title(current))
-    cursor.execute(
-        "SELECT Fame_Required, Prestige_Cost, Effect, Name, Use_Limit from Store_Fame WHERE Effect LIKE ? Limit 20",
-        (f"%{current}%",))
-    character_list = cursor.fetchall()
-    for characters in character_list:
-        if current in characters[3]:
-            data.append(app_commands.Choice(name=f"{characters[3]}", value=characters[3]))
-    #        if current in characters[1]:
-    #            data.append(app_commands.Choice(name=f"Name: {characters[3]} Requirement: {characters[0]}, Prestige Cost: {characters[1]} **Effect**: {characters[2]}, **Limit**: {characters[4]}", value=characters[3]))
-    cursor.close()
-    db.close()
+    async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+        cursor = await db.cursor()
+        current = unidecode(str.title(current))
+        await cursor.execute(
+            "SELECT Fame_Required, Prestige_Cost, Effect, Name, Use_Limit from Store_Fame WHERE Effect LIKE ? Limit 20",
+            (f"%{current}%",))
+        character_list = await cursor.fetchall()
+        for characters in character_list:
+            if current in characters[3]:
+                data.append(app_commands.Choice(name=f"{characters[3]}", value=characters[3]))
+
     return data
 
 
@@ -416,6 +413,28 @@ async def settings_autocomplete(
             for setting in settings_list:
                 if current in setting[0].lower():
                     data.append(app_commands.Choice(name=setting[0], value=setting[0]))
+
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"An error occurred while fetching settings: {e}")
+    return data
+
+async def rp_store_autocomplete(
+        interaction: discord.Interaction,
+        current: str) -> list[app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild.id
+    current = unidecode(current.lower())
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            # Correct parameterized query
+            cursor = await db.execute("SELECT name FROM rp_store_items WHERE name LIKE ? LIMIT 20",
+                                      (f"%{current}%",))
+            items_list = await cursor.fetchall()
+
+            # Populate choices
+            for item in items_list:
+                if current in item[0].lower():
+                    data.append(app_commands.Choice(name=item[0], value=item[0]))
 
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"An error occurred while fetching settings: {e}")

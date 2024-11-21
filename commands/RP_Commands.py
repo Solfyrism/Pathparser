@@ -1,7 +1,9 @@
+import logging
 from dataclasses import dataclass, field
 from typing import Dict
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 from discord.ext.commands import has_permissions, MissingPermissions
 import aiosqlite
@@ -10,22 +12,46 @@ import json
 import difflib
 from datetime import datetime
 
+from unidecode import unidecode
+
+import shared_functions
+
+
+@dataclass
+class RoleplaySettings:
+    min_post_length: int
+    similarity_threshold: float
+    min_rewards: int
+    max_rewards: int
+    reward_multiplier: float
 
 @dataclass
 class RoleplayInfoCache:
-    cache: Dict[int, tuple] = field(default_factory=dict)  # Replace 'tuple' with the actual value type if known
+    cache: Dict[int, RoleplaySettings] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
+roleplay_info_cache = RoleplayInfoCache()
 
-async def add_guild_to_rp_cache(guild_id: int) -> RoleplayInfoCache:
-    cache = RoleplayInfoCache()
-    async with aiosqlite.connect(f"pathparser_{guild_id}_test.sqlite") as db:
-        cursor = await db.cursor()
-        await cursor.execute("SELECT Minimum_Post_Length_In_Characters, Similarity_Threshold, Minimum_Rewards, Maximum_Rewards, Reward_Multiplier FROM rp_guild_info")
-        approved_channels = await cursor.fetchone()
-        cache.cache[guild_id] = approved_channels
-    return cache
 
+async def add_guild_to_rp_cache(guild_id: int) -> None:
+    async with roleplay_info_cache.lock:
+        async with aiosqlite.connect(f"pathparser_{guild_id}_test.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("""
+                SELECT Minimum_Post_Length_In_Characters, Similarity_Threshold,
+                       Minimum_Rewards, Maximum_Rewards, Reward_Multiplier
+                FROM rp_guild_info
+            """)
+            settings_row = await cursor.fetchone()
+            if settings_row:
+                settings = RoleplaySettings(
+                    min_post_length=settings_row[0],
+                    similarity_threshold=settings_row[1],
+                    min_rewards=settings_row[2],
+                    max_rewards=settings_row[3],
+                    reward_multiplier=settings_row[4]
+                )
+                roleplay_info_cache.cache[guild_id] = settings
 
 async def reinstate_rp_cache(bot: commands.Bot) -> None:
     guilds = bot.guilds
@@ -44,22 +70,22 @@ DATABASE = 'your_database.db'  # Path to your SQLite database file
 # Handler for RP messages
 async def handle_rp_message(message):
     # Ignore messages wrapped in parentheses (OOC)
+    guild_id = message.guild.id
     content = message.content.strip()
     if content.startswith('(') and content.endswith(')'):
         return
-    if message.guild.id in RoleplayInfoCache.cache:
-        min_content_length, similarity_threshold, minimum_reward, maximum_reward, reward_multiplier = RoleplayInfoCache.cache[message.guild.id]
-        min_content_length = min_content_length if min_content_length else 50
-        similarity_threshold = similarity_threshold if similarity_threshold else 0.8
-        minimum_reward = minimum_reward if minimum_reward else 1
-        maximum_reward = maximum_reward if maximum_reward else 100
-        reward_multiplier = reward_multiplier if reward_multiplier else 1
-    else:
-        min_content_length = 50
-        similarity_threshold = 0.8
-        minimum_reward = 1
-        maximum_reward = 100
-        reward_multiplier = 1
+
+    # Ensure the guild's settings are in the cache
+    async with roleplay_info_cache.lock:
+        if guild_id not in roleplay_info_cache.cache:
+            await add_guild_to_rp_cache(guild_id)
+        settings = roleplay_info_cache.cache[guild_id]
+        min_content_length = settings.min_post_length if settings.min_post_length else 50
+        similarity_threshold = settings.similarity_threshold if settings.similarity_threshold else 0.8
+        minimum_reward = settings.min_rewards if settings.min_rewards else 1
+        maximum_reward = settings.max_rewards if settings.max_rewards else 100
+        reward_multiplier = settings.reward_multiplier if settings.reward_multiplier else 1
+
 
     user_id = message.author.id
     now = datetime.utcnow()
@@ -184,6 +210,28 @@ def calculate_reward(content_length, time_since_last_post, multiplier, minumum_r
 
 
 
+async def rp_inventory_autocomplete(
+        interaction: discord.Interaction,
+        current: str) -> list[app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild.id
+    current = unidecode(current.lower())
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            # Correct parameterized query
+            cursor = await db.execute("SELECT Item_Name FROM rp_players_items WHERE player_id = ? and item_name LIKE ? LIMIT 20",
+                                      (interaction.user.id, f"%{current}%",))
+            items_list = await cursor.fetchall()
+
+            # Populate choices
+            for item in items_list:
+                if current in item[0].lower():
+                    data.append(app_commands.Choice(name=item[0], value=item[0]))
+
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"An error occurred while fetching settings: {e}")
+    return data
+
 
 
 
@@ -192,3 +240,140 @@ def calculate_reward(content_length, time_since_last_post, multiplier, minumum_r
 class RPCommands(commands.Cog, name='RP'):
     def __init__(self, bot):
         self.bot = bot
+
+
+    roleplay_group = discord.app_commands.Group(
+        name='roleplay',
+        description='roleplay Roots commands.'
+    )
+
+    @roleplay_group.command(name="help", description="Get help with roleplay commands.")
+    async def roleplay_help(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)
+
+        embed = discord.Embed(
+            title="Roleplay Commands",
+            description="Here are the available roleplay commands:",
+            color=discord.Color.blurple()
+        )
+        await interaction.response.send_message(embed=embed)
+
+    @roleplay_group.command(name="shop", description="View the roleplay shop")
+    async def roleplay_shop(self, interaction: discord.Interaction, page_number: int = 1):
+        await interaction.response.defer(thinking=True)
+
+        embed = discord.Embed(
+            title="Roleplay Shop",
+            description="Here are the items available in the roleplay shop:",
+            color=discord.Color.blurple()
+        )
+        await interaction.response.send_message(embed=embed)
+
+
+
+    @roleplay_group.command(name="balance", description="Check your roleplay balance")
+    async def roleplay_balance(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)
+
+        user_id = interaction.user.id
+        async with aiosqlite.connect(DATABASE) as db:
+            cursor = await db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+            user_data = await cursor.fetchone()
+            if user_data:
+                balance = user_data[0]
+                await interaction.response.send_message(f"Your balance is {balance} coins.")
+            else:
+                await interaction.response.send_message("You don't have a balance yet.")
+
+    @roleplay_group.command(name="buy", description="buy an item from the store")
+    @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
+    async def roleplay_buy(self, interaction: discord.Interaction, item_name: str, amount: int = 1):
+        await interaction.response.defer(thinking=True)
+
+        user_id = interaction.user.id
+        async with aiosqlite.connect(DATABASE) as db:
+            cursor = await db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+            user_data = await cursor.fetchone()
+            if user_data:
+                balance = user_data[0]
+                item_cost = shared_functions.get_item_cost(item_name)
+                if balance >= item_cost:
+                    balance -= item_cost
+                    await db.execute("UPDATE users SET balance = ? WHERE user_id = ?", (balance, user_id))
+                    await db.commit()
+                    await interaction.response.send_message(f"You have purchased {item_name} for {item_cost} coins.")
+                else:
+                    await interaction.response.send_message("You don't have enough coins to purchase this item.")
+            else:
+                await interaction.response.send_message("You don't have a balance yet.")
+
+
+    @roleplay_group.command(name="sell", description="sell an item from your inventory")
+    @app_commands.autocomplete(item_name=shared_functions.rp_inventory_autocomplete)
+    async def roleplay_sell(self, interaction: discord.Interaction, item_name: str, amount: int = 1):
+        await interaction.response.defer(thinking=True)
+
+        user_id = interaction.user.id
+        async with aiosqlite.connect(DATABASE) as db:
+            cursor = await db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+            user_data = await cursor.fetchone()
+            if user_data:
+                balance = user_data[0]
+                item_value = shared_functions.get_item_value(item_name)
+                balance += item_value
+                await db.execute("UPDATE users SET balance = ? WHERE user_id = ?", (balance, user_id))
+                await db.commit()
+                await interaction.response.send_message(f"You have sold {item_name} for {item_value} coins.")
+            else:
+                await interaction.response.send_message("You don't have a balance yet.")
+
+    @roleplay_group.command(name="use", description="use an item from your inventory")
+    @app_commands.autocomplete(item_name=rp_inventory_autocomplete)
+    async def roleplay_use(self, interaction: discord.Interaction, item_name: str):
+        await interaction.response.defer(thinking=True)
+
+        user_id = interaction.user.id
+        async with aiosqlite.connect(DATABASE) as db:
+            cursor = await db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+            user_data = await cursor.fetchone()
+            if user_data:
+                balance = user_data[0]
+                item_effect = shared_functions.get_item_effect(item_name)
+                if item_effect:
+                    # Apply the item effect
+                    await interaction.response.send_message(f"You have used {item_name}. {item_effect}")
+                else:
+                    await interaction.response.send_message(f"{item_name} does not have a use effect.")
+            else:
+                await interaction.response.send_message("You don't have a balance yet.")
+
+
+    @roleplay_group.command(name="send", description="send RP to another user")
+    async def roleplay_send(self, interaction: discord.Interaction, amount: int, recipient: discord.User):
+        await interaction.response.defer(thinking=True)
+
+        sender_id = interaction.user.id
+        recipient_id = recipient.id
+
+        async with aiosqlite.connect(DATABASE) as db:
+            cursor = await db.execute("SELECT balance FROM users WHERE user_id = ?", (sender_id,))
+            sender_data = await cursor.fetchone()
+            if sender_data:
+                sender_balance = sender_data[0]
+                if sender_balance >= amount:
+                    cursor = await db.execute("SELECT balance FROM users WHERE user_id = ?", (recipient_id,))
+                    recipient_data = await cursor.fetchone()
+                    if recipient_data:
+                        recipient_balance = recipient_data[0]
+                        sender_balance -= amount
+                        recipient_balance += amount
+                        await db.execute("UPDATE users SET balance = ? WHERE user_id = ?", (sender_balance, sender_id))
+                        await db.execute("UPDATE users SET balance = ? WHERE user_id = ?", (recipient_balance, recipient_id))
+                        await db.commit()
+                        await interaction.response.send_message(f"You have sent {amount} coins to {recipient.mention}.")
+                    else:
+                        await interaction.response.send_message("The recipient does not have a balance yet.")
+                else:
+                    await interaction.response.send_message("You don't have enough coins to send.")
+            else:
+                await interaction.response.send_message("You don't have a balance yet.")
