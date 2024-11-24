@@ -189,7 +189,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                 discord.app_commands.Choice(name='Yes!', value=2)])
     async def wipe(self, interaction: discord.Interaction, cleanse: str, remove: discord.app_commands.Choice[int]):
         """Clean out database entries older than a certain age!"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             if remove.value == 1:
                 if cleanse.endswith('D'):
@@ -225,7 +225,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
         """accept a player into your accepted bios, or Remove them."""
         guild = interaction.guild
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         async with aiosqlite.connect(f"C:/pathparser/pathparser_{guild_id}_test.sqlite") as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.cursor()
@@ -364,7 +364,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         shared_functions.extract_document_id(link)
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         if not shared_functions:
             await interaction.followup.send("Invalid link provided!", ephemeral=True)
             return
@@ -425,7 +425,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         shared_functions.extract_document_id(link)
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         if not shared_functions:
             await interaction.followup.send("Invalid link provided!", ephemeral=True)
             return

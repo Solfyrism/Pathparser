@@ -776,7 +776,7 @@ class UpdateCharacterData:
     fame_package: Optional[Tuple[int, int]] = None  # (Fame, Prestige)
 
 
-async def update_character(guild_id: int, change: UpdateCharacterData) -> str:
+async def update_character(guild_id: int, change: UpdateCharacterData) -> tuple[bool, str]:
     try:
         # Lists to collect column assignments and values
         assignments = []
@@ -812,7 +812,7 @@ async def update_character(guild_id: int, change: UpdateCharacterData) -> str:
 
         # Check if there are any assignments to update
         if not assignments:
-            return "No changes to update."
+            return False, "No changes to update."
 
         # Construct the SQL statement
         sql_statement = f"UPDATE Player_Characters SET {', '.join(assignments)} WHERE Character_Name = ?"
@@ -825,21 +825,21 @@ async def update_character(guild_id: int, change: UpdateCharacterData) -> str:
             await cursor.execute(sql_statement, values)
             updated_rows = cursor.rowcount
             if updated_rows == 0:
-                return f"No character found with name '{change.character_name}'."
+                return False, f"No character found with name '{change.character_name}'."
             else:
                 await db.commit()
                 logging.info(f"Character '{change.character_name}' updated successfully.")
-                return f"Character '{change.character_name}' updated successfully."
+                return True, f"Character '{change.character_name}' updated successfully."
 
     except aiosqlite.Error as e:
         logging.exception(f"Database error while updating '{change.character_name}': {e}")
-        return f"An error occurred with the database while updating '{change.character_name}'."
+        return False, f"An error occurred with the database while updating '{change.character_name}'."
     except (TypeError, ValueError) as e:
         logging.exception(f"Invalid data provided for '{change.character_name}': {e}")
-        return f"Invalid data provided for '{change.character_name}'. Please check the input values."
+        return False, f"Invalid data provided for '{change.character_name}'. Please check the input values."
     except Exception as e:
         logging.exception(f"An unexpected error occurred while updating '{change.character_name}': {e}")
-        return f"An unexpected error occurred while updating '{change.character_name}'."
+        return False, f"An unexpected error occurred while updating '{change.character_name}'."
 
 
 # Function to create the embed

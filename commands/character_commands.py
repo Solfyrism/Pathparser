@@ -680,7 +680,7 @@ class CharacterCommands(commands.Cog, name='character'):
 
     @character_group.command(name='help', description='Help commands for the character tree')
     async def help(self, interaction: discord.Interaction):
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         embed = discord.Embed(title=f"Character Help", description=f'This is a list of Character commands',
                               colour=discord.Colour.blurple())
         try:
@@ -723,7 +723,7 @@ class CharacterCommands(commands.Cog, name='character'):
                        nickname: str = None,
                        titles: str = None, description: str = None, oath: discord.app_commands.Choice[int] = 1,
                        color: str = '#5865F2', backstory: str = None):
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         guild_id = interaction.guild_id
         author = interaction.user.name
         author_id = interaction.user.id
@@ -856,7 +856,7 @@ class CharacterCommands(commands.Cog, name='character'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         author = interaction.user.name
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
@@ -1154,7 +1154,7 @@ class CharacterCommands(commands.Cog, name='character'):
     async def retire(self, interaction: discord.Interaction, character_name: str):
         guild_id = interaction.guild_id
         author = interaction.user.name
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
@@ -1190,7 +1190,7 @@ class CharacterCommands(commands.Cog, name='character'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         author = interaction.user.name
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         if amount >= 1:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -1310,7 +1310,7 @@ class CharacterCommands(commands.Cog, name='character'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         author = interaction.user.name
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         if amount >= 1:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -1409,7 +1409,7 @@ class CharacterCommands(commands.Cog, name='character'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         author = interaction.user.name
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
@@ -1519,7 +1519,7 @@ class CharacterCommands(commands.Cog, name='character'):
     @title_group.command(name='display', description='Display titles from the store!')
     async def display_titles(self, interaction: discord.Interaction):
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             offset = 1
             limit = 20
@@ -1543,7 +1543,7 @@ class CharacterCommands(commands.Cog, name='character'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         author = interaction.user.name
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
@@ -1637,7 +1637,7 @@ class CharacterCommands(commands.Cog, name='character'):
         guild_id = interaction.guild_id
         guild = interaction.guild
         author = interaction.user.name
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
@@ -1705,7 +1705,7 @@ class CharacterCommands(commands.Cog, name='character'):
                             description='Display available options from the store.')
     async def display_prestige(self, interaction: discord.Interaction):
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             offset = 1
             limit = 20
@@ -1734,7 +1734,7 @@ class CharacterCommands(commands.Cog, name='character'):
         author_id = interaction.user.id
         author_name = interaction.user.name
 
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -1877,7 +1877,7 @@ class CharacterCommands(commands.Cog, name='character'):
     async def history(self, interaction: discord.Interaction, character_name: str, name: typing.Optional[str],
                       page_number: int = 1):
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
 
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
@@ -1944,7 +1944,7 @@ class CharacterCommands(commands.Cog, name='character'):
             guild = interaction.guild
 
             # Defer the response to allow for processing time
-            await interaction.response.defer(thinking=True)
+            await interaction.response.defer(thinking=True, ephemeral=True)
             # Connect to the database
             async with (aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn):
                 cursor = await conn.cursor()
@@ -2097,7 +2097,7 @@ class CharacterCommands(commands.Cog, name='character'):
         Display A specific view when a specific character is provided,
         refine the list of characters when a specific player is provided."""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
 
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
@@ -2171,7 +2171,7 @@ class CharacterCommands(commands.Cog, name='character'):
     async def display_level_range(self, interaction: discord.Interaction, level_range: discord.Role,
                                   current_page: int = 1):
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             await interaction.followup.send("Fetching character data...")
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
@@ -2233,7 +2233,7 @@ class CharacterCommands(commands.Cog, name='character'):
     async def backstory(self, interaction: discord.Interaction, character_name: str, backstory: str):
         """Give or edit the backstory of a character."""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -2310,7 +2310,7 @@ class CharacterCommands(commands.Cog, name='character'):
                   reason: str):
         """Buy items from NPCs for non-player trades and crafts. Expected Value is the MARKET price of what you are buying, not the price you are paying."""
         try:
-            await interaction.response.defer(thinking=True)
+            await interaction.response.defer(thinking=True, ephemeral=True)
             _, character_name = name_fix(character_name)
             reason = str.replace(reason, ";", "")
             guild_id = interaction.guild_id
@@ -2387,7 +2387,7 @@ class CharacterCommands(commands.Cog, name='character'):
                    expected_value: float, reason: str):
         """Send gold to a crafter or other players for the purposes of their transactions. Expected Value is the MARKET price of what they will give you in return. This will ping the player involved"""
         try:
-            await interaction.response.defer(thinking=True)
+            await interaction.response.defer(thinking=True, ephemeral=True)
             guild_id = interaction.guild_id
             author = interaction.user.name
             author_id = interaction.user.id
@@ -2490,7 +2490,7 @@ class CharacterCommands(commands.Cog, name='character'):
     async def display_gold(self, interaction: discord.Interaction, character_name: str, page_number: int = 1):
         """Display the gold transaction history of a character."""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -2536,7 +2536,7 @@ class CharacterCommands(commands.Cog, name='character'):
     @gold_group.command(name='consume', description='Consume equipment gold for a specific purpose')
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def consume(self, interaction: discord.Interaction, character_name: str, amount: float, reason: str):
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             guild_id = interaction.guild_id
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
@@ -2620,7 +2620,7 @@ class CharacterCommands(commands.Cog, name='character'):
     @gold_group.command(name='claim', description='claim a set amount of gold.')
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def claim(self, interaction: discord.Interaction, character_name: str, amount: float, reason: str):
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             guild_id = interaction.guild_id
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
@@ -2696,7 +2696,7 @@ class CharacterCommands(commands.Cog, name='character'):
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def upload(self, interaction: discord.Interaction, character_name: str, mythweavers: discord.Attachment):
         try:
-            await interaction.response.defer(thinking=True)
+            await interaction.response.defer(thinking=True, ephemeral=True)
             guild_id = interaction.guild_id
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -2815,7 +2815,7 @@ class CharacterCommands(commands.Cog, name='character'):
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def combat(self, interaction: discord.Interaction, character_name: str):
         try:
-            await interaction.response.defer(thinking=True)
+            await interaction.response.defer(thinking=True, ephemeral=True)
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
                 await cursor.execute(
@@ -2871,7 +2871,7 @@ class CharacterCommands(commands.Cog, name='character'):
                      ability: discord.app_commands.Choice[str]):
         try:
             ability_name = ability if isinstance(ability, str) else ability.value
-            await interaction.response.defer(thinking=True)
+            await interaction.response.defer(thinking=True, ephemeral=True)
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
                 print(character_name, ability_name)
@@ -2915,7 +2915,7 @@ class CharacterCommands(commands.Cog, name='character'):
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def attributes(self, interaction: discord.Interaction, character_name: str):
         try:
-            await interaction.response.defer(thinking=True)
+            await interaction.response.defer(thinking=True, ephemeral=True)
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
                 await cursor.execute(

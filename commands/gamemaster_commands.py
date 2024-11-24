@@ -716,7 +716,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     @gamemaster_group.command(name='help', description='Help commands for the associated tree')
     async def help(self, interaction: discord.Interaction):
         """Help commands for the associated tree"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         embed = discord.Embed(title=f"Gamemaster Help", description=f'This is a list of GM administrative commands',
                               colour=discord.Colour.blurple())
         embed.add_field(name=f'**Create**', value=f'**GAMEMASTER**: Create a session and post an announcement!',
@@ -747,7 +747,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
         guild_id = interaction.guild_id
         author = interaction.user.name
         guild = interaction.guild
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         acceptance = 1 if acceptance == 1 else acceptance.value
         try:
 
@@ -827,7 +827,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
         """Add or remove from a player's fame and prestige!"""
         guild_id = interaction.guild_id
         guild = interaction.guild
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -887,7 +887,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                      plot: str = '9762aebb-43ae-47d5-8c7b-30c34a55b9e5',
                      overflow: discord.app_commands.Choice[int] = 1):
         """Create a new session."""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             session_name, _ = name_fix(session_name)
             overflow_value = overflow if overflow == 1 else overflow.value
@@ -1051,7 +1051,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                    plot: typing.Optional[str],
                    overflow: typing.Optional[discord.app_commands.Choice[int]]):
         """Create a new session."""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             build_info = await build_edit_info(
                 gm_name=interaction.user.name,
@@ -1172,7 +1172,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     @session_group.command(name='delete', description='Delete a session!')
     async def delete(self, interaction: discord.Interaction, session_id: int):
         """Delete an ACTIVE Session."""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -1235,7 +1235,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                      player_6: typing.Optional[discord.Member], specific_character: typing.Optional[str],
                      randomizer: int = 0):
         """GM: Accept player Sign-ups into your session for participation"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             player_members = [player for player in [player_1, player_2, player_3, player_4, player_5, player_6] if
                               player]
@@ -1369,7 +1369,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
 
     @session_group.command(name='remove', description='Remove a player from a session!')
     async def remove(self, interaction: discord.Interaction, session_id: int, player: discord.Member):
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -1473,7 +1473,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     ):
         """GM: Reward Players for Participating in your session."""
         awarded_essence = 10
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         if gold < 0 or easy < 0 or medium < 0 or hard < 0 or deadly < 0 or awarded_essence < 0 or trials < 0:
             await interaction.followup.send(
                 f"Your players might not judge you out loud for trying to give them a negative award, but I do...")
@@ -1645,7 +1645,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
             player_6: typing.Optional[discord.Member], player_6_reward: typing.Optional[str]
     ):
         """GM: Accept player Sign-ups into your session for participation"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             # Create lists of players and their corresponding rewards
             players = [player_1, player_2, player_3, player_4, player_5, player_6]
@@ -1713,7 +1713,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     @session_group.command(name='claim', description='Claim rewards for a session!')
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def claim(self, interaction: discord.Interaction, session_id: int, character_name: str):
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -1814,7 +1814,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     @session_group.command(name='notify', description='Notify players of a session!')
     async def notify(self, interaction: discord.Interaction, session_id: int, message: str = "Session Notice!"):
         """Notify players about an ACTIVE Session."""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as conn:
             try:
                 cursor = await conn.cursor()
@@ -1864,7 +1864,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     async def display(self, interaction: discord.Interaction, session_id: int,
                       group: discord.app_commands.Choice[int] = 1, page_number: int = 1):
         """ALL: THIS COMMAND DISPLAYS SESSION INFORMATION"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -1911,7 +1911,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     @app_commands.autocomplete(group_id=shared_functions.group_id_autocompletion)
     async def delete(self, interaction: discord.Interaction, group_id: int):
         """GM: Delete a group from the database."""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -1936,7 +1936,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
         try:
             guild_id = interaction.guild_id
             author = interaction.user.name
-            await interaction.response.defer(thinking=True)
+            await interaction.response.defer(thinking=True, ephemeral=True)
             if summary is None:
                 await interaction.followup.send(f"No summary available.")
                 return
@@ -1991,7 +1991,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                 "]", "")
             if ' ' in plot or '-' not in plot:
                 plot = await shared_functions.get_plots_autocomplete(interaction, plot)
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             await cursor.execute(
@@ -2046,7 +2046,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
             page_number: int = 1):
         """Display the overall availability of a range of groups"""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         day_value = day.value
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:

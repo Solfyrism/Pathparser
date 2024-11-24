@@ -2504,7 +2504,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     async def display(self, interaction: discord.Interaction, session_id: int,
                       group: discord.app_commands.Choice[int] = 1, page_number: int = 1):
         """ALL: THIS COMMAND DISPLAYS SESSION INFORMATION"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -2553,7 +2553,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def report(self, interaction: discord.Interaction, session_id: int, summary: str, character_name: str):
         """Report on a session"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -2590,7 +2590,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     async def create_group(self, interaction: discord.Interaction, character_name: str, group_name: str,
                            description: str):
         """Open a session Request"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -2613,7 +2613,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @group_group.command(name='delete', description='delete your group')
     async def delete_group(self, interaction: discord.Interaction):
         """Delete a session Request"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -2633,7 +2633,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @app_commands.autocomplete(group_id=shared_functions.group_id_autocompletion)
     async def group_join(self, interaction: discord.Interaction, group_id: int):
         """Sync your Groups up for a GM to view whose in a session request group."""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -2665,7 +2665,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @app_commands.autocomplete(group_id=shared_functions.group_id_autocompletion)
     async def group_leave(self, interaction: discord.Interaction, group_id: int):
         """leave a group because you hate everyone inside."""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -2696,7 +2696,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     async def display_groups(self, interaction: discord.Interaction, group_id: typing.Optional[int],
                              page_number: int = 1):
         """Display all participants and signups for a group"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -2774,7 +2774,7 @@ class PlayerCommands(commands.Cog, name='Player'):
                                   discord.app_commands.Choice(name='Clear All Availability', value=4)])
     async def timesheet_creation(self, interaction: discord.Interaction,
                                  change: typing.Optional[discord.app_commands.Choice[int]]):
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         change_value = 1 if change is None else change.value
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
@@ -2830,7 +2830,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @app_commands.autocomplete(timezone=search_timezones)
     async def set_timezone(self, interaction: discord.Interaction, timezone: str):
         """Set your timezone for availability"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -2863,9 +2863,10 @@ class PlayerCommands(commands.Cog, name='Player'):
     async def availability(self, interaction: discord.Interaction, player: discord.Member,
                            day: discord.app_commands.Choice[int]):
         """Display historical Session Requests"""
+
         guild_id = interaction.guild.id
         day_value = day.value
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         if day_value < 1 or day_value > 7:
             embed = discord.Embed(title=f"Day Error", description=f'{day} is not a valid day of the week!',
                                   colour=discord.Colour.red())
@@ -2906,7 +2907,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         guild_id = interaction.guild.id
         day_value = day.value
         try:
-            await interaction.response.defer(thinking=True)
+            await interaction.response.defer(thinking=True, ephemeral=True)
             if day_value < 1 or day_value > 7:
                 embed = discord.Embed(title=f"Day Error", description=f'{day} is not a valid day of the week!',
                                       colour=discord.Colour.red())
@@ -2954,10 +2955,10 @@ class GroupManyView(shared_functions.ShopView):
         statement = """
                         SELECT Group_ID, Player_Name
                         FROM Sessions_Group_Presign
-                        WHERE Group_ID = ? ORDER BY Player_Name Offset ? Limit ?
+                        WHERE Group_ID = ? ORDER BY Player_Name Limit ? Offset ? 
                     """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
-            cursor = await db.execute(statement, (self.group_id, self.offset, self.limit))
+            cursor = await db.execute(statement, (self.group_id, self.limit, self.offset ))
             self.results = await cursor.fetchall()
 
     async def create_embed(self):
@@ -2997,10 +2998,10 @@ class GroupView(shared_functions.ShopView):
 
         statement = """
                         SELECT Group_ID, Group_Name, Role_ID, Player_Name, Host_Character, Description
-                        FROM Sessions_Group Order by Group_ID Offset ? Limit ?
+                        FROM Sessions_Group Order by Group_ID Limit ? Offset ? 
                     """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
-            cursor = await db.execute(statement, (self.group_id, self.offset, self.limit))
+            cursor = await db.execute(statement, (self.group_id, self.limit, self.offset ))
             self.results = await cursor.fetchall()
 
     async def create_embed(self):

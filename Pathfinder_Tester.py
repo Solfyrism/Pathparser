@@ -1,27 +1,25 @@
-import asyncio
 import datetime
+import logging
+import os
 import random
+import re
 import shutil
-from dataclasses import dataclass, field
-from typing import Dict, Tuple
 
 import aiosqlite
 import discord
 from discord.ext import commands
-import os
+from dotenv import load_dotenv
 
-from commands.reviewer_commands import ReviewerCommands
-from test_functions import TestCommands
-from commands.character_commands import CharacterCommands
-from commands.admin_commands import AdminCommands
-from commands.gamemaster_commands import GamemasterCommands
-from commands.player_commands import PlayerCommands
-from commands.RP_Commands import RPCommands, handle_rp_message, reinstate_rp_cache
-import logging
 import shared_functions
 from commands import gamemaster_commands
+from commands.RP_Commands import RPCommands, handle_rp_message, reinstate_rp_cache
+from commands.admin_commands import AdminCommands
+from commands.character_commands import CharacterCommands
+from commands.gamemaster_commands import GamemasterCommands
+from commands.player_commands import PlayerCommands
+from commands.reviewer_commands import ReviewerCommands
 from scheduler_utils import scheduler, scheduled_jobs, remind_users
-from dotenv import load_dotenv
+from test_functions import TestCommands
 
 load_dotenv()
 
@@ -33,9 +31,8 @@ os.chdir("C:\\pathparser")
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-
-async def reinstate_cache(bot: commands.Bot) -> None:
-    for guild in bot.guilds:
+async def reinstate_cache(discord_bot: commands.Bot) -> None:
+    for guild in discord_bot.guilds:
         await shared_functions.add_guild_to_cache(guild.id)
 
 
@@ -72,6 +69,7 @@ async def reinstate_session_buttons(server_bot) -> None:
     now = datetime.datetime.now(datetime.timezone.utc)
     for guild in guilds:
         try:
+
             async with aiosqlite.connect(f"pathparser_{guild.id}_Test.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
@@ -125,6 +123,7 @@ async def on_ready():
     await shared_functions.config_cache.initialize_configuration(discord_bot=bot)
     await bot.loop.create_task(shared_functions.config_cache.refresh_cache_periodically(600, bot))
 
+
 @bot.event
 async def on_disconnect():
     print("Bot is disconnecting.")
@@ -142,14 +141,48 @@ async def on_message(message):
     elif 'monkey' in message.content.lower() and random_number == 50:
         await message.channel.send("https://tenor.com/view/mmmm-monkey-monkey-ug-master-oogway-oogway-gif-19727561")
     if random_number == 1 and message.author.id == 217873501313433600:
-        await message.channel.send("https://cdn.discordapp.com/attachments/479089930816192513/1309681106013917284/wdUWYUf3MwhkwAAAABJRU5ErkJggg.png?ex=67427714&is=67412594&hm=ef7e1e7bb5ff5a014ba0fb0036f92beaef4ebbe05178bfeaf1f6de278082c86e&")
+        await message.channel.send(
+            "https://cdn.discordapp.com/attachments/479089930816192513/1309681106013917284/wdUWYUf3MwhkwAAAABJRU5ErkJggg.png?ex=67427714&is=67412594&hm=ef7e1e7bb5ff5a014ba0fb0036f92beaef4ebbe05178bfeaf1f6de278082c86e&")
     elif random_number == 2 and message.author.id == 217873501313433600:
-        await message.channel.send("https://cdn.discordapp.com/attachments/479089930816192513/1309681542653546560/764rjEg82XSZ0fJzf8fVPtjhVRebgAAAAASUVORK5CYII.png?ex=6742777c&is=674125fc&hm=a5875743269822bbfc6a966710bf5f3e9a65795751ba71050b8dae0ba7e94c73&")
+        await message.channel.send(
+            "https://cdn.discordapp.com/attachments/479089930816192513/1309681542653546560/764rjEg82XSZ0fJzf8fVPtjhVRebgAAAAASUVORK5CYII.png?ex=6742777c&is=674125fc&hm=a5875743269822bbfc6a966710bf5f3e9a65795751ba71050b8dae0ba7e94c73&")
     elif random_number == 3 and message.author.id == 217873501313433600:
-        await message.channel.send("https://cdn.discordapp.com/attachments/479089930816192513/1309682327860805733/7YjmdoZxhSgAAAAASUVORK5CYII.png?ex=67427837&is=674126b7&hm=6b916230203905c734500e091bf91b6f80ac4fd2cdfeb83ee3e437b44250a428&")
+        await message.channel.send(
+            "https://cdn.discordapp.com/attachments/479089930816192513/1309682327860805733/7YjmdoZxhSgAAAAASUVORK5CYII.png?ex=67427837&is=674126b7&hm=6b916230203905c734500e091bf91b6f80ac4fd2cdfeb83ee3e437b44250a428&")
     elif random_number == 4 and message.author.id == 473912723663749130:
-        await message.channel.send("https://cdn.discordapp.com/attachments/479089930816192513/1309684036637298759/lvcbpPEd8IYNoAAAAASUVORK5CYII.png?ex=674279cf&is=6741284f&hm=c4e73bcc27b276c09dfe1accaf28ee8361c0c686a631bd15cc1bbc7898c3d419&")
+        await message.channel.send(
+            "https://cdn.discordapp.com/attachments/479089930816192513/1309684036637298759/lvcbpPEd8IYNoAAAAASUVORK5CYII.png?ex=674279cf&is=6741284f&hm=c4e73bcc27b276c09dfe1accaf28ee8361c0c686a631bd15cc1bbc7898c3d419&")
     guild_id = message.guild.id
+    swears = {
+        "fuck": 0,
+        "shit": 0,
+        "damn": 0,
+        "bitch": 0,
+        "ass": 0,
+    }
+
+    # Normalize the string (optional)
+    normalized_string = message.content.lower()
+
+    # Count occurrences of each fruit in the string
+    for swear in swears.keys():
+        # Use regex to match whole words
+        swears[swear] = len(re.findall(rf"\b{swear}\b", normalized_string))
+
+    # Calculate total occurrences
+    total_count = sum(swears.values()) * 10
+    if total_count > 10 and message.author.id == 243120409703088128:
+        hostility = min(100, int((total_count / 50)))
+        if 0 <= random_number <= 17:
+            await message.channel.send(f"Hostility Detected: {hostility}% Someone's a salty boy! :)")
+        elif 18 <= random_number <= 34:
+            await message.channel.send(f"Wow. Someone's feeling mean today! He's {hostility}% hostile!")
+        elif 35 <= random_number <= 50:
+            await message.channel.send(
+                f"Angry dog off the leash! he's feeling {hostility}% hostile! Someone better get his waifu before he wreck his laifu.")
+    if message.author.id == 243120409703088128 and 'I mean' in message.content:
+        await message.channel.send(
+            "https://us-tuna-sounds-images.voicemod.net/c75f5860-13bd-4808-a2ed-3a097f0a24b1.jpg")
     if isinstance(message.channel, discord.channel.TextChannel):
         channel_id = message.channel.id
     elif isinstance(message.channel, discord.channel.Thread):
@@ -168,14 +201,16 @@ async def on_message(message):
 
             await shared_functions.add_guild_to_cache(guild_id)
             if channel_id in shared_functions.approved_channel_cache.cache[guild_id]:
-                test = await handle_rp_message(message)
+                await handle_rp_message(message)
             else:
                 await bot.process_commands(message)
+
 
 @bot.event
 async def on_join(guild):
     shutil.copyfile(f"C:/pathparser/pathparser_test.sqlite",
                     f"C:/pathparser/pathparser_{guild.id}_test.sqlite")
+
 
 bot.run(os.getenv("DISCORD_TOKEN_V2"))
 bot.loop.create_task(shared_functions.clear_autocomplete_cache())
