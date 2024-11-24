@@ -459,7 +459,7 @@ class RPCommands(commands.Cog, name='RP'):
 
                         if matching_requirements:
                             matching_requirements = int(matching_requirements)
-                            if matching_requirements == 1 and (requirements_1_valid is False or requirements_2_valid is False or requirements_3_valid is False):
+                            if matching_requirements == 1 and not any((requirements_1_valid, requirements_2_valid, requirements_3_valid)):
                                 type_dict = {1: "Role", 2: "Balance", 3: "Item"}
                                 content = f"Requirements not met: "
                                 content += f"{type_dict[requirements_1_type]}: {requirements_1_pair}, " if requirements_1_valid is False else ""
@@ -467,7 +467,7 @@ class RPCommands(commands.Cog, name='RP'):
                                 content += f"{type_dict[requirements_3_type]}: {requirements_3_pair}" if requirements_3_valid is False else ""
                                 await interaction.followup.send(content)
                                 return
-                            elif matching_requirements == 2 and (requirements_1_valid is False and requirements_2_valid is False and requirements_3_valid is False):
+                            elif matching_requirements == 2 and not all((requirements_1_valid, requirements_2_valid, requirements_3_valid)):
                                 type_dict = {1: "Role", 2: "Balance", 3: "Item"}
                                 content = f"Requirements not met: "
                                 content += f"{type_dict[requirements_1_type]}: {requirements_1_pair}, " if not requirements_1_valid else ""
@@ -475,7 +475,7 @@ class RPCommands(commands.Cog, name='RP'):
                                 content += f"{type_dict[requirements_3_type]}: {requirements_3_pair}" if not requirements_3_valid else ""
                                 await interaction.followup.send(content)
                                 return
-                            elif matching_requirements == 3 and (requirements_1_valid is True or requirements_2_valid is True or requirements_3_valid is True):
+                            elif matching_requirements == 3 and any((requirements_1_valid, requirements_2_valid, requirements_3_valid)):
                                 type_dict = {1: "Role", 2: "Balance", 3: "Item"}
                                 content = f"the following requirements should NOT be met: "
                                 content += f"{type_dict[requirements_1_type]}: {requirements_1_pair}, " if not requirements_1_valid else ""
