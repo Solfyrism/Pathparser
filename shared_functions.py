@@ -3,13 +3,14 @@ import logging
 import os
 import re
 import sqlite3
+import time
 import typing
 import urllib.error
 from dataclasses import dataclass, field
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
-from typing import List, Optional, Tuple, Union, Dict
+from typing import List, Optional, Tuple, Union, Dict, Any
 from urllib.parse import urlparse, parse_qs
 from zoneinfo import available_timezones, ZoneInfo
 import aiosqlite
@@ -30,9 +31,107 @@ load_dotenv()
 timezone_cache = sorted(available_timezones())
 
 
+# Cache Server Settings
+
+@dataclass
+class ConfigCache:
+    cache: Dict[int, Dict[str, Any]] = field(default_factory=dict)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    async def initialize_configuration(self, discord_bot: discord.Client):
+        for guild in discord_bot.guilds:
+
+            await self.load_configurations(guild.id)
+
+    async def load_configurations(self, guild_id: int):
+        """Load configurations for all guilds from the database into the cache."""
+        try:
+            async with self.lock:
+                async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+                    cursor = await db.execute("SELECT Identifier, search FROM Admin")
+                    rows = await cursor.fetchall()
+                    self.cache = {}
+                    for key, value in rows:
+                        guild_id = int(guild_id)
+                        if guild_id not in self.cache:
+                            self.cache[guild_id] = {}
+                        self.cache[guild_id][key] = self._parse_value(value)
+        except aiosqlite.Error as e:
+            logging.exception(f"Failed to load configurations for guild {guild_id} with error: {e}")
+
+    def get(self, guild_id: int, key: str, default: Any = None) -> Any:
+        """Retrieve a configuration value for a guild from the cache."""
+        return self.cache.get(guild_id, {}).get(key, default)
+
+    async def update_setting(self, guild_id: int, key: str, value: Any):
+        """Update a configuration setting for a guild in the database and cache."""
+        async with self.lock:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+                await db.execute("REPLACE INTO configuration_table (Search, Identifier) VALUES (?, ?)",
+                                 (guild_id, key, str(value))
+                                 )
+                await db.commit()
+            # Update the cache
+            if guild_id not in self.cache:
+                self.cache[guild_id] = {}
+            self.cache[guild_id][key] = value
+
+    def _parse_value(self, value: str) -> Any:
+        """Parse the value from the database into the appropriate type."""
+        # Implement parsing logic as before
+        # Handle booleans
+        try:
+            return int(value)
+        except ValueError:
+            pass
+        try:
+            return float(value)
+        except ValueError:
+            pass
+        if value.lower() in ('true', 'false'):
+            return value.lower() == 'true'
+        # Handle integers
+
+        # Handle floats
+
+        # Return as string if parsing fails
+        return value
+
+    async def refresh_cache_periodically(self, interval_seconds: int, bot: discord.Client):
+        while True:
+            await asyncio.sleep(interval_seconds)
+            await config_cache.initialize_configuration(discord_bot=bot)
+            print("Configuration cache refreshed.")
+
+
+config_cache = ConfigCache()
+
+
+@dataclass
+class ApprovedChannelCache:
+    cache: Dict[int, list[int]] = field(default_factory=dict)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+approved_channel_cache = ApprovedChannelCache()
+
+
+async def add_guild_to_cache(guild_id: int) -> None:
+    try:
+        async with approved_channel_cache.lock:
+            async with aiosqlite.connect(f"pathparser_{guild_id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Channel_ID FROM rp_approved_Channels")
+                approved_channels = await cursor.fetchall()
+                # approved_channels is a list of tuples, extract the channel IDs
+                channel_ids = [int(channel_id[0]) for channel_id in approved_channels]
+                approved_channel_cache.cache[guild_id] = channel_ids
+    except aiosqlite.Error as e:
+        logging.exception(f"Failed to add guild {guild_id} to cache with error: {e}")
+
+
+
 # *** AUTOCOMPLETION COMMANDS *** #
-
-
 async def stg_character_select_autocompletion(
         interaction: discord.Interaction,
         current: str) -> typing.List[app_commands.Choice[str]]:
@@ -177,8 +276,10 @@ class AutocompleteWorldAnvilCache:
     cache: Dict[int, Tuple[List[Tuple[str, dict]], float]] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
+
 autocomplete_worldanvil_cache = AutocompleteWorldAnvilCache()
 CACHE_EXPIRATION = 600  # 10 minutes
+
 
 async def get_plots_autocompletion(
         interaction: discord.Interaction,
@@ -327,7 +428,6 @@ async def get_plots_autocomplete(
                                                                   '9ad3d530-1a42-4e99-9a09-9c4dccddc70a')]
     for articles in articles_list:
         if current in articles['title']:
-            print(articles['title'])
             data.append(app_commands.Choice(name=articles['title'], value=f"1-{articles['id']}"))
     data.append(app_commands.Choice(name=f"NEW: {str.title(current)}", value=f"2-{str.title(current)}"))
     return data
@@ -390,12 +490,6 @@ async def title_autocomplete(interaction: discord.Interaction, current: str) -> 
     return data
 
 
-import aiosqlite
-from discord import app_commands
-from unidecode import unidecode
-import logging
-
-
 async def settings_autocomplete(
         interaction: discord.Interaction,
         current: str) -> list[app_commands.Choice[str]]:
@@ -418,6 +512,7 @@ async def settings_autocomplete(
         logging.exception(f"An error occurred while fetching settings: {e}")
     return data
 
+
 async def rp_store_autocomplete(
         interaction: discord.Interaction,
         current: str) -> list[app_commands.Choice[str]]:
@@ -429,6 +524,29 @@ async def rp_store_autocomplete(
             # Correct parameterized query
             cursor = await db.execute("SELECT name FROM rp_store_items WHERE name LIKE ? LIMIT 20",
                                       (f"%{current}%",))
+            items_list = await cursor.fetchall()
+
+            # Populate choices
+            for item in items_list:
+                if current in item[0].lower():
+                    data.append(app_commands.Choice(name=item[0], value=item[0]))
+
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"An error occurred while fetching settings: {e}")
+    return data
+
+
+async def rp_inventory_autocomplete(
+        interaction: discord.Interaction,
+        current: str) -> list[app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild.id
+    current = unidecode(current.lower())
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            # Correct parameterized query
+            cursor = await db.execute("SELECT name FROM rp_players_items WHERE item_name LIKE ? and player_id = ? LIMIT 20",
+                                      (f"%{current}%", interaction.user.id))
             items_list = await cursor.fetchall()
 
             # Populate choices
@@ -703,7 +821,7 @@ async def update_character(guild_id: int, change: UpdateCharacterData) -> str:
         # Execute the SQL statement
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
             cursor = await db.cursor()
-            print(sql_statement, values)
+
             await cursor.execute(sql_statement, values)
             updated_rows = cursor.rowcount
             if updated_rows == 0:
@@ -799,7 +917,6 @@ async def log_embed(change: CharacterChange, guild: discord.Guild, thread: int, 
             gold = round(change.gold, 2) if change.gold is not None else "N/A"
             gold_change = round(change.gold_change, 2) if change.gold_change is not None else "N/A"
             gold_value = round(change.gold_value, 2) if change.gold_value is not None else "N/A"
-            print(gold, gold_change, gold_value)
             embed.add_field(
                 name="Wealth Changes",
                 value=(
@@ -903,7 +1020,6 @@ async def search_timezones(interaction: discord.Interaction, current: str) -> ty
     # Check if timezone cache is initialized
     # Filter timezones based on current input
     filtered_timezones = [tz for tz in timezone_cache if current.lower() in tz.lower()]
-    print(filtered_timezones)
     # Return list of app_commands.Choice objects (maximum 25 choices for Discord autocomplete)
     return [
         app_commands.Choice(name=tz, value=tz)
@@ -917,12 +1033,10 @@ def get_utc_offset(tz):
         tzinfo = ZoneInfo(tz)
         now_utc = datetime.now(timezone.utc)
         now_tz = now_utc.astimezone(tzinfo)
-        print(tzinfo, now_utc, now_tz)
         # Get the offset in hours and minutes
         offset_seconds = now_tz.utcoffset().total_seconds()
         offset_hours = int(offset_seconds // 3600)
         offset_minutes = int((offset_seconds % 3600) // 60)
-        print(offset_hours, offset_minutes)
         # Format the offset as "+HH:MM" or "-HH:MM"
         return f"{offset_hours:+03}:{offset_minutes:02}"
     except Exception as e:
@@ -955,7 +1069,7 @@ def fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset):
     ]
     conn = sqlite3.connect(f"Pathparser_{guild_id}_test.sqlite")
     cursor = conn.cursor()
-    print(f" this is {utc_offset}")
+
     if utc_offset > 0:
         select_columns = []
         for col in time_labels:
@@ -984,8 +1098,6 @@ def fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset):
                 select_columns.append(f'pt2."{col}"')
         select_clause = ', '.join(select_columns)
         day_two = adjust_day(day, 23, -4)
-        print(f" DAY ONE IS {day} DAY TWO IS {day_two}")
-        print(f"The select clause is {select_clause}", f"the day is day {day_two}")
         cursor.execute(
             "SELECT {select_clause} FROM Player_Timecard PT1 Left Join Player_Timecard PT2 on PT1.Player_Name = PT2.Player_Name where PT1.Player_Name = ? and PT1.Day = ? AND PT2.Day = ?",
             (player_name, day, day_two))
@@ -1270,7 +1382,7 @@ def validate_vtt(url: str) -> Tuple[bool, str, int]:
 
         # Additional path validation for Forge
         if domain.endswith('forge-vtt.com'):
-            print(path)
+
             if not path.startswith('/invite/') and not path.startswith('/game/'):
                 return False, "Forge game links should start with '/invite/' or  '/game/'.", step
 
@@ -1604,7 +1716,7 @@ async def put_wa_report(guild_id: int, session_id: int, overview: str, author: s
                     'plots': [{'id': plot}]
                 })
                 for character in characters:
-                    print(f" This is a character {character[0]} Do they have an article: {character[2]}?")
+
                     if character[2] is not None:
                         person = {'id': character[2]}
                         related_persons_block.append(person)
@@ -2190,13 +2302,11 @@ class DualView(discord.ui.View):
     async def send_initial_message(self):
         """Send the initial message with the view."""
         try:
-            print("oh")
+
             await self.update_results()
-            print("here")
             await self.create_embed()
-            print("I")
             await self.update_buttons()
-            print("AM")
+
             self.message = await self.interaction.followup.send(
                 content=self.content,
                 embed=self.embed,
@@ -2285,7 +2395,7 @@ class DualView(discord.ui.View):
         try:
 
             max_items = await self.get_max_items()
-            print("Updating buttons", self.offset, self.limit, max_items)
+
             first_page = self.offset == 1
             last_page = self.offset + self.limit - 1 >= max_items
 

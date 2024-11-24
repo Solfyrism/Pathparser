@@ -23,20 +23,20 @@ import commands.character_commands as character_commands
 os.chdir("C:\\pathparser")
 
 
-async def transaction_reverse(cursor: aiosqlite.Cursor, transaction_id: int, author_id: int, author_name: str,
+async def transactions_reverse(cursor: aiosqlite.Cursor, transactions_id: int, author_id: int, author_name: str,
                               reason: str) -> (
         Union[tuple[int, int, str, int, float, float, float, float], str]):
     try:
         await cursor.execute(
-            "Select Character_Name, Gold_value, Effective_Gold_Value, Effective_gold_value_max, source_command, Related_Transaction_ID FROM A_Audit_Gold WHERE Transaction_ID = ?",
-            (transaction_id,))
+            "Select Character_Name, Gold_value, Effective_Gold_Value, Effective_gold_value_max, source_command, Related_Transactions_ID FROM A_Audit_Gold WHERE Transactions_ID = ?",
+            (transactions_id,))
         gold_info = await cursor.fetchone()
         if not gold_info:
-            return_value = f"There is no transaction with the ID of {transaction_id}."
+            return_value = f"There is no transaction with the ID of {transactions_id}."
             return return_value
         else:
             (character_name, gold, effective_gold, max_effective_gold, source_command,
-             related_transaction_id) = gold_info
+             related_transactions_id) = gold_info
             await cursor.execute(
                 "select gold, gold_value, gold_value_max, Thread_ID from Player_Characters where Character_Name = ?",
                 (character_name,))
@@ -53,157 +53,28 @@ async def transaction_reverse(cursor: aiosqlite.Cursor, transaction_id: int, aut
                         character_name))
                 cursor.connection.commit()
                 await cursor.execute(
-                    "INSERT into A_Audit_Gold (Character_Name, Author_Name, Author_ID, Gold, Gold_Value, Effective_Gold_Value, Effective_Gold_value_max, Related_Transaction_ID, Reason, Source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT into A_Audit_Gold (Character_Name, Author_Name, Author_ID, Gold, Gold_Value, Effective_Gold_Value, Effective_Gold_value_max, Related_Transactions_ID, Reason, Source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         character_name, author_name, author_id, -gold, -effective_gold, -max_effective_gold,
-                        transaction_id,
+                        transactions_id,
                         reason, 'undo transaction'))
                 cursor.connection.commit()
-                await cursor.execute("Select MAX(Transaction_ID) FROM A_Audit_Gold")
-                new_transaction_id = await cursor.fetchone()
-                new_transaction_id = new_transaction_id[0]
+                await cursor.execute("Select MAX(Transactions_ID) FROM A_Audit_Gold")
+                new_transactions_id = await cursor.fetchone()
+                new_transactions_id = new_transactions_id[0]
                 new_gold_total = gold_total - gold
                 new_effective_gold_total = gold_value_total - effective_gold
                 new_max_effective_gold_total = gold_value_max_total - max_effective_gold
                 return_value = (
-                    new_transaction_id, related_transaction_id, character_name, thread_id, -abs(gold), new_gold_total,
+                    new_transactions_id, related_transactions_id, character_name, thread_id, -abs(gold), new_gold_total,
                     new_effective_gold_total, new_max_effective_gold_total)
                 return return_value
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(
-            f"an error occurred for {author_name} whilst undoing transaction with id {transaction_id}': {e}")
-        return_value = f"an error occurred for {author_name} whilst undoing transaction with id {transaction_id} Error: {e}."
+            f"an error occurred for {author_name} whilst undoing transaction with id {transactions_id}': {e}")
+        return_value = f"an error occurred for {author_name} whilst undoing transaction with id {transactions_id} Error: {e}."
         return return_value
 
-
-class AddItemModal(discord.ui.Modal):
-    def __init__(self, guild_id):
-        super().__init__(title="Add Item to Store")
-
-        self.name = discord.ui.TextInput(label='Item Name', required=True)
-        self.price = discord.ui.TextInput(label='Price', required=True)
-        self.description = discord.ui.TextInput(label='Description', style=discord.TextStyle.paragraph, required=False)
-        self.stock = discord.ui.TextInput(label='Stock', required=False)
-
-        self.image_link = discord.ui.TextInput(label='Image Link', required=False)
-        self.storable = discord.ui.Select(placeholder='Is the item storable? or is it used on purchase?', options=[
-            discord.SelectOption(label='Storable', value='storable'),
-            discord.SelectOption(label='consumed', value='consumed')
-        ])
-        self.sellable = discord.ui.Select(placeholder='Is the item sellable?', options=[
-            discord.SelectOption(label='Sellable', value='sellable'),
-            discord.SelectOption(label='Not Sellable', value='not_sellable')
-        ])
-        self.usable = discord.ui.Select(placeholder='Is the item usable?', options=[
-            discord.SelectOption(label='Usable', value='usable'),
-            discord.SelectOption(label='Not Usable', value='not_usable')
-        ])
-        self.custom_message = discord.ui.TextInput(label='Custom Message', style=discord.TextStyle.paragraph,
-                                                   required=False)
-        self.guild_id = guild_id
-        self.add_item(self.name)
-        self.add_item(self.price)
-        self.add_item(self.description)
-        self.add_item(self.stock)
-        self.add_item(self.storable)
-        self.add_item(self.sellable)
-        self.add_item(self.image_link)
-        self.add_item(self.custom_message)
-        self.add_item(self.usable)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        item_name = self.name.value
-        price = self.price.value
-        description = self.description.value
-        stock = self.stock.value
-        storable = self.storable.value
-        sellable = self.sellable.value
-        image_link = self.image_link
-        custom_message = self.custom_message
-        usable = self.usable
-        # Validate price
-        try:
-            price = int(price)
-        except ValueError:
-            await interaction.response.send_message("Price must be a number.", ephemeral=True)
-            return
-
-        # Add the item to the store (you need to implement this function)
-        await add_item_to_store(guild_id=self.guild_id, item_name=item_name, price=price, description=description,
-                                stock=stock, inventory=storable, sellable=sellable, image=image_link, usable=usable,
-                                custom_message=custom_message)
-
-        await interaction.response.send_message(f"Item '{item_name}' added to the store.", ephemeral=True)
-
-
-class EditItemModal(discord.ui.Modal):
-    def __init__(self, guild_id, old_item_name):
-        super().__init__(title="Add Item to Store")
-
-        self.name = discord.ui.TextInput(label='Item Name', required=False)
-        self.price = discord.ui.TextInput(label='Price', required=False)
-        self.description = discord.ui.TextInput(label='Description', style=discord.TextStyle.paragraph, required=False)
-        self.stock = discord.ui.TextInput(label='Stock', required=False)
-        self.storable = discord.ui.Select(placeholder='Is the item storable? or is it used on purchase?', options=[
-            discord.SelectOption(label='Storable', value='storable'),
-            discord.SelectOption(label='consumed', value='consumed')
-        ])
-        self.sellable = discord.ui.Select(placeholder='Is the item sellable?', options=[
-            discord.SelectOption(label='Sellable', value='sellable'),
-            discord.SelectOption(label='Not Sellable', value='not_sellable')
-        ])
-        self.usable = discord.ui.Select(placeholder='Is the item usable?', options=[
-            discord.SelectOption(label='Usable', value='usable'),
-            discord.SelectOption(label='Not Usable', value='not_usable')
-        ])
-        self.custom_message = discord.ui.TextInput(label='Custom Message', style=discord.TextStyle.paragraph,
-                                                   required=False)
-        self.image_link = discord.ui.TextInput(label='Image Link', required=False)
-        self.guild_id = guild_id
-        self.old_item_name = old_item_name
-        self.add_item(self.name)
-        self.add_item(self.price)
-        self.add_item(self.description)
-        self.add_item(self.stock)
-        self.add_item(self.image_link)
-        self.add_item(self.custom_message)
-        self.add_item(self.storable)
-        self.add_item(self.sellable)
-        self.add_item(self.usable)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        item_name = self.name.value
-        price = self.price.value
-        description = self.description.value
-        stock = self.stock.value
-        storable = self.storable.value
-        sellable = self.sellable.value
-        usable = self.usable.value
-        custom_message = self.custom_message.value
-        image_link = self.image_link
-
-        # Validate price
-        try:
-            price = int(price)
-        except ValueError:
-            await interaction.response.send_message("Price must be a number.", ephemeral=True)
-            return
-
-        # Add the item to the store (you need to implement this function)
-        await edit_item_in_store(
-            guild_id=self.guild_id,
-            old_item_name=self.old_item_name,
-            new_item_name=item_name,
-            price=price,
-            description=description,
-            stock=stock,
-            inventory=storable,
-            sellable=sellable,
-            image=image_link,
-            usable=usable,
-            custom_message=custom_message)
-
-        await interaction.response.send_message(f"Item '{item_name}' added to the store.", ephemeral=True)
 
 
 def safe_add(a, b):
@@ -230,9 +101,10 @@ async def add_item_to_store(guild_id, item_name, price, description, stock, inve
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             await cursor.execute(
-                "INSERT INTO RP_Store_Items (name, price, description, stock_remaining, inventory, usable, sellable, image_link, custom_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (item_name, price, description, stock, inventory, usable, sellable, image, custom_message))
+                "INSERT INTO RP_Store_Items (name, price, description, stock_remaining, inventory, usable, sellable, matching_requirements, image_link, custom_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (item_name, price, description, stock, inventory, usable, sellable, 1, image, custom_message))
             await conn.commit()
+            return True
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(
             f"an error occurred whilst adding an item to the store': {e}")
@@ -262,10 +134,14 @@ async def edit_item_in_store(guild_id, old_item_name, new_item_name, price, desc
             new_item_name = new_item_name if new_item_name else old_item_name
             new_custom_message = custom_message if custom_message else old_custom_message
             await cursor.execute(
-                "UPDATE RP_Store_Items SET name = ? price = ? description = ? stock_remaining = ? inventory = ? usable = ? sellable = ? image_link = ? Custom_Message = ? WHERE name = ?",
+                "UPDATE RP_Store_Items SET name = ?, price = ?, description = ?, stock_remaining = ?, inventory = ?, usable = ?, sellable = ?, image_link = ?, Custom_Message = ?, WHERE name = ?",
                 (new_item_name, new_price, new_description, new_stock, new_inventory, new_usable, new_sellable,
                  new_image, new_custom_message, old_item_name))
             await conn.commit()
+            await cursor.execute(
+                "UPDATE RP_Players_Items SET item_name = ? WHERE item_name = ?",
+                (new_item_name, old_item_name))
+            return True
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(
             f"an error occurred whilst adding an item to the store': {e}")
@@ -310,15 +186,15 @@ async def session_log_player(cursor: aiosqlite.Cursor,
         else:
             trial_change = 0
         if isinstance(return_gold, tuple):
-            (calculated_difference, gold_total, gold_value_total, gold_value_max_total, transaction_id) = return_gold
+            (calculated_difference, gold_total, gold_value_total, gold_value_max_total, transactions_id) = return_gold
             character_changes.gold = gold_total
             character_changes.gold_change = calculated_difference
             character_changes.effective_gold = gold_value_total
             character_changes.effective_gold_max = gold_value_max_total
-            character_changes.transaction_id = transaction_id
+            character_changes.transactions_id = transactions_id
         else:
             calculated_difference = 0
-            transaction_id = 0
+            transactions_id = 0
         if isinstance(return_essence, tuple):
             (essence_total, essence_change) = return_essence
             character_changes.essence = essence_total
@@ -328,12 +204,12 @@ async def session_log_player(cursor: aiosqlite.Cursor,
         (player_name, player_id, original_level, original_tier, original_effective_gold) = packaged_session_info
         await cursor.execute("INSERT INTO Session_Log (Session_ID, Player_ID, Character_Name, Level, "
                              "Tier, Effective_Gold, Received_Milestones, Received_Trials, Received_Gold, "
-                             "Received_Fame, Received_Prestige, Received_Essence, Gold_Transaction_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                             "Received_Fame, Received_Prestige, Received_Essence, Gold_Transactions_ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                              (
                                  session_id, player_id, character_name, original_level, original_tier,
                                  original_effective_gold,
                                  awarded_total_milestones, trial_change, calculated_difference, 0, 0, essence_change,
-                                 transaction_id))
+                                 transactions_id))
         await shared_functions.character_embed(character_name=character_name,
                                                guild=interaction.guild)
         await shared_functions.log_embed(change=character_changes, guild=interaction.guild,
@@ -478,7 +354,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     else:
                         (info_true_character_name, info_character_name, info_fame, info_prestige,
                          info_thread_id) = player_info
-                        print(info_fame, info_prestige, fame, prestige)
+
                         fame_calculation = await character_commands.calculate_fame(
                             character_name=character_name,
                             fame=info_fame,
@@ -597,7 +473,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 )
 
                 (adjusted_gold_change, gold_total, new_effective_gold,
-                 gold_value_max_total, transaction_id) = gold_result
+                 gold_value_max_total, transactions_id) = gold_result
 
                 gold_package = (gold_total, new_effective_gold, gold_value_max_total)
                 character_updates = shared_functions.UpdateCharacterData(
@@ -615,7 +491,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     gold=gold_total,
                     gold_change=adjusted_gold_change,
                     gold_value=new_effective_gold,
-                    transaction_id=transaction_id,
+                    transactions_id=transactions_id,
                     source=f"Admin adjusted gold by {amount} for {character_name} for {reason}"
                 )
 
@@ -645,7 +521,7 @@ class AdminCommands(commands.Cog, name='admin'):
     @gold_group.command(name="undo_transaction",
                         description="commands for undoing a transaction")
     async def undo_transaction(self, interaction: discord.Interaction, reason: str,
-                               transaction_id: int):
+                               transactions_id: int):
         guild_id = interaction.guild_id
         guild = interaction.guild
 
@@ -653,22 +529,22 @@ class AdminCommands(commands.Cog, name='admin'):
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
-                transaction_undo = await transaction_reverse(
-                    cursor=cursor, transaction_id=transaction_id,
+                transactions_undo = await transactions_reverse(
+                    cursor=cursor, transactions_id=transactions_id,
                     author_id=interaction.user.id, author_name=interaction.user.name, reason=reason)
-                if isinstance(transaction_undo, str):
-                    await interaction.followup.send(transaction_undo, ephemeral=True)
+                if isinstance(transactions_undo, str):
+                    await interaction.followup.send(transactions_undo, ephemeral=True)
                 else:
-                    (new_transaction_id, related_transaction_id, character_name, thread_id, amount, gold_total,
+                    (new_transactions_id, related_transactions_id, character_name, thread_id, amount, gold_total,
                      gold_value_total,
-                     gold_value_max_total) = transaction_undo
+                     gold_value_max_total) = transactions_undo
                     character_changes = shared_functions.CharacterChange(
                         character_name=character_name,
                         author=interaction.user.name,
                         gold=Decimal(gold_total),
                         gold_change=Decimal(amount),
-                        transaction_id=transaction_id,
-                        source=f"admin undid the transaction of transaction ID: {transaction_id} reducing gold by {amount} for {character_name} for {reason} \r\n New Transaction ID of {new_transaction_id}")
+                        transactions_id=transactions_id,
+                        source=f"admin undid the transaction of transaction ID: {transactions_id} reducing gold by {amount} for {character_name} for {reason} \r\n New Transaction ID of {new_transactions_id}")
                     character_log = await shared_functions.log_embed(
                         change=character_changes,
                         guild=guild,
@@ -677,23 +553,23 @@ class AdminCommands(commands.Cog, name='admin'):
                     await shared_functions.character_embed(
                         character_name=character_name,
                         guild=guild)
-                    content = f"undid transaction {transaction_id} for {character_name} with a new transaction id of {new_transaction_id}."
-                    if related_transaction_id:
-                        related_transaction_undo = await transaction_reverse(
-                            cursor=cursor, transaction_id=transaction_id,
+                    content = f"undid transaction {transactions_id} for {character_name} with a new transaction id of {new_transactions_id}."
+                    if related_transactions_id:
+                        related_transactions_undo = await transactions_reverse(
+                            cursor=cursor, transactions_id=transactions_id,
                             author_id=interaction.user.id, author_name=interaction.user.name, reason=reason)
-                        if isinstance(related_transaction_undo, str):
-                            content += f"\r\n {related_transaction_undo}"
+                        if isinstance(related_transactions_undo, str):
+                            content += f"\r\n {related_transactions_undo}"
                         else:
-                            (new_transaction_id, _, character_name, thread_id, amount, gold_total, gold_value_total,
-                             gold_value_max_total) = related_transaction_undo
+                            (new_transactions_id, _, character_name, thread_id, amount, gold_total, gold_value_total,
+                             gold_value_max_total) = related_transactions_undo
                             character_changes = shared_functions.CharacterChange(
                                 character_name=character_name,
                                 author=interaction.user.name,
                                 gold=Decimal(gold_total),
                                 gold_change=Decimal(amount),
-                                transaction_id=transaction_id,
-                                source=f"admin undid the transaction of transaction ID: {transaction_id} reducing gold by {amount} for {character_name} for {reason} \r\n New Transaction ID of {new_transaction_id}")
+                                transactions_id=transactions_id,
+                                source=f"admin undid the transaction of transaction ID: {transactions_id} reducing gold by {amount} for {character_name} for {reason} \r\n New Transaction ID of {new_transactions_id}")
                             character_log = await shared_functions.log_embed(
                                 change=character_changes,
                                 guild=guild,
@@ -702,13 +578,13 @@ class AdminCommands(commands.Cog, name='admin'):
                             await shared_functions.character_embed(
                                 character_name=character_name,
                                 guild=guild)
-                            content += f"\r\n undid related transaction {transaction_id} for {character_name} with a new transaction id of {new_transaction_id}."
+                            content += f"\r\n undid related transaction {transactions_id} for {character_name} with a new transaction id of {new_transactions_id}."
                     await interaction.followup.send(embed=character_log, content=content)
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(
-                    f"an error occurred for {interaction.user.name} whilst undoing a gold transaction with ID: {transaction_id}': {e}")
+                    f"an error occurred for {interaction.user.name} whilst undoing a gold transaction with ID: {transactions_id}': {e}")
                 await interaction.followup.send(
-                    f"An error occurred whilst undoing a gold transaction with ID: '{transaction_id}' Error: {e}.",
+                    f"An error occurred whilst undoing a gold transaction with ID: '{transactions_id}' Error: {e}.",
                     ephemeral=True)
 
     session_group = discord.app_commands.Group(
@@ -786,7 +662,7 @@ class AdminCommands(commands.Cog, name='admin'):
                             f"Minimum Session Rewards may only be 0, if a player receives a lesser reward, have them claim the transaction.")
                     else:
                         await cursor.execute(
-                            "Select Player_ID, Player_Name, Character_Name, Level, Tier, Effective_Gold, Received_Milestones, Received_Trials, Received_Gold, Received_Fame, Received_Prestige, Received_Essence, Gold_Transaction_ID FROM Sessions_Archive WHERE Session_ID = ?",
+                            "Select Player_ID, Player_Name, Character_Name, Level, Tier, Effective_Gold, Received_Milestones, Received_Trials, Received_Gold, Received_Fame, Received_Prestige, Received_Essence, Gold_Transactions_ID FROM Sessions_Archive WHERE Session_ID = ?",
                             (session_id,))
                         session_complex = await cursor.fetchall()
                         if not session_complex:
@@ -799,7 +675,7 @@ class AdminCommands(commands.Cog, name='admin'):
                                 (player_id, player_name, character_name, level, tier, effective_gold,
                                  received_milestones,
                                  received_trials, received_gold, received_fame, received_prestige, received_essence,
-                                 gold_transaction_id) = player
+                                 gold_transactions_id) = player
                                 field = f"{player_name}'s {character_name}: \r\n"
                                 await cursor.execute(
                                     "SELECT True_Character_Name, milestones, trials, Fame, Prestige, Thread_ID from Player_Characters WHERE Character_Name = ? OR Nickname = ?",
@@ -882,7 +758,7 @@ class AdminCommands(commands.Cog, name='admin'):
             if shop is not None:
                 embed = discord.Embed(title=f"UBB Inventory", description=f'UBB inventory',
                                       colour=discord.Colour.blurple())
-                print(shop)
+
                 for idx, item in enumerate(shop.items):
                     if idx <= 20:
                         embed.add_field(name=f'**new item**', value=f'{item}', inline=False)
@@ -1016,6 +892,7 @@ class AdminCommands(commands.Cog, name='admin'):
                                 return
                         await cursor.execute("Update Admin set Search = ? WHERE identifier = ?", (revision, setting))
                         await conn.commit()
+                        await shared_functions.config_cache.load_configurations(guild_id=guild_id)
                         await interaction.followup.send(f"Updated {setting} to {revision}")
 
                     else:
@@ -2328,16 +2205,16 @@ class AdminCommands(commands.Cog, name='admin'):
         await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
-                cursor = await db.execute("SELECT 1 FROM A_Approved_Channels WHERE channel_id = ?", (channel.id,))
+                cursor = await db.execute("SELECT 1 FROM rp_Approved_Channels WHERE channel_id = ?", (channel.id,))
                 existing_channel = await cursor.fetchone()
 
                 if existing_channel:
                     await interaction.followup.send(f"{channel.mention} is already an RP channel.")
                     return
 
-                await db.execute("INSERT INTO A_Approved_Channels (channel_id) VALUES (?)", (channel.id,))
+                await db.execute("INSERT INTO rp_Approved_Channels (channel_id) VALUES (?)", (channel.id,))
                 await db.commit()
-
+                await shared_functions.add_guild_to_cache(interaction.guild.id)
                 await interaction.followup.send(f"{channel.mention} has been added to the RP channels.")
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(
@@ -2353,12 +2230,15 @@ class AdminCommands(commands.Cog, name='admin'):
         await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
-                cursor = await db.execute("SELECT 1 FROM A_Approved_Channels WHERE channel_id = ?", (channel.id,))
+                cursor = await db.execute("SELECT 1 FROM rp_Approved_Channels WHERE channel_id = ?", (channel.id,))
                 rp_channel = await cursor.fetchone()
 
                 if rp_channel:
-                    await db.execute("DELETE FROM A_Approved_Channels WHERE channel_id = ?", (channel.id,))
+                    await db.execute("DELETE FROM rp_Approved_Channels WHERE channel_id = ?", (channel.id,))
                     await db.commit()
+                    async with shared_functions.config_cache.lock:
+                        await shared_functions.config_cache.pop(interaction.guild.id, None)
+                    await shared_functions.add_guild_to_cache(interaction.guild.id)
                     await interaction.followup.send(f"{channel.mention} has been removed from the RP channels.")
                 else:
                     await interaction.followup.send(f"{channel.mention} is not an RP channel.")
@@ -2376,7 +2256,7 @@ class AdminCommands(commands.Cog, name='admin'):
         await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
-                cursor = await db.execute("SELECT channel_id FROM A_Approved_Channels")
+                cursor = await db.execute("SELECT channel_id FROM rp_Approved_Channels")
                 rp_channels = await cursor.fetchall()
                 if rp_channels:
                     channels = [f"<#{channel_id}>" for (channel_id,) in rp_channels]
@@ -2460,7 +2340,7 @@ class AdminCommands(commands.Cog, name='admin'):
                      reward_multiplier) = rp_settings
                     await interaction.followup.send(f"RP Settings:\n"
                                                     f"Minimum Post Length: {minimum_length}\n"
-                                                    f"Similarity Threshold: {similarity_threshold}\n"
+                                                    f"Similarity Threshold: {similarity_threshold}%\n"
                                                     f"Minimum Reward: {minimum_reward}\n"
                                                     f"Maximum Reward: {maximum_reward}\n"
                                                     f"Reward Multiplier: {reward_multiplier}")
@@ -2482,25 +2362,110 @@ class AdminCommands(commands.Cog, name='admin'):
     )
 
     @rp_store_group.command(name='add', description='add an item to the store')
-    async def add_rp_store(self, interaction: discord.Interaction):
+    @app_commands.describe(stock="The amount of stock available for the item, x<0 for infinite")
+    @app_commands.describe(response="The response to be sent when the item is used")
+    @app_commands.describe(storable="Whether the item can be stored or is immediately used on purchase.")
+    @app_commands.describe(sellable="Whether the item can be sold back to the store or not.")
+    @app_commands.choices(
+        storable=[discord.app_commands.Choice(name='storable', value=1),
+                  discord.app_commands.Choice(name='consumed', value=2)])
+    @app_commands.choices(
+        sellable=[discord.app_commands.Choice(name='sellable', value=1),
+                  discord.app_commands.Choice(name='unsellable', value=2)])
+    @app_commands.choices(
+        usable=[discord.app_commands.Choice(name='usable', value=1),
+                discord.app_commands.Choice(name='unusable', value=2)])
+    async def add_rp_store(
+            self,
+            interaction: discord.Interaction,
+            name: str,
+            description: str,
+            price: int,
+            stock: typing.Optional[int] = -1,
+            image: typing.Optional[str] = None,
+            response: typing.Optional[str] = None,
+            storable: discord.app_commands.Choice[int] = 1,
+            sellable: discord.app_commands.Choice[int] = 1,
+            usable: discord.app_commands.Choice[int] = 1
+                           ):
         await interaction.response.defer(thinking=True)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
-                modal = AddItemModal(guild_id=interaction.guild.id)
-                await interaction.followup.send_modal(modal)
+            sellable_value = sellable if isinstance(sellable, int) else sellable.value
+            storable_value = storable if isinstance(storable, int) else storable.value
+            usable_value = usable if isinstance(usable, int) else usable.value
+            result = await add_item_to_store(
+                guild_id=interaction.guild.id,
+                item_name=name,
+                description=description,
+                price=price,
+                stock=stock,
+                image=image,
+                custom_message=response,
+                inventory=storable_value,
+                sellable=sellable_value,
+                usable=usable_value
+                                       )
+            if isinstance(result, str):
+                await interaction.followup.send(result)
+                return
+            else:
+                await interaction.followup.send(f"{name} has been added to the store.")
         except (aiosqlite.Error, ValueError) as e:
             logging.exception("an issue occurred in trying to send a modal in the add_rp_store command")
             await interaction.followup.send(
                 f"An error occurred whilst responding. Please try again later.")
 
     @rp_store_group.command(name='edit', description='edit the store by adding or editing an item')
-    @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
-    async def edit_rp_store(self, interaction: discord.Interaction, item_name: str):
+    @app_commands.describe(stock="The amount of stock available for the item, x<0 for infinite")
+    @app_commands.describe(response="The response to be sent when the item is used")
+    @app_commands.describe(storable="Whether the item can be stored or is immediately used on purchase.")
+    @app_commands.describe(sellable="Whether the item can be sold back to the store or not.")
+    @app_commands.choices(
+        storable=[discord.app_commands.Choice(name='storable', value=1),
+                  discord.app_commands.Choice(name='consumed', value=0)])
+    @app_commands.choices(
+        sellable=[discord.app_commands.Choice(name='sellable', value=1),
+                  discord.app_commands.Choice(name='unsellable', value=0)])
+    @app_commands.choices(
+        usable=[discord.app_commands.Choice(name='usable', value=1),
+                discord.app_commands.Choice(name='unusable', value=0)])
+    @app_commands.autocomplete(name=shared_functions.rp_store_autocomplete)
+    async def edit_rp_store(
+            self,
+            interaction: discord.Interaction,
+            name: str,
+            new_name: typing.Optional[str],
+            description: typing.Optional[str],
+            price: typing.Optional[int],
+            stock: typing.Optional[int],
+            image: typing.Optional[str],
+            response: typing.Optional[str],
+            storable: typing.Optional[discord.app_commands.Choice[int]],
+            sellable: typing.Optional[discord.app_commands.Choice[int]],
+            usable: discord.app_commands.Choice[int]):
         await interaction.response.defer(thinking=True)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
-                modal = EditItemModal(guild_id=interaction.guild.id, item_name=item_name)
-                await interaction.followup.send_modal(modal)
+            sellable_value = sellable.value if sellable else None
+            storable_value = storable.value if storable else None
+            usable_value = usable.value
+            result = await edit_item_in_store(
+                guild_id=interaction.guild.id,
+                old_item_name=name,
+                new_item_name=new_name,
+                description=description,
+                price=price,
+                stock=stock,
+                image=image,
+                custom_message=response,
+                inventory=storable_value,
+                sellable=sellable_value,
+                usable=usable_value
+            )
+            if isinstance(result, str):
+                await interaction.followup.send(result)
+                return
+            else:
+                await interaction.followup.send(f"{name} has been updated in the store!")
         except (aiosqlite.Error, ValueError) as e:
             logging.exception("an issue occurred in trying to send a modal in the edit_rp_store command")
             await interaction.followup.send(
@@ -2513,12 +2478,12 @@ class AdminCommands(commands.Cog, name='admin'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT 1 FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                await cursor.execute("SELECT 1 FROM rp_store_items WHERE name = ?", (item_name,))
                 item = await cursor.fetchone()
                 if not item:
                     await interaction.followup.send(f"{item_name} is not in the store.")
                     return
-                await cursor.execute("DELETE FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                await cursor.execute("DELETE FROM rp_store_items WHERE name = ?", (item_name,))
                 await db.commit()
                 await interaction.followup.send(f"{item_name} has been removed from the store.")
         except (aiosqlite.Error, ValueError) as e:
@@ -2536,12 +2501,12 @@ class AdminCommands(commands.Cog, name='admin'):
                                             discord.app_commands.Choice(name='item', value=3)])
     async def requirements_rp_store(self, interaction: discord.Interaction, item_name: str,
                                     requirement_type: discord.app_commands.Choice[int],
-                                    requirement: discord.app_commands.Choice[int], value: int):
+                                    requirement: discord.app_commands.Choice[int], value: str):
         await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT 1 FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                await cursor.execute("SELECT 1 FROM rp_store_items WHERE name = ?", (item_name,))
                 item = await cursor.fetchone()
                 if not item:
                     await interaction.followup.send(f"{item_name} is not in the store.")
@@ -2557,7 +2522,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         await interaction.followup.send(f"Role not found.")
                         return
                 elif requirement_type.value == 3:
-                    await cursor.execute("Select 1 from rp_store_items WHERE Item_ID = ?", (value,))
+                    await cursor.execute("Select 1 from rp_store_items WHERE name = ?", (value,))
                     item = await cursor.fetchone()
                     if not item:
                         await interaction.followup.send(f"Item not found.")
@@ -2568,19 +2533,23 @@ class AdminCommands(commands.Cog, name='admin'):
                         return
                 requirement_value = requirement if isinstance(requirement, int) else requirement.value
                 requirement_type_value = requirement_type if isinstance(requirement_type, int) else requirement_type.value
+                print("I am here in the modification")
                 if requirement_value == 1:
                     await cursor.execute(
-                        "UPDATE rp_store_items SET Requirements_1_type = ?, Requirements_1_pair = ? WHERE Item_Name = ?",
+                        "UPDATE rp_store_items SET Requirements_1_type = ?, Requirements_1_pair = ? WHERE name = ?",
                         (requirement_type_value, value, item_name))
+                    await db.commit()
                 elif requirement_value == 2:
+                    print(item_name)
                     await cursor.execute(
-                        "UPDATE rp_store_items SET Requirements_2_type = ?, Requirements_2_pair = ? WHERE Item_Name = ?",
+                        "UPDATE rp_store_items SET Requirements_2_type = ?, Requirements_2_pair = ? WHERE name = ?",
                         (requirement_type_value, value, item_name))
+                    await db.commit()
                 else:
                     await cursor.execute(
-                        "UPDATE rp_store_items SET Requirements_3_type = ?, Requirements_3_pair = ? WHERE Item_Name = ?",
+                        "UPDATE rp_store_items SET Requirements_3_type = ?, Requirements_3_pair = ? WHERE name = ?",
                         (requirement_type_value, value, item_name))
-                await db.commit()
+                    await db.commit()
                 await interaction.followup.send(f"Requirements for {item_name} have been updated.")
         except (aiosqlite.Error, ValueError) as e:
             logging.exception("an issue occurred in trying to send a modal in the requirements_rp_store_items command")
@@ -2598,13 +2567,13 @@ class AdminCommands(commands.Cog, name='admin'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT 1 FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                await cursor.execute("SELECT 1 FROM rp_store_items WHERE name = ?", (item_name,))
                 item = await cursor.fetchone()
                 if not item:
                     await interaction.followup.send(f"{item_name} is not in the store.")
                     return
                 matching_value = matching if isinstance(matching, int) else matching.value
-                await cursor.execute("UPDATE rp_store_items SET Matching_Requirements = ? WHERE Item_Name = ?",
+                await cursor.execute("UPDATE rp_store_items SET Matching_Requirements = ? WHERE name = ?",
                                      (matching_value, item_name))
                 await db.commit()
                 await interaction.followup.send(f"Matching requirements for {item_name} have been updated.")
@@ -2625,12 +2594,12 @@ class AdminCommands(commands.Cog, name='admin'):
                                   discord.app_commands.Choice(name='Remove', value=2)])
     async def behavior_rp_store(self, interaction: discord.Interaction, item_name: str,
                                 slot: discord.app_commands.Choice[int], behavior: discord.app_commands.Choice[int],
-                                change: discord.app_commands.Choice[int], value: int):
+                                change: discord.app_commands.Choice[int], value: str):
         await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT 1 FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                await cursor.execute("SELECT 1 FROM rp_store_items WHERE name = ?", (item_name,))
                 item = await cursor.fetchone()
                 if not item:
                     await interaction.followup.send(f"{item_name} is not in the store.")
@@ -2639,30 +2608,30 @@ class AdminCommands(commands.Cog, name='admin'):
                 change_value = change if isinstance(change, int) else change.value
                 slot_value = slot if isinstance(slot, int) else slot.value
                 if behavior_value == 1:
-                    get_role = interaction.guild.get_role(value)
+                    get_role = interaction.guild.get_role(int(value))
                     if not get_role:
                         await interaction.followup.send(f"Role not found.")
                         return
                 elif behavior_value == 3:
-                    await cursor.execute("Select 1 from rp_store_items WHERE Item_ID = ?", (value,))
+                    await cursor.execute("Select 1 from rp_store_items WHERE name = ?", (value,))
                     item = await cursor.fetchone()
                     if not item:
                         await interaction.followup.send(f"Item not found.")
                         return
                 if slot_value == 1:
                     await cursor.execute(
-                        "UPDATE rp_store_items SET Action_1_Type = ? Action_1_Subtype = ? action_1_behavior = ? WHERE Item_Name = ?",
+                        "UPDATE rp_store_items SET Actions_1_Type = ?, Actions_1_Subtype = ?, actions_1_behavior = ? WHERE name = ?",
                         (behavior_value, change_value, value, item_name))
                 elif slot_value == 2:
                     await cursor.execute(
-                        "UPDATE rp_store_items SET Action_2_Type = ? Action_2_Subtype = ? action_2_behavior = ? WHERE Item_Name = ?",
+                        "UPDATE rp_store_items SET Actions_2_Type = ?, Actions_2_Subtype = ?, actions_2_behavior = ? WHERE name = ?",
                         (behavior_value, change_value, value, item_name))
                 else:
                     await cursor.execute(
-                        "UPDATE rp_store_items SET Action_3_Type = ? Action_3_Subtype = ? action_3_behavior = ? WHERE Item_Name = ?",
+                        "UPDATE rp_store_items SET Actions_3_Type = ?, Actions_3_Subtype = ?, actions_3_behavior = ? WHERE name = ?",
                         (behavior_value, change_value, value, item_name))
                 await db.commit()
-
+                await interaction.followup.send(f"Behavior for {item_name} has been updated.")
         except (aiosqlite.Error, ValueError) as e:
             logging.exception("an issue occurred in the behavior_rp_store_items command")
             await interaction.followup.send(
@@ -2679,7 +2648,7 @@ class AdminCommands(commands.Cog, name='admin'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT 1 FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                await cursor.execute("SELECT 1 FROM rp_store_items WHERE name = ?", (item_name,))
                 item = await cursor.fetchone()
                 if not item:
                     await interaction.followup.send(f"{item_name} is not in the store.")
@@ -2687,15 +2656,15 @@ class AdminCommands(commands.Cog, name='admin'):
                 requirement_value = requirement if isinstance(requirement, int) else requirement.value
                 if requirement_value == 1:
                     await cursor.execute(
-                        "UPDATE rp_store_items SET Requirements_1_type = NULL, Requirements_1_pair = NULL WHERE Item_Name = ?",
+                        "UPDATE rp_store_items SET Requirements_1_type = NULL, Requirements_1_pair = NULL WHERE name = ?",
                         (item_name,))
                 elif requirement_value == 2:
                     await cursor.execute(
-                        "UPDATE rp_store_items SET Requirements_2_type = NULL, Requirements_2_pair = NULL WHERE Item_Name = ?",
+                        "UPDATE rp_store_items SET Requirements_2_type = NULL, Requirements_2_pair = NULL WHERE name = ?",
                         (item_name,))
                 else:
                     await cursor.execute(
-                        "UPDATE rp_store_items SET Requirements_3_type = NULL, Requirements_3_pair = NULL WHERE Item_Name = ?",
+                        "UPDATE rp_store_items SET Requirements_3_type = NULL, Requirements_3_pair = NULL WHERE name = ?",
                         (item_name,))
                 await db.commit()
                 await interaction.followup.send(f"Requirement for {item_name} has been cancelled.")
@@ -2715,7 +2684,7 @@ class AdminCommands(commands.Cog, name='admin'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT 1 FROM rp_store_items WHERE Item_Name = ?", (item_name,))
+                await cursor.execute("SELECT 1 FROM rp_store_items WHERE name = ?", (item_name,))
                 item = await cursor.fetchone()
                 if not item:
                     await interaction.followup.send(f"{item_name} is not in the store.")
@@ -2723,15 +2692,15 @@ class AdminCommands(commands.Cog, name='admin'):
                 requirement_value = requirement if isinstance(requirement, int) else requirement.value
                 if requirement_value == 1:
                     await cursor.execute(
-                        "UPDATE rp_store_items SET Action_1_Type = NULL, Action_1_Subtype = NULL, action_1_behavior = NULL WHERE Item_Name = ?",
+                        "UPDATE rp_store_items SET Actions_1_Type = NULL, Actions_1_Subtype = NULL, actions_1_behavior = NULL WHERE name = ?",
                         (item_name,))
                 elif requirement_value == 2:
                     await cursor.execute(
-                        "UPDATE rp_store_items SET Action_2_Type = NULL, Action_2_Subtype = NULL, action_2_behavior = NULL WHERE Item_Name = ?",
+                        "UPDATE rp_store_items SET Actions_2_Type = NULL, Actions_2_Subtype = NULL, actions_2_behavior = NULL WHERE name = ?",
                         (item_name,))
                 else:
                     await cursor.execute(
-                        "UPDATE rp_store_items SET Action_3_Type = NULL, Action_3_Subtype = NULL, action_3_behavior = NULL WHERE Item_Name = ?",
+                        "UPDATE rp_store_items SET Actions_3_Type = NULL, Actions_3_Subtype = NULL, actions_3_behavior = NULL WHERE name = ?",
                         (item_name,))
                 await db.commit()
                 await interaction.followup.send(f"Behavior for {item_name} has been cancelled.")
@@ -2746,7 +2715,7 @@ class AdminCommands(commands.Cog, name='admin'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT COUNT(Item_Name) FROM rp_store_items")
+                await cursor.execute("SELECT COUNT(name) FROM rp_store_items")
                 item_count = await cursor.fetchone()
                 (item_count,) = item_count
                 page_number = min(max(page_number, 1), ceil(item_count / 10))
@@ -2854,7 +2823,7 @@ class RPStoreView(shared_functions.ShopView):
         """fetch the level information."""
         statement = """
             SELECT Item_ID, name, price, description, stock_remaining, inventory, usable, sellable, custom_message,
-            Requirements_Match, Requirements_1_type, Requirements_1_pair, Requirements_2_type, Requirements_2_pair, Requirements_3_type, Requirements_3_pair,
+            matching_requirements, Requirements_1_type, Requirements_1_pair, Requirements_2_type, Requirements_2_pair, Requirements_3_type, Requirements_3_pair,
             actions_1_type, actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype, actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior,
             image_link
             FROM RP_Store_Items
@@ -2873,7 +2842,7 @@ class RPStoreView(shared_functions.ShopView):
                                    description=f"Page {current_page} of {total_pages}")
         for item in self.results:
             (item_ID, name, price, description, stock_remaining, inventory, usable, sellable, custom_message,
-             requirements_Match, requirements_1_type, requirements_1_pair, requirements_2_type, requirements_2_pair,
+             matching_requirements, requirements_1_type, requirements_1_pair, requirements_2_type, requirements_2_pair,
              requirements_3_type, requirements_3_pair,
              actions_1_type, actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype,
              actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior,
@@ -2891,7 +2860,7 @@ class RPStoreView(shared_functions.ShopView):
             actions_1_behavior, actions_2_behavior, actions_3_behavior)
             additional_content = ""
             if any(requirements_group):
-                additional_content += "**Requirements**: {requirements_Match}\r\n"
+                additional_content += "**Requirements**: {matching_requirements}\r\n"
                 additional_content += f'**Requirement 1**: {requirements_1_type}, {requirements_1_pair}\r\n' if requirements_1_type else ""
                 additional_content += f'**Requirement 2**: {requirements_2_type}, {requirements_2_pair}\r\n' if requirements_2_type else ""
                 additional_content += f'**Requirement 3**: {requirements_3_type}, {requirements_3_pair}\r\n' if requirements_3_type else ""

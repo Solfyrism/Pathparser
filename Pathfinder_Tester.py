@@ -1,5 +1,7 @@
 import asyncio
 import datetime
+import random
+import shutil
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
@@ -31,29 +33,10 @@ os.chdir("C:\\pathparser")
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-@dataclass
-class ApprovedChannelCache:
-    cache: Dict[int, list[int]] = field(default_factory=dict)
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-
-
-approved_channel_cache = ApprovedChannelCache()
-
-
-async def add_guild_to_cache(guild_id: int) -> None:
-    async with approved_channel_cache.lock:
-        async with aiosqlite.connect(f"pathparser_{guild_id}_test.sqlite") as db:
-            cursor = await db.cursor()
-            await cursor.execute("SELECT Channel_ID FROM rp_approved_Channels")
-            approved_channels = await cursor.fetchall()
-            # approved_channels is a list of tuples, extract the channel IDs
-            channel_ids = [channel_id[0] for channel_id in approved_channels]
-            approved_channel_cache.cache[guild_id] = channel_ids
-
 
 async def reinstate_cache(bot: commands.Bot) -> None:
     for guild in bot.guilds:
-        await add_guild_to_cache(guild.id)
+        await shared_functions.add_guild_to_cache(guild.id)
 
 
 async def reinstate_reminders(server_bot) -> None:
@@ -107,7 +90,7 @@ async def reinstate_session_buttons(server_bot) -> None:
                     session_id, session_name, message_id, channel_id, hammer_time_str = session
                     session_start_time = datetime.datetime.fromtimestamp(int(hammer_time_str), datetime.timezone.utc)
                     timeout_seconds = (
-                                session_start_time - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+                            session_start_time - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
                     timeout_seconds = min(timeout_seconds, 12 * 3600)
 
                     # Fetch the channel and message
@@ -118,6 +101,7 @@ async def reinstate_session_buttons(server_bot) -> None:
                                                                       session_id=session_id, guild=guild,
                                                                       session_name=session_name, content="")
                     await message.edit(view=view)
+
         except aiosqlite.Error as e:
             logging.exception(f"Failed to reinstate session buttons for guild {guild.id} with error: {e}")
 
@@ -138,7 +122,8 @@ async def on_ready():
     await reinstate_session_buttons(bot)
     await reinstate_cache(bot)
     await reinstate_rp_cache(bot)
-
+    await shared_functions.config_cache.initialize_configuration(discord_bot=bot)
+    await bot.loop.create_task(shared_functions.config_cache.refresh_cache_periodically(600, bot))
 
 @bot.event
 async def on_disconnect():
@@ -149,25 +134,48 @@ async def on_disconnect():
 async def on_message(message):
     if message.author.bot:
         return
-
+    random_number = random.randint(1, 50)
+    if 'einstein' in message.content.lower():
+        await message.channel.send("https://i.insider.com/641ca0f5d67fe70018a376ca?width=800&format=jpeg&auto=webp")
+    elif 'monkey' in message.content.lower() and random_number != 50:
+        await message.channel.send("https://i.ytimg.com/vi/tLHqnn1ZkAM/maxresdefault.jpg")
+    elif 'monkey' in message.content.lower() and random_number == 50:
+        await message.channel.send("https://tenor.com/view/mmmm-monkey-monkey-ug-master-oogway-oogway-gif-19727561")
+    if random_number == 1 and message.author.id == 217873501313433600:
+        await message.channel.send("https://cdn.discordapp.com/attachments/479089930816192513/1309681106013917284/wdUWYUf3MwhkwAAAABJRU5ErkJggg.png?ex=67427714&is=67412594&hm=ef7e1e7bb5ff5a014ba0fb0036f92beaef4ebbe05178bfeaf1f6de278082c86e&")
+    elif random_number == 2 and message.author.id == 217873501313433600:
+        await message.channel.send("https://cdn.discordapp.com/attachments/479089930816192513/1309681542653546560/764rjEg82XSZ0fJzf8fVPtjhVRebgAAAAASUVORK5CYII.png?ex=6742777c&is=674125fc&hm=a5875743269822bbfc6a966710bf5f3e9a65795751ba71050b8dae0ba7e94c73&")
+    elif random_number == 3 and message.author.id == 217873501313433600:
+        await message.channel.send("https://cdn.discordapp.com/attachments/479089930816192513/1309682327860805733/7YjmdoZxhSgAAAAASUVORK5CYII.png?ex=67427837&is=674126b7&hm=6b916230203905c734500e091bf91b6f80ac4fd2cdfeb83ee3e437b44250a428&")
+    elif random_number == 4 and message.author.id == 473912723663749130:
+        await message.channel.send("https://cdn.discordapp.com/attachments/479089930816192513/1309684036637298759/lvcbpPEd8IYNoAAAAASUVORK5CYII.png?ex=674279cf&is=6741284f&hm=c4e73bcc27b276c09dfe1accaf28ee8361c0c686a631bd15cc1bbc7898c3d419&")
     guild_id = message.guild.id
-    channel_id = message.channel.id
-
+    if isinstance(message.channel, discord.channel.TextChannel):
+        channel_id = message.channel.id
+    elif isinstance(message.channel, discord.channel.Thread):
+        channel_id = message.channel.parent_id
+    else:
+        channel_id = None
     # Check if the guild is in the cache
-    async with approved_channel_cache.lock:
-        if guild_id in approved_channel_cache.cache:
-            if channel_id in approved_channel_cache.cache[guild_id]:
+    async with shared_functions.approved_channel_cache.lock:
+        if guild_id in shared_functions.approved_channel_cache.cache:
+            if channel_id in shared_functions.approved_channel_cache.cache[guild_id]:
                 await handle_rp_message(message)
             else:
                 await bot.process_commands(message)
         else:
             # Guild not in cache, add it
-            await add_guild_to_cache(guild_id)
-            if channel_id in approved_channel_cache.cache[guild_id]:
-                await handle_rp_message(message)
+
+            await shared_functions.add_guild_to_cache(guild_id)
+            if channel_id in shared_functions.approved_channel_cache.cache[guild_id]:
+                test = await handle_rp_message(message)
             else:
                 await bot.process_commands(message)
 
+@bot.event
+async def on_join(guild):
+    shutil.copyfile(f"C:/pathparser/pathparser_test.sqlite",
+                    f"C:/pathparser/pathparser_{guild.id}_test.sqlite")
 
 bot.run(os.getenv("DISCORD_TOKEN_V2"))
 bot.loop.create_task(shared_functions.clear_autocomplete_cache())

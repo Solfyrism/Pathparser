@@ -24,6 +24,8 @@ class RoleplaySettings:
     min_rewards: int
     max_rewards: int
     reward_multiplier: float
+    reward_name: str = "coins"
+    reward_emoji: str = "<:RPCash:884166313260503060>"
 
 
 @dataclass
@@ -35,67 +37,83 @@ class RoleplayInfoCache:
 roleplay_info_cache = RoleplayInfoCache()
 
 
-
-async def use_item(interaction: discord.Interaction, character_name: str, item_name: str):
+async def use_item(interaction: discord.Interaction, item_name: str):
     guild_id = interaction.guild.id
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
-            cursor = await db.execute("SELECT Action_1_type, Action_1_subtype, action_1_behavior, action_2_type, action_2_subtype, action_2_behavior, action_3_type, action_3_subtype, action_3_behavior FROM RP_Store_Items WHERE item_name = ?",
-                                      (item_name,))
+            cursor = await db.execute(
+                "SELECT actions_1_type, actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype, actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior FROM RP_Store_Items WHERE name = ?",
+                (item_name,))
             item_info = await cursor.fetchone()
             if item_info:
-                action_1_type, action_1_subtype, action_1_behavior, action_2_type, action_2_subtype, action_2_behavior, action_3_type, action_3_subtype, action_3_behavior = item_info
-                if action_1_type and action_1_subtype and action_1_behavior:
-                    action_1 = await handle_action(interaction, action_1_type, action_1_subtype, action_1_behavior, character_name)
+                actions_1_type, actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype, actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior = item_info
+                if actions_1_type and actions_1_subtype and actions_1_behavior:
+                    actions_1 = await handle_action(interaction, actions_1_type, actions_1_subtype, actions_1_behavior)
                 else:
-                    action_1 = 0
-                if action_2_type and action_2_subtype and action_2_behavior:
-                    action_2 = await handle_action(interaction, action_2_type, action_2_subtype, action_2_behavior, character_name)
+                    actions_1 = 0
+                if actions_2_type and actions_2_subtype and actions_2_behavior:
+                    actions_2 = await handle_action(interaction, actions_2_type, actions_2_subtype, actions_2_behavior)
                 else:
-                    action_2 = 0
-                if action_3_type and action_3_subtype and action_3_behavior:
-                    action_3 = await handle_action(interaction, action_3_type, action_3_subtype, action_3_behavior, character_name)
+                    actions_2 = 0
+                if actions_3_type and actions_3_subtype and actions_3_behavior:
+                    actions_3 = await handle_action(interaction, actions_3_type, actions_3_subtype, actions_3_behavior)
                 else:
-                    action_3 = 0
-                return action_1, action_2, action_3
+                    actions_3 = 0
+                return actions_1, actions_2, actions_3
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"An error occurred while using item: {e}")
         return -1, -1, -1
 
 
 
-
-async def handle_action(interaction: discord.Interaction, action_type: str, action_subtype: str, action_behavior: str):
+async def handle_action(interaction: discord.Interaction, actions_type: str, actions_subtype: str, actions_behavior: str):
     try:
-        if action_type == 1:
-            role = interaction.guild.get_role(int(action_behavior))
-            if action_subtype == 1:
+        if int(actions_type) == 1:
+            role = interaction.guild.get_role(int(actions_behavior))
+            if int(actions_subtype) == 1 and role not in interaction.user.roles:
                 await interaction.user.add_roles(role)
-            elif action_subtype == 2:
+            elif int(actions_subtype) == 2 and role in interaction.user.roles:
                 await interaction.user.remove_roles(role)
+            else:
+                if int(actions_subtype) == 1:
+                    raise "User already has role and does not need another..."
+                else:
+                    raise "User does not have role and does not need it removed."
         else:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
-                if action_type == 2:
-                    if action_subtype == 1:
-                        await cursor.execute("UPDATE RP_Players SET balance = balance + ? WHERE user_id = ?", (action_behavior, interaction.user.id))
+                if int(actions_type) == 2:
+                    if int(actions_subtype) == 1:
+                        await cursor.execute("UPDATE RP_Players SET balance = balance + ? WHERE user_id = ?",
+                                             (actions_behavior, interaction.user.id))
                     else:
-                        await cursor.execute("UPDATE RP_Players SET balance = balance - ? WHERE user_id = ?", (action_behavior, interaction.user.id))
+                        await cursor.execute("UPDATE RP_Players SET balance = balance - ? WHERE user_id = ?",
+                                             (actions_behavior, interaction.user.id))
                     await db.commit()
                 else:
-                    await cursor.execute("Select Item_Quantity from RP_PLayers_Items WHERE player_id = ? and item_name = ?", (interaction.user.id, action_behavior))
-                    item_quantity = await cursor.fetchone()
-                    if action_subtype == 1:
+                    await cursor.execute(
+                        "Select Item_Quantity from RP_PLayers_Items WHERE player_id = ? and item_name = ?",
+                        (interaction.user.id, actions_behavior))
+                    item_quantity_info = await cursor.fetchone()
+                    item_quantity = int(item_quantity_info[0]) if item_quantity_info else None
+                    if int(actions_subtype) == 1:
                         if item_quantity is None:
-                            await cursor.execute("INSERT INTO RP_Players_Items (player_id, item_name, item_quantity) VALUES (?, ?, 1)", (interaction.user.id, action_behavior))
+                            await cursor.execute(
+                                "INSERT INTO RP_Players_Items (player_id, item_name, item_quantity) VALUES (?, ?, 1)",
+                                (interaction.user.id, actions_behavior))
                         else:
-                            await cursor.execute("UPDATE RP_Players_Items SET Item_Quantity = Item_Quantity + 1 WHERE user_id = ? and Item_Name = ?", (interaction.user.id, action_behavior))
+                            await cursor.execute(
+                                "UPDATE RP_Players_Items SET Item_Quantity = Item_Quantity + 1 WHERE user_id = ? and Item_Name = ?",
+                                (interaction.user.id, actions_behavior))
                         await db.commit()
-                    elif action_subtype == 2 and item_quantity:
+                    elif int(actions_subtype) == 2 and item_quantity:
                         if item_quantity == 1:
-                            await cursor.execute("DELETE FROM RP_Players_Items WHERE user_id = ? and item_name = ?", (interaction.user.id, action_behavior))
+                            await cursor.execute("DELETE FROM RP_Players_Items WHERE user_id = ? and item_name = ?",
+                                                 (interaction.user.id, actions_behavior))
                         else:
-                            await cursor.execute("UPDATE RP_Players_Items SET item_quantity = item_quantity - ? WHERE user_id = ? AND Item_Name = ?", (interaction.user.id, action_behavior))
+                            await cursor.execute(
+                                "UPDATE RP_Players_Items SET item_quantity = item_quantity - ? WHERE user_id = ? AND Item_Name = ?",
+                                (interaction.user.id, actions_behavior))
                         await db.commit()
         return 1
     except (aiosqlite.Error, TypeError, ValueError) as e:
@@ -103,28 +121,63 @@ async def handle_action(interaction: discord.Interaction, action_type: str, acti
         return -1
 
 
+async def handle_requirements(requirements_type, requirements_pair, interaction, user_id, balance):
+    try:
+        async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+            cursor = await db.cursor()
+
+            if requirements_type == 1:
+                role = interaction.guild.get_role(int(requirements_pair))
+                user_roles = interaction.user.roles
+
+                if not role in user_roles:
+                    validation = False
+                else:
+                    validation = True
+            elif requirements_type == 2:
+                if balance > requirements_pair:
+                    validation = True
+                else:
+                    validation = False
+            else:
+                await cursor.execute("SELECT Item_Quantity FROM RP_Players_Items WHERE player_id = ? and item_name = ?",
+                                     (user_id, requirements_pair))
+                item_quantity = await cursor.fetchone()
+                if item_quantity is None:
+                    validation = False
+                else:
+                    validation = True
+        return validation
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"An error occurred while handling requirements: {e}")
+        return False
 
 
 async def add_guild_to_rp_cache(guild_id: int) -> None:
-    async with roleplay_info_cache.lock:
-        async with aiosqlite.connect(f"pathparser_{guild_id}_test.sqlite") as db:
-            cursor = await db.cursor()
-            await cursor.execute("""
-                SELECT Minimum_Post_Length_In_Characters, Similarity_Threshold,
-                       Minimum_Rewards, Maximum_Rewards, Reward_Multiplier
-                FROM rp_guild_info
-            """)
-            settings_row = await cursor.fetchone()
-            if settings_row:
-                settings = RoleplaySettings(
-                    min_post_length=settings_row[0],
-                    similarity_threshold=settings_row[1],
-                    min_rewards=settings_row[2],
-                    max_rewards=settings_row[3],
-                    reward_multiplier=settings_row[4]
-                )
-                roleplay_info_cache.cache[guild_id] = settings
-
+    try:
+        async with roleplay_info_cache.lock:
+            async with aiosqlite.connect(f"pathparser_{guild_id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("""
+                    SELECT Minimum_Post_Length_In_Characters, Similarity_Threshold,
+                           Minimum_Reward, Maximum_Reward, Reward_Multiplier,
+                           reward_name, reward_emoji
+                    FROM rp_guild_info
+                """)
+                settings_row = await cursor.fetchone()
+                if settings_row:
+                    settings = RoleplaySettings(
+                        min_post_length=settings_row[0],
+                        similarity_threshold=settings_row[1],
+                        min_rewards=settings_row[2],
+                        max_rewards=settings_row[3],
+                        reward_multiplier=settings_row[4],
+                        reward_name=settings_row[5],
+                        reward_emoji=settings_row[6]
+                    )
+                    roleplay_info_cache.cache[guild_id] = settings
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Failed to add guild {guild_id} to cache with error: {e}")
 
 async def reinstate_rp_cache(bot: commands.Bot) -> None:
     guilds = bot.guilds
@@ -132,10 +185,10 @@ async def reinstate_rp_cache(bot: commands.Bot) -> None:
         await add_guild_to_rp_cache(guild.id)
 
 
+
 MAX_SIMILARITY_LENGTH = 1000  # Maximum characters to consider in similarity checks
 MAX_COMPARISONS = 2  # Number of recent posts to compare against
 SIMILARITY_TIMEOUT = 0.05  # Maximum time in seconds for similarity checks
-DATABASE = 'your_database.db'  # Path to your SQLite database file
 
 
 # Handler for RP messages
@@ -145,7 +198,6 @@ async def handle_rp_message(message):
     content = message.content.strip()
     if content.startswith('(') and content.endswith(')'):
         return
-
     # Ensure the guild's settings are in the cache
     async with roleplay_info_cache.lock:
         if guild_id not in roleplay_info_cache.cache:
@@ -156,13 +208,11 @@ async def handle_rp_message(message):
         minimum_reward = settings.min_rewards if settings.min_rewards else 1
         maximum_reward = settings.max_rewards if settings.max_rewards else 100
         reward_multiplier = settings.reward_multiplier if settings.reward_multiplier else 1
-
     user_id = message.author.id
     now = datetime.utcnow()
-
-    async with aiosqlite.connect(DATABASE) as db:
+    async with aiosqlite.connect(f"Pathparser_{message.guild.id}_test.sqlite") as db:
         # Fetch user data
-        cursor = await db.execute("SELECT balance, last_post_time, recent_posts FROM users WHERE user_id = ?",
+        cursor = await db.execute("SELECT balance, last_post_time, recent_posts FROM RP_Players WHERE user_id = ?",
                                   (user_id,))
         user_data = await cursor.fetchone()
 
@@ -178,7 +228,7 @@ async def handle_rp_message(message):
             balance = 0
             last_post_time = None
             recent_posts = []
-            await db.execute("INSERT INTO users (user_id, balance, last_post_time, recent_posts) VALUES (?, ?, ?, ?)",
+            await db.execute("INSERT INTO RP_Players (user_id, balance, last_post_time, recent_posts) VALUES (?, ?, ?, ?)",
                              (user_id, balance, None, json.dumps(recent_posts)))
             await db.commit()
 
@@ -240,7 +290,7 @@ async def handle_rp_message(message):
         # Update user's balance and other data in the database
         balance += reward
         await db.execute(
-            "UPDATE users SET balance = ?, last_post_time = ?, recent_posts = ? WHERE user_id = ?",
+            "UPDATE RP_Players SET balance = ?, last_post_time = ?, recent_posts = ? WHERE user_id = ?",
             (balance, last_post_time_str, recent_posts_str, user_id)
         )
         await db.commit()
@@ -341,7 +391,7 @@ class RPCommands(commands.Cog, name='RP'):
         await interaction.response.defer(thinking=True)
 
         user_id = interaction.user.id
-        async with aiosqlite.connect(DATABASE) as db:
+        async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
             cursor = await db.execute("SELECT balance FROM RP_Players WHERE user_id = ?", (user_id,))
             user_data = await cursor.fetchone()
             if user_data:
@@ -354,90 +404,240 @@ class RPCommands(commands.Cog, name='RP'):
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
     async def roleplay_buy(self, interaction: discord.Interaction, item_name: str, amount: int = 1):
         await interaction.response.defer(thinking=True)
-
         user_id = interaction.user.id
-        async with aiosqlite.connect(DATABASE) as db:
-            cursor = await db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+        if amount < 1:
+            await interaction.response.send_message("You can't buy less than 1 item.")
+            return
+        async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+            cursor = await db.execute("SELECT balance FROM RP_Players WHERE user_id = ?", (user_id,))
             user_data = await cursor.fetchone()
             if user_data:
-                balance = user_data[0]
+                old_balance = user_data[0]
+                await cursor.execute(""" SELECT
+                price, description, stock_remaining, inventory, usable, sellable, custom_message,
+                matching_requirements, requirements_1_type, requirements_1_pair, requirements_2_type, requirements_2_pair, requirements_3_type, requirements_3_pair,
+                actions_1_type, actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype, actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior
+                From RP_Store_Items WHERE name = ?""", (item_name,))
+                item_data = await cursor.fetchone()
+                if item_data:
+                    item_cost, item_description, stock_remaining, inventory, usable, sellable, custom_message, matching_requirements, requirements_1_type, requirements_1_pair, requirements_2_type, requirements_2_pair, requirements_3_type, requirements_3_pair, actions_1_type, actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype, actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior = item_data
+                    purchase_response = f"You have bought {amount} {item_name}."
+                    if stock_remaining is not None:
+                        if not stock_remaining:
+                            await interaction.followup.send("This item is out of stock.")
+                            return
+                        elif 0 <= stock_remaining < amount:
+                            amount = stock_remaining
+                    total_cost = item_cost * amount
+                    if total_cost > old_balance:
+                        await interaction.followup.send(f"You don't have enough coins to buy this item. You have {balance} coins and buying {amount} would take {total_cost}.")
+                        return
+                    if total_cost <= old_balance:
+                        balance = old_balance - int(item_cost) * amount
+                        if requirements_1_pair and requirements_1_type:
+                            requirements_1_type = int(requirements_1_type)
+                            requirements_1_pair = int(requirements_1_pair)
 
-                if balance >= item_cost:
-                    balance -= item_cost
-                    await db.execute("UPDATE users SET balance = ? WHERE user_id = ?", (balance, user_id))
-                    await db.commit()
-                    await interaction.response.send_message(f"You have purchased {item_name} for {item_cost} coins.")
-                else:
-                    await interaction.response.send_message("You don't have enough coins to purchase this item.")
+                            requirements_1_valid = await handle_requirements(requirements_1_type, requirements_1_pair,
+                                                                             interaction, user_id, old_balance)
+                        else:
+                            requirements_1_valid = True
+                        if requirements_2_pair and requirements_2_type:
+                            requirements_2_type = int(requirements_2_type)
+                            requirements_2_pair = int(requirements_2_pair)
+                            requirements_2_valid = await handle_requirements(requirements_2_type, requirements_2_pair,
+                                                                             interaction, user_id, old_balance)
+                        else:
+                            requirements_2_valid = True
+                        if requirements_3_pair and requirements_3_type:
+                            requirements_3_type = int(requirements_3_type)
+                            requirements_3_pair = int(requirements_3_pair)
+                            requirements_3_valid = await handle_requirements(requirements_3_type, requirements_3_pair,
+                                                                             interaction, user_id, old_balance)
+                        else:
+                            requirements_3_valid = True
+
+                        if matching_requirements:
+                            matching_requirements = int(matching_requirements)
+                            if matching_requirements == 1 and (requirements_1_valid is False or requirements_2_valid is False or requirements_3_valid is False):
+                                type_dict = {1: "Role", 2: "Balance", 3: "Item"}
+                                content = f"Requirements not met: "
+                                content += f"{type_dict[requirements_1_type]}: {requirements_1_pair}, " if requirements_1_valid is False else ""
+                                content += f"{type_dict[requirements_2_type]}: {requirements_2_pair}, " if requirements_2_valid is False else ""
+                                content += f"{type_dict[requirements_3_type]}: {requirements_3_pair}" if requirements_3_valid is False else ""
+                                await interaction.followup.send(content)
+                                return
+                            elif matching_requirements == 2 and (requirements_1_valid is False and requirements_2_valid is False and requirements_3_valid is False):
+                                type_dict = {1: "Role", 2: "Balance", 3: "Item"}
+                                content = f"Requirements not met: "
+                                content += f"{type_dict[requirements_1_type]}: {requirements_1_pair}, " if not requirements_1_valid else ""
+                                content += f"{type_dict[requirements_2_type]}: {requirements_2_pair}, " if not requirements_2_valid else ""
+                                content += f"{type_dict[requirements_3_type]}: {requirements_3_pair}" if not requirements_3_valid else ""
+                                await interaction.followup.send(content)
+                                return
+                            elif matching_requirements == 3 and (requirements_1_valid is True or requirements_2_valid is True or requirements_3_valid is True):
+                                type_dict = {1: "Role", 2: "Balance", 3: "Item"}
+                                content = f"the following requirements should NOT be met: "
+                                content += f"{type_dict[requirements_1_type]}: {requirements_1_pair}, " if not requirements_1_valid else ""
+                                content += f"{type_dict[requirements_2_type]}: {requirements_2_pair}, " if not requirements_2_valid else ""
+                                content += f"{type_dict[requirements_3_type]}: {requirements_3_pair}" if not requirements_3_valid else ""
+                                await interaction.followup.send(content)
+                                return
+                            else:
+                                validation = True
+                        else:
+                            validation = True
+                        if validation:
+                            new_balance = balance - total_cost
+                            await cursor.execute("UPDATE RP_Players SET balance = ? WHERE user_id = ?",
+                                                 (new_balance, user_id))
+                            await db.commit()
+                            if stock_remaining is not None:
+                                stock_remaining = stock_remaining - amount if stock_remaining > 0 else -1
+
+                                await cursor.execute(
+                                    "UPDATE RP_Store_Items SET stock_remaining = ? WHERE name = ?",
+                                    (stock_remaining, item_name))
+                                await db.commit()
+                            if inventory == '0':
+                                for _ in range(amount):
+                                    try:
+                                        actions_1, actions_2, actions_3 = await use_item(interaction=interaction, item_name=item_name,)
+                                    except discord.errors.Forbidden:
+                                        await interaction.followup.send("An error occurred while using the item! Bot does not have permissions to adjust that role!")
+                                        return
+                                    except Exception as e:
+                                        await interaction.followup.send(
+                                            "An error occurred while using the item.")
+                                        logging.exception(f"An error occurred while using the item: {e}")
+                                        return
+                                    else:
+                                        purchase_response += "\r\n" + custom_message
+                            else:
+                                await cursor.execute(
+                                    "SELECT Item_Quantity FROM RP_Players_Items WHERE player_id = ? and item_name = ?",
+                                    (user_id, item_name))
+                                item_quantity = await cursor.fetchone()
+                                if item_quantity is None:
+                                    await cursor.execute(
+                                        "INSERT INTO RP_Players_Items (player_id, item_name, item_quantity) VALUES (?, ?, ?)",
+                                        (user_id, item_name, amount))
+                                else:
+                                    await cursor.execute(
+                                        "UPDATE RP_Players_Items SET Item_Quantity = Item_Quantity + ? WHERE Player_ID = ? and item_name = ?",
+                                        (amount, user_id, item_name))
+                            await db.commit()
+                            await interaction.followup.send(purchase_response)
+                    else:
+                        await interaction.followup.send("You don't have enough coins to buy this item.")
             else:
-                await interaction.response.send_message("You don't have a balance yet.")
+                await interaction.followup.send("You don't have a balance yet.")
 
     @roleplay_group.command(name="sell", description="sell an item from your inventory")
     @app_commands.autocomplete(item_name=shared_functions.rp_inventory_autocomplete)
     async def roleplay_sell(self, interaction: discord.Interaction, item_name: str, amount: int = 1):
         await interaction.response.defer(thinking=True)
-
-        user_id = interaction.user.id
-        async with aiosqlite.connect(DATABASE) as db:
-            cursor = await db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
-            user_data = await cursor.fetchone()
-            if user_data:
-                balance = user_data[0]
-                item_value = shared_functions.get_item_value(item_name)
-                balance += item_value
-                await db.execute("UPDATE users SET balance = ? WHERE user_id = ?", (balance, user_id))
-                await db.commit()
-                await interaction.response.send_message(f"You have sold {item_name} for {item_value} coins.")
-            else:
-                await interaction.response.send_message("You don't have a balance yet.")
+        try:
+            if amount < 1:
+                await interaction.followup.send("You can't sell less than 1 item, did you mean to buy something instead?")
+                return
+            user_id = interaction.user.id
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.execute("SELECT Item_Quantity FROM RP_Players_Items WHERE Player_ID = ?", (user_id,))
+                user_item_data = await cursor.fetchone()
+                cursor = await db.execute("SELECT balance FROM RP_Players WHERE user_id = ?", (user_id,))
+                user_data = await cursor.fetchone()
+                if user_data and user_item_data:
+                    item_quantity = user_item_data[0]
+                    balance = user_data[0]
+                    await cursor.execute("SELECT Price, Sellable FROM RP_Store_Items WHERE item_name = ?", (item_name,))
+                    sellable_data = await cursor.fetchone()
+                    if sellable_data:
+                        (item_value, sellable) = sellable_data
+                        sold_value = min(item_quantity, amount) * item_value
+                        balance += sold_value
+                        await db.execute("UPDATE RP_Players SET balance = ? WHERE user_id = ?", (balance, user_id))
+                        await db.commit()
+                        if item_quantity - amount > 0:
+                            await db.execute(
+                                "UPDATE RP_Players_Items SET Item_Quantity = Item_Quantity - ? WHERE player_id = ? and item_name = ?",
+                                (amount, user_id, item_name))
+                            await db.commit()
+                        else:
+                            await db.execute("DELETE FROM RP_Players_Items WHERE player_id = ? and item_name = ?",
+                                             (user_id, item_name))
+                            await db.commit()
+                        await interaction.followup.send(f"You have sold {item_name} for {item_value} coins and have a new balance of {balance}.")
+                    else:
+                        await interaction.followup.send(f"{item_name} could not be found!")
+                else:
+                    await interaction.followup.send("You don't have a balance yet or item could not be found!")
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred while selling an item: {e}")
+            await interaction.followup.send("An error occurred while selling an item.")
 
     @roleplay_group.command(name="use", description="use an item from your inventory")
     @app_commands.autocomplete(item_name=rp_inventory_autocomplete)
-    async def roleplay_use(self, interaction: discord.Interaction, item_name: str):
+    async def roleplay_use(self, interaction: discord.Interaction, item_name: str, amount: int = 1):
         await interaction.response.defer(thinking=True)
-
         user_id = interaction.user.id
-        async with aiosqlite.connect(DATABASE) as db:
-            cursor = await db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
-            user_data = await cursor.fetchone()
-            if user_data:
-                balance = user_data[0]
-                item_effect = shared_functions.get_item_effect(item_name)
-                if item_effect:
-                    # Apply the item effect
-                    await interaction.response.send_message(f"You have used {item_name}. {item_effect}")
-                else:
-                    await interaction.response.send_message(f"{item_name} does not have a use effect.")
+        async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("SELECT Item_Quantity, Custom_Message FROM RP_Players_Items WHERE Player_ID = ? and Item_Name = ?", (user_id,item_name))
+            item_quantity = await cursor.fetchone()
+            if not item_quantity:
+                await interaction.response.send_message(f"You don't have any {item_name} in your inventory.")
             else:
-                await interaction.response.send_message("You don't have a balance yet.")
+                response = f"You have used {amount}: {item_name}."
+                for _ in range(amount):
+                    actions_1, actions_2, actions_3 = await use_item(interaction=interaction, item_name=item_name)
+                    response += "\r\n" + item_quantity[1] if item_quantity[1] else ""
+                    if actions_1 == -1 or actions_2 == -1 or actions_3 == -1:
+                        await interaction.followup.send("An error occurred while using the item.")
+                        return
+                await interaction.followup.send(response)
 
     @roleplay_group.command(name="send", description="send RP to another user")
     async def roleplay_send(self, interaction: discord.Interaction, amount: int, recipient: discord.User):
         await interaction.response.defer(thinking=True)
-
-        sender_id = interaction.user.id
-        recipient_id = recipient.id
-
-        async with aiosqlite.connect(DATABASE) as db:
-            cursor = await db.execute("SELECT balance FROM users WHERE user_id = ?", (sender_id,))
-            sender_data = await cursor.fetchone()
-            if sender_data:
-                sender_balance = sender_data[0]
-                if sender_balance >= amount:
-                    cursor = await db.execute("SELECT balance FROM users WHERE user_id = ?", (recipient_id,))
-                    recipient_data = await cursor.fetchone()
-                    if recipient_data:
-                        recipient_balance = recipient_data[0]
-                        sender_balance -= amount
-                        recipient_balance += amount
-                        await db.execute("UPDATE users SET balance = ? WHERE user_id = ?", (sender_balance, sender_id))
-                        await db.execute("UPDATE users SET balance = ? WHERE user_id = ?",
-                                         (recipient_balance, recipient_id))
-                        await db.commit()
-                        await interaction.response.send_message(f"You have sent {amount} coins to {recipient.mention}.")
+        try:
+            sender_id = interaction.user.id
+            recipient_id = recipient.id
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+                cursor = await db.execute("SELECT balance FROM RP_Players WHERE user_id = ?", (sender_id,))
+                sender_data = await cursor.fetchone()
+                if sender_data:
+                    sender_balance = sender_data[0]
+                    if sender_balance >= amount:
+                        cursor = await db.execute("SELECT balance FROM RP_Players WHERE user_id = ?", (recipient_id,))
+                        recipient_data = await cursor.fetchone()
+                        if recipient_data:
+                            recipient_balance = recipient_data[0]
+                            sender_balance -= amount
+                            recipient_balance += amount
+                            await db.execute("UPDATE RP_Players SET balance = ? WHERE user_id = ?", (sender_balance, sender_id))
+                            await db.execute("UPDATE RP_Players SET balance = ? WHERE user_id = ?",
+                                             (recipient_balance, recipient_id))
+                            await db.commit()
+                            await interaction.followup.send(f"You have sent {amount} coins to {recipient.mention}.")
+                        else:
+                            await db.execute("INSERT INTO RP_Players (user_id, balance) VALUES (?, ?)", (recipient_id, amount))
+                            await db.commit()
+                            await db.execute("UPDATE RP_Players SET balance = ? WHERE user_id = ?", (sender_balance - amount, sender_id))
+                            await db.commit()
+                            await interaction.followup.send(f"You have sent {amount} coins to {recipient.mention}.")
                     else:
-                        await interaction.response.send_message("The recipient does not have a balance yet.")
+                        await interaction.followup.send("You don't have enough coins to send.")
                 else:
-                    await interaction.response.send_message("You don't have enough coins to send.")
-            else:
-                await interaction.response.send_message("You don't have a balance yet.")
+                    await interaction.followup.send("You don't have a balance yet.")
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred while sending coins: {e}")
+            await interaction.followup.send("An error occurred while sending coins.")
+
+
+logging.basicConfig(
+    level=logging.INFO,  # Set the minimum logging level
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    filename='application.log',  # Log to a file
+    filemode='a'  # Append to the file
+)

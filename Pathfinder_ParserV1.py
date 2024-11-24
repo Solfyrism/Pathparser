@@ -2294,7 +2294,7 @@ async def session_management(interaction: discord.Interaction, session_id: int, 
                     tier_rate_limit = cursor.fetchone()
                 rate_limited_tier = floor(true_level / int(tier_rate_limit[0]))
                 true_tier = int(max_tier[0]) if current_mythic_information[0] > int(max_tier[0]) else \
-                current_mythic_information[0]
+                    current_mythic_information[0]
                 true_tier = true_tier if true_tier <= rate_limited_tier else rate_limited_tier
                 if true_tier == rate_limited_tier or true_tier == max_tier:
                     cursor.execute(
@@ -5210,7 +5210,7 @@ async def edit(ctx: commands.Context, name: str, new_character_name: str = None,
             if new_character_name is not None:
                 new_character_name = str.replace(str.replace(
                     str.replace(str.replace(str.replace(str.title(new_character_name), ";", ""), ")", ""), "("), "["),
-                                                 "]")
+                    "]")
                 true_character_name = unidecode(new_character_name)
             else:
                 true_character_name = results[0]
@@ -6741,7 +6741,7 @@ async def buy(ctx: commands.Context, character_name: str, expenditure: float, ma
 @app_commands.describe(consumption="Consume illiquid gold from having consumed or lost an item.")
 @app_commands.autocomplete(character_name=own_character_select_autocompletion)
 async def consume(ctx: commands.Context, character_name: str, consumption: float, reason: str):
-    """Buy items from NPCs for non-player trades and crafts. Expected Value is the MARKET price of what you are buying, not the price you are paying."""
+    """Consume illiquid gold from having consumed or lost an item."""
     character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
     reason = str.replace(reason, ";", "")
     guild_id = ctx.guild_id
@@ -6761,11 +6761,27 @@ async def consume(ctx: commands.Context, character_name: str, consumption: float
         if player_info[0] is None:
             await ctx.response.send_message(f"{ctx.user.name} does not have a character named {character_name}")
         else:
+            (
+                info_player_name, info_player_id, info_true_character_name, info_character_name, info_titles, info_description, info_oath,
+                info_level, info_tier, info_milestones, info_milestones_required, info_trials, info_trials_required,
+                info_gold, info_gold_value, info_gold_value_max, info_flux, info_color, info_mythweavers, info_image_link,
+                info_tradition_name, info_tradition_link, info_template_name, info_template_link, info_message_id,
+                info_logging_id, info_thread_id, info_fame, info_title, info_personal_cap, info_prestige,
+                info_article_link) = player_info
             consumption = -abs(round(consumption, 2))
             if player_info[14] - player_info[13] >= abs(consumption):
                 remaining = round(consumption + player_info[14], 2)
-                await EventCommand.gold_change(self, guild_id, author, author_id, character_name, player_info[13],
-                                               remaining, player_info[14], reason, 'Gold_Consume')
+                await EventCommand.gold_change(
+                    self,
+                    guild_id=guild_id,
+                    author_name=author,
+                    author_id=author_id,
+                    character_name=character_name,
+                    amount=0,
+                    expected_value= -abs(consumption),
+                    lifetime_value=0,
+                    reason=reason,
+                    source='Gold_Consume')
                 cursor.execute(f'SELECT MAX(Transaction_ID) FROM A_Audit_Gold Order By Transaction_ID DESC LIMIT 1')
                 transaction_id = cursor.fetchone()
                 cursor.execute(f"Select Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
@@ -6781,9 +6797,16 @@ async def consume(ctx: commands.Context, character_name: str, consumption: float
                 bio_message = await bio_channel.fetch_message(player_info[24])
                 await bio_message.edit(content=bio_embed[1], embed=bio_embed[0])
                 source = f"Character of {character_name} has consumed {consumption} GP having used {reason} using the consume command, transaction_id: {transaction_id[0]}!"
-                logging_embed = log_embed(player_info[2], author, None, None, None, None, None, None, None, None, None,
-                                          consumption, round(player_info[14] + consumption, 2), transaction_id[0], None,
-                                          None, None, None, None, None, None, None, None, None, None, source)
+                logging_embed = log_embed(character_name=player_info[2], author=author, level=None,
+                                          milestone_change=None, milestones_total=None, milestones_remaining=None,
+                                          tier=None, trial_change=None, trials=None, trials_remaining=None,
+                                          gold=info_gold, gold_change=consumption,
+                                          effective_gold=round(info_gold_value + consumption, 2),
+                                          transaction_id=transaction_id[0],
+                                          flux=None, flux_change=None, tradition_name=None, tradition_link=None,
+                                          template_name=None, template_link=None,
+                                          alternate_reward=None, total_fame=None, fame=None, total_prestige=None,
+                                          prestige=None, source=source)
                 logging_thread = guild.get_thread(player_info[25])
                 await logging_thread.send(embed=logging_embed)
                 await ctx.response.send_message(
