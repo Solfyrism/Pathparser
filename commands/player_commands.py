@@ -295,7 +295,7 @@ async def fetch_group_availability_from_db(guild_id, group_id, day, utc_offset):
                 sql_statement = f"SELECT {joined_labels} FROM Player_Timecard WHERE Player_Name in ({select_list}) AND Day = ?"
 
                 await cursor.execute(sql_statement,
-                    (player_list, day))
+                                     (player_list, day))
                 row = await cursor.fetchone()
             else:
                 # get next instance of day occurring
@@ -838,7 +838,7 @@ class DaySelect(discord.ui.Select):
                 # Proceed to time selection
                 await self.view.update_time_select(interaction, time_type="start")
         except Exception as e:
-            logging.exception("Error in DaySelect callback")
+            logging.exception(f"Error in DaySelect callback: {e}")
             await interaction.response.send_message(
                 "An error occurred while selecting the day.", ephemeral=True
             )
@@ -853,8 +853,6 @@ class TimeStyleSelect(discord.ui.Select):
         ]
         super().__init__(
             placeholder="Select your preferred time format",
-            min_values=1,
-            max_values=1,
             options=options
         )
 
@@ -882,8 +880,6 @@ class HourSelect(discord.ui.Select):
         options = [discord.SelectOption(label=hour, value=hour) for hour in hours]
         super().__init__(
             placeholder="Select the hour...",
-            min_values=1,
-            max_values=1,
             options=options
         )
 
@@ -903,7 +899,7 @@ class HourSelect(discord.ui.Select):
                 else:
                     await self.view.update_minute_select(interaction, self.time_type)
         except Exception as e:
-            logging.exception("Error in HourSelect callback")
+            logging.exception(f"Error in HourSelect callback: {e}")
             await interaction.response.send_message(
                 "An error occurred while selecting the hour.", ephemeral=True
             )
@@ -919,8 +915,6 @@ class AMPMSelect(discord.ui.Select):
         ]
         super().__init__(
             placeholder="Select AM or PM",
-            min_values=1,
-            max_values=1,
             options=options
         )
 
@@ -934,7 +928,7 @@ class AMPMSelect(discord.ui.Select):
                 self.view.end_am_pm = am_pm
                 await self.view.update_minute_select(interaction, self.time_type)
         except Exception as e:
-            logging.exception("Error in AMPMSelect callback")
+            logging.exception(f"Error in AMPMSelect callback: {e}")
             await interaction.response.send_message(
                 "An error occurred while selecting AM/PM.", ephemeral=True
             )
@@ -999,7 +993,7 @@ class AddAnotherSlotButton(discord.ui.Button):
             self.add_item(DaySelect())
             await interaction.response.edit_message(content="Select the day you are available:", view=self.view)
         except Exception as e:
-            logging.exception("Error in AddAnotherSlotButton callback")
+            logging.exception(f"Error in AddAnotherSlotButton callback: {e}")
             await interaction.response.send_message(
                 "An error occurred while adding another time slot.", ephemeral=True
             )
@@ -1050,7 +1044,7 @@ class FinishButton(discord.ui.Button):
 
 class BackButton(discord.ui.Button):
     def __init__(self):
-        super().__init__(label="Back", style=discord.ButtonStyle.secondary)
+        super().__init__(label="Back")
 
     async def callback(self, interaction: discord.Interaction):
         await self.view.go_back(interaction)
@@ -1066,7 +1060,7 @@ class CancelButton(discord.ui.Button):
 
 class ChangeTimeFormatButton(discord.ui.Button):
     def __init__(self):
-        super().__init__(label="Change Time Format", style=discord.ButtonStyle.secondary)
+        super().__init__(label="Change Time Format")
 
     async def callback(self, interaction: discord.Interaction):
         try:
@@ -1074,7 +1068,7 @@ class ChangeTimeFormatButton(discord.ui.Button):
             self.view.add_item(TimeStyleSelect())
             await interaction.response.edit_message(content="Select your preferred time format:", view=self.view)
         except Exception as e:
-            logging.exception("Error in ChangeTimeFormatButton callback")
+            logging.exception(f"Error in ChangeTimeFormatButton callback: {e}")
             await interaction.response.send_message(
                 "An error occurred while changing time format.", ephemeral=True
             )
@@ -1319,8 +1313,6 @@ class AvailabilityView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         # Optionally, edit the message to inform the user
-        if self.message:
-            await self.message.edit(content="This interaction has timed out.", view=self)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Ensure only the initiating user can interact with the view."""
@@ -1372,7 +1364,7 @@ class AvailabilityView(discord.ui.View):
             else:
                 self.current_step = "am_pm_select_end"
         except Exception as e:
-            logging.exception("Error in update_am_pm_select")
+            logging.exception(f"Error in update_am_pm_select: {e}")
             await interaction.response.send_message(
                 "An error occurred while updating AM/PM selection.", ephemeral=True
             )
@@ -1390,7 +1382,7 @@ class AvailabilityView(discord.ui.View):
             else:
                 self.current_step = "hour_select_end"
         except Exception as e:
-            logging.exception("Error in update_time_select")
+            logging.exception(f"Error in update_time_select: {e}")
             await interaction.response.send_message(
                 "An error occurred while updating time selection.", ephemeral=True
             )
@@ -1408,7 +1400,7 @@ class AvailabilityView(discord.ui.View):
             else:
                 self.current_step = "minute_select_end"
         except Exception as e:
-            logging.exception("Error in update_minute_select")
+            logging.exception(f"Error in update_minute_select: {e}")
             await interaction.response.send_message(
                 "An error occurred while updating minute selection.", ephemeral=True
             )
@@ -1570,10 +1562,9 @@ class AvailabilityView(discord.ui.View):
                     start_datetime_utc = start_datetime.astimezone(datetime.timezone.utc)
                     end_datetime_utc = end_datetime.astimezone(datetime.timezone.utc)
 
-                    utc_offset = start_datetime.utcoffset().total_seconds()
+#                    utc_offset = start_datetime.utcoffset().total_seconds()
 
                     if end_datetime <= start_datetime:
-
                         end_datetime += datetime.timedelta(days=1)
                     # Extract hours and minutes for storage
                     start_hours = start_datetime_utc.hour
@@ -1664,13 +1655,15 @@ class AvailabilityView(discord.ui.View):
             return hour % 12  # 12 AM is 0 hours
         else:
             return (hour % 12) + 12  # 12 PM is 12 hours
+
     async def cancel(self, interaction: discord.Interaction):
         try:
             await interaction.response.send_message("Availability setup has been canceled.", ephemeral=True)
             self.stop()
         except Exception as e:
-            logging.exception("Error in cancel")
+            logging.exception(f"Error in cancel: {e}")
             self.stop()
+
     async def go_back(self, interaction: discord.Interaction):
         try:
             # Determine the previous step based on current_step
@@ -1723,7 +1716,7 @@ class AvailabilityView(discord.ui.View):
                 # Default case
                 await interaction.response.send_message("Cannot go back from here.", ephemeral=True)
         except Exception as e:
-            logging.exception("Error in go_back")
+            logging.exception(f"Error in go_back: {e}")
             await interaction.response.send_message(
                 "An error occurred while going back to the previous step.", ephemeral=True
             )
@@ -1766,7 +1759,7 @@ class UnavailabilityView(discord.ui.View):
             # Remove previous items
             self.clear_items()
             # Add HourSelect
-            self.add_item(HourSelect(time_type=time_type))
+            self.add_item(HourSelect(time_type=time_type, time_style="24-hour"))
             await interaction.response.edit_message(content=f"Select your {time_type} time (hour):", view=self)
         except Exception as e:
             logging.exception(f"Error in update_time_select: {e}")
@@ -2115,7 +2108,7 @@ async def player_leave_session(guild: discord.Guild, session_id: int, player_nam
                         await thread.send(f"{player_name} has decided against participating in the session!")
                         return True
                     else:
-                        await thread.send(f"Has been removed from the session!")
+                        await thread.send(f"{player_name} Has been removed from the session!")
                         return True
                 else:
                     raise ValueError(f"Thread {thread_id} not found in guild {guild.id}")
@@ -2434,8 +2427,11 @@ class PlayerCommands(commands.Cog, name='Player'):
         discord.app_commands.Choice(name='half an hour before', value=30),
         discord.app_commands.Choice(name='session start', value=0),
         discord.app_commands.Choice(name='no reminder', value=-1)])
-    async def notify_me(self, interaction: discord.Interaction, session_id: int,
-                   notification: typing.Optional[discord.app_commands.Choice[int]]):
+    async def notify_me(
+            self, interaction:
+            discord.Interaction,
+            session_id: int,
+            notification: typing.Optional[discord.app_commands.Choice[int]]):
         warning_duration = -1 if notification is None else notification.value
         await interaction.response.defer(thinking=True, ephemeral=True)
         try:
@@ -2538,8 +2534,7 @@ class PlayerCommands(commands.Cog, name='Player'):
                         offset=offset,
                         view_type=view_type,
                         interaction=interaction,
-                        session_id=session_id,
-                        content=""
+                        session_id=session_id
                     )
                     await view.send_initial_message()
         except (aiosqlite.Error, TypeError, ValueError) as e:
@@ -2573,12 +2568,15 @@ class PlayerCommands(commands.Cog, name='Player'):
                         await interaction.followup.send(
                             f"Character {character_name} not found for player {interaction.user.name}")
                     else:
-                        await cursor.execute("Select Search from admin where Identifier = 'WA_World_ID'")
-                        world_id = await cursor.fetchone()
+                        async with shared_functions.config_cache.lock:
+                            configs = shared_functions.config_cache.cache.get(interaction.guild.id)
+                            if configs:
+                                world_id = configs.get('WA_World_ID')
+
                         if not world_id:
                             await interaction.followup.send("World ID not found!")
                         else:
-                            await update_report(interaction.guild_id, summary, world_id[0], article_id, character_name,
+                            await update_report(interaction.guild_id, summary, world_id, article_id, character_name,
                                                 interaction.user.name)
                             await interaction.followup.send(f"Report has been updated for {session_name}!")
         except aiosqlite.Error as e:
@@ -2932,8 +2930,6 @@ class PlayerCommands(commands.Cog, name='Player'):
                 "An error occurred whilst handling timesheet. Please try again later.")
 
 
-
-
 class GroupManyView(shared_functions.ShopView):
     def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, group_id: typing.Optional[int],
                  group_name: str, host_player_name: str, host_character: str, description: str, role_id: int,
@@ -2958,7 +2954,7 @@ class GroupManyView(shared_functions.ShopView):
                         WHERE Group_ID = ? ORDER BY Player_Name Limit ? Offset ? 
                     """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
-            cursor = await db.execute(statement, (self.group_id, self.limit, self.offset ))
+            cursor = await db.execute(statement, (self.group_id, self.limit, self.offset))
             self.results = await cursor.fetchall()
 
     async def create_embed(self):
@@ -3001,7 +2997,7 @@ class GroupView(shared_functions.ShopView):
                         FROM Sessions_Group Order by Group_ID Limit ? Offset ? 
                     """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
-            cursor = await db.execute(statement, (self.group_id, self.limit, self.offset ))
+            cursor = await db.execute(statement, (self.group_id, self.limit, self.offset))
             self.results = await cursor.fetchall()
 
     async def create_embed(self):
@@ -3261,7 +3257,7 @@ class DisplayGroupTimesheet(discord.ui.View):
         """Update the enabled/disabled state of buttons based on the current page."""
         try:
 
-            max_items = await self.get_max_items()
+            await self.get_max_items()
 
             if self.view_type == 0:
                 first_page = 1
@@ -3355,5 +3351,3 @@ class DisplayGroupTimesheet(discord.ui.View):
 
             self.max_range_id = count[0]
             return self.max_range_id
-
-

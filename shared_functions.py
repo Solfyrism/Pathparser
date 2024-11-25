@@ -222,6 +222,7 @@ async def own_character_select_autocompletion(
 
 async def character_select_autocompletion(interaction: discord.Interaction, current: str
                                           ) -> List[app_commands.Choice[str]]:
+
     data = []
     user_id = interaction.user.id
     guild_id = interaction.guild_id
@@ -254,6 +255,7 @@ async def character_select_autocompletion(interaction: discord.Interaction, curr
     for character in character_list:
         if current_prefix in character[1].lower():
             data.append(app_commands.Choice(name=character[1], value=character[1]))
+
     return data
 
 
@@ -313,19 +315,20 @@ async def get_plots_autocompletion(
                 os.getenv('WORLD_ANVIL_API'),
                 os.getenv(f'WORLD_ANVIL_{guild_id}')
             )
-            async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
-                cursor = await db.execute("SELECT Search FROM admin WHERE Identifier = 'WA_World_ID'")
-                wa_world_id = await cursor.fetchone()
-                cursor = await db.execute("SELECT Search FROM admin WHERE Identifier = 'WA_Plot_Folder'")
-                wa_plot_folder = await cursor.fetchone()
+
+            async with config_cache.lock:
+                configs = config_cache.cache.get(guild_id)
+                if configs:
+                    wa_world_id = configs.get('WA_World_ID')
+                    wa_plot_folder = configs.get('WA_Plot_Folder')
 
             # Ensure that the client methods are asynchronous or use an executor
             loop = asyncio.get_event_loop()
             plot_list = await loop.run_in_executor(
                 None,
                 client.world.articles,
-                wa_world_id[0],
-                wa_plot_folder[0]
+                wa_world_id,
+                wa_plot_folder
             )
 
             # Cache the result with a timestamp
@@ -499,6 +502,7 @@ async def settings_autocomplete(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
             # Correct parameterized query
+
             cursor = await db.execute("SELECT Identifier FROM Admin WHERE Identifier LIKE ? LIMIT 20",
                                       (f"%{current}%",))
             settings_list = await cursor.fetchall()
@@ -568,13 +572,15 @@ async def character_embed(
         async with aiosqlite.connect(f"Pathparser_{guild.id}_test.sqlite") as conn:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.cursor()
+            async with config_cache.lock:
+                configs = config_cache.cache.get(guild.id)
 
-            # Fetch channel ID
-            await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-            channel_id_row = await cursor.fetchone()
-            if not channel_id_row:
+                if configs:
+                    channel_id = configs.get('Accepted_Bio_Channel')
+
+            if not channel_id:
                 return f"No channel found with Identifier 'Accepted_Bio_Channel' in Admin table."
-            channel_id = channel_id_row['Search']
+
 
             # Fetch character info
             await cursor.execute(
@@ -1670,16 +1676,18 @@ async def put_wa_report(guild_id: int, session_id: int, overview: str, author: s
             world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("Select Search from Admin where Identifier = 'WA_Session_Folder'")
-                session_folder = await cursor.fetchone()
+                async with config_cache.lock:
+                    configs = config_cache.cache.get(guild_id)
+                    if configs:
+                        session_folder = configs.get('WA_Session_Folder')
+                        timeline = configs.get('WA_Timeline_Default')
+
                 if not session_folder:
                     raise ValueError("No World Anvil session folder set.")
-                session_folder = session_folder[0]
-                await cursor.execute("Select Search from Admin where Identifier = 'WA_Timeline_Default'")
-                timeline = await cursor.fetchone()
+
                 if not timeline:
                     raise ValueError("No World Anvil timeline set.")
-                timeline = timeline[0]
+
                 await cursor.execute(
                     "SELECT Session_Name, Completed_Time, Alt_Reward_Party, Alt_Reward_All, Overview from Sessions where Session_ID = ?",
                     (session_id,))
@@ -1910,7 +1918,7 @@ class ShopView(discord.ui.View):
         await self.update_results()
         await self.create_embed()
         await self.update_buttons()
-        await interaction.message.edit(
+        await interaction.edit_original_response(
             embed=self.embed,
             view=self
         )
@@ -1925,7 +1933,7 @@ class ShopView(discord.ui.View):
             await self.update_results()
             await self.create_embed()
             await self.update_buttons()
-            await interaction.message.edit(
+            await interaction.edit_original_response(
                 embed=self.embed,
                 view=self
             )
@@ -1941,7 +1949,7 @@ class ShopView(discord.ui.View):
             await self.update_results()
             await self.create_embed()
             await self.update_buttons()
-            await interaction.message.edit(
+            await interaction.edit_original_response(
                 embed=self.embed,
                 view=self
             )
@@ -1958,7 +1966,7 @@ class ShopView(discord.ui.View):
             await self.update_results()
             await self.create_embed()
             await self.update_buttons()
-            await interaction.message.edit(
+            await interaction.edit_original_response(
                 embed=self.embed,
                 view=self
             )
@@ -2046,16 +2054,18 @@ class RecipientAcknowledgementView(discord.ui.View):
 
     async def accept(self, interaction: discord.Interaction):
         """Handle the accept action."""
+        await interaction.response.defer(thinking=True)
         await self.accepted(interaction)
-        await interaction.message.edit(
+        await interaction.edit_original_response(
             embed=self.embed,
             view=None
         )
 
     async def reject(self, interaction: discord.Interaction):
         """Handle the reject action."""
+        await interaction.response.defer(thinking=True)
         await self.rejected(interaction)
-        await interaction.message.edit(
+        await interaction.edit_original_response(
             embed=self.embed,
             view=None
         )
@@ -2066,17 +2076,20 @@ class RecipientAcknowledgementView(discord.ui.View):
         try:
             async with aiosqlite.connect(f"Pathparser_{self.interaction.guild_id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
-                await cursor.execute("SELECT Search FROM Admin WHERE identifier = 'Character_Transaction_Channel'")
-                channel_id = await cursor.fetchone()
+                async with config_cache.lock:
+                    configs = config_cache.cache.get(self.interaction.guild_id)
+                    if configs:
+                        channel_id = configs.get('Character_Transaction_Channel')
+
                 if channel_id is None:
                     await self.interaction.followup.send(
                         "Character Transaction Channel not found in the database.",
                         ephemeral=True
                     )
                     return
-                channel = self.interaction.guild.get_channel(int(channel_id[0]))
+                channel = self.interaction.guild.get_channel(int(channel_id))
                 if not channel:
-                    channel = await self.interaction.guild.fetch_channel(int(channel_id[0]))
+                    channel = await self.interaction.guild.fetch_channel(int(channel_id))
                 if channel:
                     send_message = await channel.send(
                         content=self.content,
@@ -2182,7 +2195,7 @@ class SelfAcknowledgementView(discord.ui.View):
         """Handle the accept action."""
         await interaction.response.defer()
         await self.accepted(interaction)
-        await interaction.message.edit(
+        await interaction.edit_original_response(
             embed=self.embed,
             view=None
         )
@@ -2191,7 +2204,7 @@ class SelfAcknowledgementView(discord.ui.View):
         """Handle the reject action."""
         await interaction.response.defer()
         await self.rejected(interaction)
-        await interaction.message.edit(
+        await interaction.edit_original_response(
             embed=self.embed,
             view=None
         )
@@ -2270,7 +2283,7 @@ class DualView(discord.ui.View):
             await self.update_results()
             await self.create_embed()
             await self.update_buttons()
-            await interaction.message.edit(
+            await interaction.edit_original_response(
                 embed=self.embed,
                 view=self
             )
@@ -2289,7 +2302,7 @@ class DualView(discord.ui.View):
                 await self.update_results()
                 await self.create_embed()
                 await self.update_buttons()
-                await interaction.message.edit(
+                await interaction.edit_original_response(
                     embed=self.embed,
                     view=self
                 )
@@ -2341,7 +2354,7 @@ class DualView(discord.ui.View):
             await self.update_results()
             await self.create_embed()
             await self.update_buttons()
-            await interaction.message.edit(
+            await interaction.edit_original_response(
                 embed=self.embed,
                 view=self
             )
@@ -2359,7 +2372,7 @@ class DualView(discord.ui.View):
                 await self.update_results()
                 await self.create_embed()
                 await self.update_buttons()
-                await interaction.message.edit(
+                await interaction.edit_original_response(
                     embed=self.embed,
                     view=self
                 )
@@ -2380,7 +2393,7 @@ class DualView(discord.ui.View):
                 await self.update_results()
                 await self.create_embed()
                 await self.update_buttons()
-                await interaction.message.edit(
+                await interaction.edit_original_response(
                     embed=self.embed,
                     view=self
                 )

@@ -25,11 +25,13 @@ async def register_character_embed(
             cursor = await conn.cursor()
 
             # Fetch channel ID
-            await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-            channel_id_row = await cursor.fetchone()
-            if not channel_id_row:
+            async with shared_functions.config_cache.lock:
+                configs = shared_functions.config_cache.cache.get(guild.id)
+                if configs:
+                    channel_id = configs.get('Accepted_Bio_Channel')
+
+            if not channel_id:
                 return f"No channel found with Identifier 'Accepted_Bio_Channel' in Admin table."
-            channel_id = channel_id_row['Search']
 
             # Fetch character info
             await cursor.execute(
@@ -264,15 +266,16 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                     info_mythweavers = player_info['mythweavers']
                     info_image_link = player_info['image_link']
                     info_tmp_bio = player_info['Backstory']
-                    await cursor.execute("Select Search FROM Admin WHERE Identifier = 'Char_Eventlog_Channel'")
-                    character_log_channel_id = await cursor.fetchone()
-                    await cursor.execute("SELECT search from admin where identifier = 'WA_Backstory_Category'")
-                    backstory_category = await cursor.fetchone()
-                    await cursor.execute("SELECT search from admin where identifier = 'Starting_Level'")
-                    starting_level = await cursor.fetchone()
+                    async with shared_functions.config_cache.lock:
+                        configs = shared_functions.config_cache.cache.get(interaction.guild.id)
+                        if configs:
+                            character_log_channel_id = configs.get('Char_Eventlog_Channel')
+                            backstory_category = configs.get('WA_Backstory_Category')
+                            starting_level = configs.get('Starting_Level')
+
                     await cursor.execute(
                         "SELECT Minimum_Milestones, Milestones_to_level, WPL FROM Milestone_System where level = ?",
-                        (starting_level[0],))
+                        (starting_level,))
                     starting_level_info = await cursor.fetchone()
                     if not starting_level_info:
                         await interaction.followup.send(
@@ -282,7 +285,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                         (info_minimum_milestones, info_milestones_to_level, info_wpl) = starting_level_info
                         gold_calculation = await character_commands.gold_calculation(
                             guild_id=guild_id,
-                            level=starting_level[0],
+                            level=starting_level,
                             author_name=interaction.user.name,
                             author_id=interaction.user.id,
                             character_name=info_character_name,
@@ -306,7 +309,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                         ?,?,?,?,?,?,?,?,?,?,
                         ?,?,?,?,?,?,?,?, ?, ?)""",
                         (info_player_name, info_player_id, info_true_character_name, info_character_name,
-                         info_nickname, info_titles, info_description, info_oath, starting_level[0], info_tier,
+                         info_nickname, info_titles, info_description, info_oath, starting_level, info_tier,
                          info_minimum_milestones, info_milestones_to_level, info_trials, info_trials_required,
                          str(gold_total), str(gold_value_total), str(gold_value_max_total), 0, info_color, info_mythweavers,
                          info_image_link, 0, 0, datetime.datetime.utcnow()))
@@ -320,9 +323,9 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                                           description=f"Other Names: {info_titles}", color=int(info_color[1:], 16))
                     embed.set_author(name=f'{info_player_name}')
                     embed.set_thumbnail(url=f'{info_image_link}')
-                    character_log_channel = interaction.guild.get_channel(character_log_channel_id[0])
+                    character_log_channel = interaction.guild.get_channel(character_log_channel_id)
                     if not character_log_channel:
-                        character_log_channel = await self.bot.fetch_channel(character_log_channel_id[0])
+                        character_log_channel = await self.bot.fetch_channel(character_log_channel_id)
                     character_log_message = await character_log_channel.send(content=f'<@{info_player_id}>',
                                                                              embed=embed,
                                                                              allowed_mentions=discord.AllowedMentions(
@@ -331,11 +334,16 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                     if info_tmp_bio:
                         article = await shared_functions.put_wa_article(guild_id=interaction.guild.id, template='Person',
                                                                         title=info_true_character_name,
-                                                                        category=backstory_category[0],
+                                                                        category=backstory_category,
                                                                         overview=info_tmp_bio,
                                                                         author=info_player_name)
-                        article_url = article['url']
-                        article_id = article['id']
+                        try:
+                            article_url = article['url']
+                            article_id = article['id']
+                        except TypeError:
+                            article_url = None
+                            article_id = None
+                            pass
                     else:
                         article_url = None
                         article_id = None
@@ -345,7 +353,8 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                             article_url, article_id, character_embed_info[3], character_log_message.id, thread.id,
                             info_character_name))
                     await db.commit()
-                    shared_functions.autocomplete_cache.clear()
+                    async with shared_functions.autocomplete_cache.lock:
+                        shared_functions.autocomplete_cache.cache.clear()
                     await interaction.followup.send(f"{character_name} has been moved to the accepted bios.",
                                                     ephemeral=True)
 

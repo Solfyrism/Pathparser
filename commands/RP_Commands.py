@@ -7,7 +7,6 @@ from typing import Dict
 import discord
 from discord import app_commands
 from discord.ext import commands
-from discord.ext.commands import has_permissions, MissingPermissions
 import aiosqlite
 import asyncio
 import json
@@ -39,13 +38,13 @@ class RoleplayInfoCache:
 roleplay_info_cache = RoleplayInfoCache()
 
 
-async def use_item(interaction: discord.Interaction, item_name: str):
+async def use_item(interaction: discord.Interaction, item_name: typing.Optional[str], item_id: typing.Optional[int] = None):
     guild_id = interaction.guild.id
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
             cursor = await db.execute(
-                "SELECT actions_1_type, actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype, actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior FROM RP_Store_Items WHERE name = ?",
-                (item_name,))
+                "SELECT actions_1_type, actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype, actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior FROM RP_Store_Items WHERE name = ? or item_id = ?",
+                (item_name, item_id))
             item_info = await cursor.fetchone()
             if item_info:
                 actions_1_type, actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype, actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior = item_info
@@ -62,6 +61,8 @@ async def use_item(interaction: discord.Interaction, item_name: str):
                 else:
                     actions_3 = 0
                 return actions_1, actions_2, actions_3
+            else:
+                raise ValueError("Item not found.")
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"An error occurred while using item: {e}")
         return -1, -1, -1
@@ -369,7 +370,7 @@ async def fetch_user_balance(db, user_id):
 
 async def fetch_item_data(db, item_name):
     cursor = await db.execute(
-        """SELECT price, description, stock_remaining, inventory, usable, sellable, custom_message,
+        """SELECT item_id, price, description, stock_remaining, inventory, usable, sellable, custom_message,
            matching_requirements, requirements_1_type, requirements_1_pair, requirements_2_type,
            requirements_2_pair, requirements_3_type, requirements_3_pair, actions_1_type,
            actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype,
@@ -418,7 +419,7 @@ async def update_balance_and_stock(db, user_id, new_balance, item_name, stock_re
     await db.commit()
 
 
-async def handle_inventory_or_use(db, interaction, user_id, item_name, amount, inventory, custom_message):
+async def handle_inventory_or_use(db, interaction, user_id, item_id, item_name, amount, inventory, custom_message):
     if inventory == "0":  # Item is consumed immediately
         for _ in range(amount):
             try:
@@ -437,8 +438,8 @@ async def handle_inventory_or_use(db, interaction, user_id, item_name, amount, i
         item_quantity = await cursor.fetchone()
         if item_quantity is None:
             await db.execute(
-                "INSERT INTO RP_Players_Items (player_id, item_name, item_quantity) VALUES (?, ?, ?)",
-                (user_id, item_name, amount)
+                "INSERT INTO RP_Players_Items (player_id, item_id, item_name, item_quantity) VALUES (?, ?, ?, ?)",
+                (user_id, item_id, item_name, amount)
             )
         else:
             await db.execute(
@@ -447,6 +448,36 @@ async def handle_inventory_or_use(db, interaction, user_id, item_name, amount, i
             )
         await db.commit()
         return f"You bought {amount} {item_name} and added them to your inventory."
+
+
+async def handle_use(db, interaction: discord.Interaction, user_id: int, item_name: typing.Optional[str] = None, item_id: typing.Optional[int] = None, amount: int = 1):
+    cursor = await db.cursor()
+    if item_id is None and item_name is None:
+        # neither value provided.
+        raise ValueError("No item provided.")
+    await cursor.execute(
+        "SELECT Item_Quantity FROM RP_Players_Items WHERE Player_ID = ? and (Item_Name = ? OR Item_ID = ?)",
+        (user_id, item_name, item_id))
+    item_quantity = await cursor.fetchone()
+    await cursor.execute(
+        "SELECT Custom_message from RP_Store_Items WHERE name = ? or item_id = ?", (item_name, item_id))
+    custom_message = await cursor.fetchone()
+    if not item_quantity:
+        return f"You don't have any {item_name} in your inventory."
+    amount = min(amount, item_quantity[0])
+    response = f"You have used {amount}: {item_name}."
+    response += custom_message[0] if custom_message[0] else ""
+    for _ in range(amount):
+        item_used = await use_item(interaction=interaction, item_id=item_id, item_name=item_name)
+        (actions_1, actions_2, actions_3) = item_used
+        if actions_1 == -1 or actions_2 == -1 or actions_3 == -1:
+            return "An error occurred while using the item."
+    update_quantity = item_quantity[0] - amount
+    await cursor.execute(
+        "UPDATE RP_Players_Items SET Item_Quantity = ? WHERE player_id = ? and (item_name = ? or item_id = ?)",
+        (update_quantity, user_id, item_name, item_id))
+    await db.commit()
+    return response
 
 
 class RPCommands(commands.Cog, name='RP'):
@@ -467,7 +498,7 @@ class RPCommands(commands.Cog, name='RP'):
             description="Here are the available roleplay commands:",
             color=discord.Color.blurple()
         )
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     @roleplay_group.command(name="balance", description="Check your roleplay balance")
     async def roleplay_balance(self, interaction: discord.Interaction):
@@ -479,9 +510,9 @@ class RPCommands(commands.Cog, name='RP'):
             user_data = await cursor.fetchone()
             if user_data:
                 balance = user_data[0]
-                await interaction.response.send_message(f"Your balance is {balance} :<:RPCash:884166313260503060>.")
+                await interaction.followup.send(f"Your balance is {balance} :<:RPCash:884166313260503060>.")
             else:
-                await interaction.response.send_message("You don't have a balance yet.")
+                await interaction.followup.send("You don't have a balance yet.")
 
     @roleplay_group.command(name="buy", description="buy an item from the store")
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
@@ -490,7 +521,7 @@ class RPCommands(commands.Cog, name='RP'):
         user_id = interaction.user.id
 
         if amount < 1:
-            await interaction.response.send_message("You can't buy less than 1 item.")
+            await interaction.followup.send("You can't buy less than 1 item.")
             return
 
         async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
@@ -510,7 +541,7 @@ class RPCommands(commands.Cog, name='RP'):
 
             # Unpack item data
             (
-                item_cost, item_description, stock_remaining, inventory, usable, sellable, custom_message,
+                item_id, item_cost, item_description, stock_remaining, inventory, usable, sellable, custom_message,
                 matching_requirements, *requirements_and_actions
             ) = item_data
 
@@ -527,7 +558,6 @@ class RPCommands(commands.Cog, name='RP'):
                 settings = roleplay_info_cache.cache[interaction.guild.id]
                 reward_name = settings.reward_name if settings.reward_name else "coins"
                 reward_emoji = settings.reward_emoji if settings.reward_emoji else "<:RPCash:884166313260503060>"
-
 
             # Check if user can afford the item
             total_cost = item_cost * amount
@@ -551,7 +581,7 @@ class RPCommands(commands.Cog, name='RP'):
 
             # Handle inventory or immediate use
             purchase_response = await handle_inventory_or_use(
-                db, interaction, user_id, item_name, amount, inventory, custom_message
+                db, interaction, user_id, item_id, item_name, amount, inventory, custom_message
             )
 
             # Final response
@@ -616,13 +646,23 @@ class RPCommands(commands.Cog, name='RP'):
         user_id = interaction.user.id
         async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
             cursor = await db.cursor()
+            await cursor.execute("SELECT Custom_message, usable from RP_Store_Items WHERE name = ?", (item_name,))
+            item_data = await cursor.fetchone()
+            if not item_data:
+                await interaction.followup.send("This item does not exist in the store! Please reach out to your admin to correct this if this is a mistake.")
+                return
+            (custom_message, usable) = item_data
+            if not usable:
+                await interaction.followup.send("This item is not usable.")
+                return
             await cursor.execute(
-                "SELECT Item_Quantity, Custom_Message FROM RP_Players_Items WHERE Player_ID = ? and Item_Name = ?",
+                "SELECT Item_Quantity FROM RP_Players_Items WHERE Player_ID = ? and Item_Name = ?",
                 (user_id, item_name))
             item_quantity = await cursor.fetchone()
             if not item_quantity:
-                await interaction.response.send_message(f"You don't have any {item_name} in your inventory.")
+                await interaction.followup.send(f"You don't have any {item_name} in your inventory.")
             else:
+
                 response = f"You have used {amount}: {item_name}."
                 for _ in range(amount):
                     actions_1, actions_2, actions_3 = await use_item(interaction=interaction, item_name=item_name)
@@ -661,7 +701,8 @@ class RPCommands(commands.Cog, name='RP'):
                             await db.execute("UPDATE RP_Players SET balance = ? WHERE user_id = ?",
                                              (recipient_balance, recipient_id))
                             await db.commit()
-                            await interaction.followup.send(f"You have sent {amount} {reward_name} {reward_emoji} to {recipient.mention}.")
+                            await interaction.followup.send(
+                                f"You have sent {amount} {reward_name} {reward_emoji} to {recipient.mention}.")
                         else:
                             await db.execute("INSERT INTO RP_Players (user_id, balance) VALUES (?, ?)",
                                              (recipient_id, amount))
@@ -853,7 +894,7 @@ class InventoryView(shared_functions.ShopView):
     def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, player_id: int, member: discord.Member,
                  interaction: discord.Interaction):
         super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction,
-                         content=self.content)
+                         content="")
         self.max_items = None  # Cache total number of items
         self.content = None
         self.player_id = player_id
@@ -864,7 +905,7 @@ class InventoryView(shared_functions.ShopView):
         """Fetch the history of prestige request  for the current page."""
 
         statement = """
-                        SELECT RPI.Item_Name, RPI.Item_Quantity, RPS.Description
+                        SELECT RPI.Item_Name, RPI.Item_Quantity, RPS.Description, RPS.Image_Link
                         FROM RP_Players_Items RPI left join RP_Store_Items RPS on RPI.Item_Name = RPS.Name
                         WHERE RPI.Player_ID = ? ORDER BY item_Name Limit ? Offset ?
                     """
@@ -883,7 +924,7 @@ class InventoryView(shared_functions.ShopView):
         self.embed.set_thumbnail(url=self.member.avatar)
         self.embed.set_footer(text=f"Page {current_page} of {total_pages}")
         for item in self.results:
-            (item_name, item_number, item_description) = item
+            (item_name, item_number, item_description, image) = item
             self.embed.add_field(name=f"{item_name}",
                                  value=f"**Quantity**: {item_number} \r\n **Description**: {item_description}",
                                  inline=False)
@@ -892,7 +933,7 @@ class InventoryView(shared_functions.ShopView):
         """Get the total number of titles."""
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
-                cursor = await db.execute("SELECT COUNT(*) FROM RP_Store_Items WHERE Player_ID = ?",
+                cursor = await db.execute("SELECT COUNT(*) FROM RP_Players_Items WHERE Player_ID = ?",
                                           (self.member.id,))
                 count = await cursor.fetchone()
                 self.max_items = count[0]

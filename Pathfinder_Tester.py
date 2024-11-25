@@ -170,9 +170,9 @@ async def on_message(message):
         swears[swear] = len(re.findall(rf"\b{swear}\b", normalized_string))
 
     # Calculate total occurrences
-    total_count = sum(swears.values()) * 10
-    if total_count > 10 and message.author.id == 243120409703088128:
-        hostility = min(100, int((total_count / 50)))
+    total_count = sum(swears.values())
+    if total_count > 1 and message.author.id == 243120409703088128:
+        hostility = min(100, int((total_count / 5) * 100))
         if 0 <= random_number <= 17:
             await message.channel.send(f"Hostility Detected: {hostility}% Someone's a salty boy! :)")
         elif 18 <= random_number <= 34:

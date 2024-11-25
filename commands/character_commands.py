@@ -15,6 +15,7 @@ import datetime
 import os
 import aiosqlite
 import shared_functions
+from commands import RP_Commands
 from shared_functions import name_fix
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -54,12 +55,15 @@ def safe_int_atk(value, default=0):
 
 # LEVEL INFORMATION
 async def get_max_level(cursor, guild_id: int) -> Optional[int]:
-    await cursor.execute("SELECT Search FROM Admin WHERE Identifier = ?", ('Level_Cap',))
-    row = await cursor.fetchone()
-    if row is not None:
-        return int(row[0])
-    logging.error(f"Level cap not found for guild {guild_id}")
-    return None
+    async with shared_functions.config_cache.lock:
+        configs = shared_functions.config_cache.cache.get(guild_id)
+        if configs:
+            row = configs.get('Level_Cap')
+            if row:
+                return row
+            else:
+                logging.error(f"Level cap not found for guild {guild_id}")
+                return None
 
 
 def calculate_milestones(
@@ -125,7 +129,7 @@ async def level_calculation(
     """
     try:
         logging.debug(f"Starting level calculation for character '{character_name}' in guild {guild_id}")
-        print(personal_cap, level, base, easy, medium, hard, deadly, misc)
+
         # Validate inputs
         if level < 1:
             raise ValueError("Level must be at least 1.")
@@ -210,28 +214,40 @@ async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: i
         await cursor.execute("SELECT Level, Level_Range_Name, Level_Range_ID FROM Milestone_System WHERE level = ?",
                              (new_level,))
         new_role = await cursor.fetchone()
+
         if new_role is None:
             logging.error(f"Role not found for level {new_level}")
             return None
         else:
             member = guild.get_member(author_id)
-            new_level_range_role = guild.get_role(new_role[2])
+            new_level_range_role = guild.get_role(int(new_role[2]))
+
+            if not new_level_range_role:
+                await guild.get_role()
+
             try:
                 await member.add_roles(new_level_range_role)
+
                 await cursor.execute("SELECT Level_Range_Name FROM Milestone_System WHERE level = ?", (level,))
                 old_role = await cursor.fetchone()
+
                 if old_role is not None:
                     await cursor.execute(
                         "SELECT Min(Level), Max(Level) FROM Milestone_System where Level_Range_Name = ?",
                         (old_role[0],))
                     old_role_range = await cursor.fetchone()
+
                     await cursor.execute(
-                        "SELECT Character_Name from Player_Characters where Player_ID = ? AND level > ? AND LEVEL < ?",
+                        "SELECT Character_Name from Player_Characters where Player_ID = ? AND level BETWEEN ? AND ?",
                         (author_id, old_role_range[0], old_role_range[1]))
                     character = await cursor.fetchone()
+
                     if character is None:
-                        old_level_range_role = guild.get_role(old_role[0])
+
+                        old_level_range_role = guild.get_role(int(old_role[0]))
+
                         await member.remove_roles(old_level_range_role)
+
             except discord.Forbidden:
                 logging.error(f"Bot does not have permissions to add roles to <@{author_id}>")
                 return None
@@ -242,25 +258,25 @@ async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: i
 
 
 # Mythic Information
-async def get_max_mythic(cursor, guild_id: int, level: int) -> Optional[int]:
+async def get_max_mythic(guild_id: int, level: int) -> Optional[int]:
     try:
-        await cursor.execute("SELECT Search FROM Admin WHERE Identifier = ?", ('Tier_Cap',))
-        max_tier = await cursor.fetchone()
-        await cursor.execute("SELECT Search FROM Admin WHERE Identifier = ?", ('Tier_Rate_Limit_1',))
-        rate_limit_1 = await cursor.fetchone()
-        await cursor.execute("SELECT Search FROM Admin WHERE Identifier = ?", ('Tier_Rate_Limit_2',))
-        rate_limit_2 = await cursor.fetchone()
-        await cursor.execute("SELECT Search FROM Admin WHERE Identifier = ?", ('Tier_Rate_Limit_Breakpoint',))
-        rate_limit_breakpoint = await cursor.fetchone()
+        async with shared_functions.config_cache.lock:
+            configs = shared_functions.config_cache.cache.get(guild_id)
+            if configs:
+
+                max_tier = configs.get('Tier_Cap')
+                rate_limit_1 = configs.get('Tier_Rate_Limit_1')
+                rate_limit_2 = configs.get('Tier_Rate_Limit_2')
+                rate_limit_breakpoint = configs.get('Tier_Rate_Limit_Breakpoint')
         if rate_limit_2 is not None and rate_limit_1 is not None and rate_limit_breakpoint is not None:
-            rate_limit_max = floor(int(level) / int(rate_limit_1[0])) if int(level) < int(
-                rate_limit_breakpoint[0]) else floor(
-                int(level) / int(rate_limit_2[0]))
+            rate_limit_max = floor(int(level) / int(rate_limit_1)) if int(level) < int(
+                rate_limit_breakpoint) else floor(
+                int(level) / int(rate_limit_2))
         else:
             rate_limit_max = 99
 
         if max_tier is not None:
-            return min(int(rate_limit_max), int(max_tier[0]))
+            return min(int(rate_limit_max), int(max_tier))
         else:
             logging.error(f"Tier cap not found for guild {guild_id}")
             return None
@@ -305,43 +321,42 @@ async def mythic_calculation(
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
 
-            # Fetch configuration values from the Admin table
-            await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Tier_Cap'")
-            max_mythic_row = await cursor.fetchone()
-            if not max_mythic_row:
+            # fetch server configurations.
+            async with shared_functions.config_cache.lock:
+                configs = shared_functions.config_cache.cache.get(guild_id)
+                if configs:
+
+                    max_tier = configs.get('Tier_Cap')
+                    rate_limit_1 = configs.get('Tier_Rate_Limit_1')
+                    rate_limit_2 = configs.get('Tier_Rate_Limit_2')
+                    rate_limit_breakpoint = configs.get('Tier_Rate_Limit_Breakpoint')
+
+
+            # check if configurations are correct
+            if not max_tier:
                 raise ValueError("Tier_Cap not found in Admin table.")
-            max_mythic = int(max_mythic_row[0])
 
-            await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Tier_Rate_Limit_1'")
-            tier_rate_limit_1_row = await cursor.fetchone()
-            if not tier_rate_limit_1_row:
+            if not rate_limit_1:
                 raise ValueError("Tier_Rate_limit_1 not found in Admin table.")
-            tier_rate_limit_before_breakpoint = int(tier_rate_limit_1_row[0])
 
-            await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Tier_Rate_Limit_2'")
-            tier_rate_limit_2_row = await cursor.fetchone()
-            if not tier_rate_limit_2_row:
+            if not rate_limit_2:
                 raise ValueError("Tier_Rate_limit_2 not found in Admin table.")
-            tier_rate_limit_after_breakpoint = int(tier_rate_limit_2_row[0])
 
-            await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Tier_Rate_Limit_Breakpoint'")
-            tier_rate_limit_breakpoint_row = await cursor.fetchone()
-            if not tier_rate_limit_breakpoint_row:
+            if not rate_limit_breakpoint:
                 raise ValueError("Tier_Rate_limit_Breakpoint not found in Admin table.")
-            tier_rate_limit_breakpoint = int(tier_rate_limit_breakpoint_row[0])
 
             # Determine the tier rate limit modifier
-            if level < tier_rate_limit_breakpoint:
-                tier_rate_limit_modifier = tier_rate_limit_before_breakpoint
+            if level < rate_limit_breakpoint:
+                tier_rate_limit_modifier = rate_limit_1
             else:
-                tier_rate_limit_modifier = tier_rate_limit_after_breakpoint
+                tier_rate_limit_modifier = rate_limit_2
 
             if tier_rate_limit_modifier == 0:
                 raise ValueError("Tier rate limit modifier cannot be zero.")
 
             # Calculate tier candidate and tier max
             tier_candidate = level // tier_rate_limit_modifier
-            tier_max = min(tier_candidate, max_mythic)
+            tier_max = min(tier_candidate, max_tier)
 
             # Fetch mythic tier information
             await cursor.execute("""
@@ -366,6 +381,7 @@ async def mythic_calculation(
             trials_remaining = max(trials_remaining, 0)
             new_tier = 0 if tier == 0 and trial_change == 0 else new_tier
             # Return mythic tier, total trials, trials remaining, and trial change
+            logging.info(f"Mythic calculation complete: new tier of {new_tier}, total_trials of {trial_total}, trials_remaining of {trials_remaining}, trial change: {trial_change}")
             return new_tier, trial_total, trials_remaining, trial_change
 
     except (aiosqlite.Error, TypeError, ValueError, ZeroDivisionError) as e:
@@ -396,8 +412,8 @@ async def gold_calculation(
         related_transaction: int = None
 ) -> Tuple[Decimal, Decimal, Decimal, Decimal, int]:
     time = datetime.datetime.now()
-
     try:
+
         if gold_change > 0:
             gold_value += gold_value_change
             if oath == 'Offerings' and not ignore_limitations:
@@ -443,24 +459,33 @@ async def gold_calculation(
 
         # Ensure gold values are not negative
         if gold_total < 0 or new_effective_gold < 0:
-            raise ValueError("Gold cannot be negative.")
+            raise ValueError(f"Gold cannot be negative: Gold of {gold_total}, effective gold of {new_effective_gold}.")
 
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             gold_total = (gold + adjusted_gold_change).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            new_effective_gold = (gold_value + adjusted_gold_change + gold_value_change).quantize(Decimal('0.01'),
-                                                                                                  rounding=ROUND_HALF_UP)
-            gold_value_max_total = (
-                    gold_value_max +
-                    gold_value_max_change +
-                    gold_value_change +
-                    adjusted_gold_change).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+            final_gold_value_change = (
+                gold_value_change.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                if gold_value_change else
+                adjusted_gold_change.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+            new_effective_gold = (
+                (gold_value + gold_value_change).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                if gold_value_change else
+                (gold_value + adjusted_gold_change).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+            gold_value_total_change = (
+                gold_value_max_change.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                if gold_value_max_change else
+                gold_change.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+            gold_value_max_total = (gold_value_max + gold_value_total_change).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
             # Before inserting into the database, convert Decimal to string after rounding
             adjusted_gold_change_str = str(adjusted_gold_change.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
-            new_effective_gold_str = str(new_effective_gold)
-            gold_value_max_total_str = str(gold_value_max_total)
-
+            gold_value_change_str = str(final_gold_value_change)
+            gold_value_total_change_str = str(gold_value_total_change)
             # Update the database
             if is_transaction:
                 sql = """
@@ -475,8 +500,8 @@ async def gold_calculation(
                     author_id,
                     character_name,
                     adjusted_gold_change_str,
-                    new_effective_gold_str,
-                    gold_value_max_total_str,
+                    gold_value_change_str,
+                    gold_value_total_change_str,
                     reason,
                     related_transaction,
                     source,
@@ -490,6 +515,7 @@ async def gold_calculation(
             else:
                 transaction_id = 0
             logging.info(f"Gold updated for character '{character_name}', transaction_id: {transaction_id}.")
+
             return adjusted_gold_change, gold_total, new_effective_gold, gold_value_max_total, transaction_id
     except Exception as e:
         logging.exception(f"Error in gold calculation for character '{character_name}': {e}")
@@ -553,6 +579,24 @@ async def ubb_inventory_check(guild_id: int, author_id: int, item_id: str, amoun
         return amount
     except unbelievaboat.errors.HTTPError:
         logging.exception(f"Failed to retrieve inventory item {item_id} for user {author_id}")
+        return 0
+
+
+async def server_inventory_check(guild_id: int, player_id: int, item_id: str, amount: int) -> int:
+    client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
+    try:
+        logging.info(f"Retrieving server inventory item {item_id}")
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
+            cursor = await conn.cursor()
+            await cursor.execute("SELECT item_quantity FROM RP_Players_Items WHERE Player_ID = ? and Item_ID = ?", (player_id, item_id,))
+            item = await cursor.fetchone()
+            if item is None:
+                logging.error(f"Item {item_id} not found in in inventory")
+                return 0
+            item_quantity = min(item[0], amount)
+            return item_quantity
+    except unbelievaboat.errors.HTTPError:
+        logging.exception(f"Failed to retrieve server inventory item {item_id}")
         return 0
 
 
@@ -684,27 +728,54 @@ class CharacterCommands(commands.Cog, name='character'):
         embed = discord.Embed(title=f"Character Help", description=f'This is a list of Character commands',
                               colour=discord.Colour.blurple())
         try:
-            embed.add_field(name=f'**Register**', value=f'Register your character!', inline=False)
-            embed.add_field(name=f'**Retire**', value=f'Retire a registered character!', inline=False)
-            embed.add_field(name=f'**levelup**', value=f'Use Medium Jobs from the unbelievaboat shop.', inline=False)
-            embed.add_field(name=f'**trialup**', value=f'Use Trial Catch Ups from the unbelievaboat shop', inline=False)
-            embed.add_field(name=f'**Pouch**', value=f'Use Gold Pouches from the unbelievaboat shop.', inline=False)
-            embed.add_field(name=f'**Display**', value=f'View information about a character.', inline=False)
-            embed.add_field(name=f'**List**', value=f'View information about characters in a level range.',
-                            inline=False)
-            embed.add_field(name=f'**Edit**',
-                            value=f'Change the Character Name, Mythweavers, Image, Nickname, Titles, Description, Oath of your character, or color of your embed.',
-                            inline=False)
-            embed.add_field(name=f'**Entitle**',
-                            value=f'Use an approved title item from the unbelievaboat Store. NOTE: Your most famous title is the one that will be used.',
-                            inline=False)
-            embed.add_field(name=f'**Proposition**', value=f'Use your prestigious status to proposition an act.',
-                            inline=False)
-            embed.add_field(name=f'**Cap**', value=f'Stop yourself from leveling! For reasons only you understand.',
-                            inline=False)
-            embed.add_field(name=f'**Backstory**',
-                            value=f'Give your character a backstory if they do not already have one.',
-                            inline=False)
+            embed.add_field(
+                name="__**Character Commands**__",
+                value="""Commands related to characters\r\n
+                **/Character Backstory** - Give your character a backstory if they do not already have one. \n
+                **/Character Cap** - Set a cap on your character's level. \n
+                **/Character Edit** -  Edit a registered character or a character in stage. \n 
+                **/Character Levelup** - Consume jobs from your inventory to level up. \n
+                **/Character Pouch** - Consume gold pouches from your inventory to meet WPL. \n
+                **/Character Retire** - Retire a registered character. \n
+                **/Character Trialup** - Consume trial catch ups from your inventory to level up. \n
+                """, inline=False)
+            embed.add_field(
+                name="**__Display Commands__**",
+                value="""Commands related to displaying Character Info \r\n
+                **/character display level_range** - Display characters in a level range. \n
+                **/character display character** - Display information about a character. \n
+                """, inline=False)
+            embed.add_field(
+                name="**__Gold Commands__**",
+                value="""Commands related to gold for characters\r\n
+                **/Character gold buy** - Mark Gold Purchases from NPCs \n
+                **/Character Gold Consume** - Consume gold from your illiquid wealth to represent usage of items \n
+                **/Character Gold Claim** - Claim gold from downtime or other activities.  \n
+                **/Character Gold History** - View the gold audit history of a character. \n
+                **/Character Gold Send** - Send gold between characters. \n
+                """, inline=False)
+            embed.add_field(
+                name="__**Prestige Commands**__",
+                value="""Commands related to Prestige for characters\r\n
+                **/Character Prestige Display** - Display Prestige events in the store. \n
+                **/Character Prestige History** - Display your prestige request history. \n
+                **/Character Prestige Prestige** - Request a prestige event from the DM \n
+                """, inline=False)
+            embed.add_field(
+                name="__**Title Commands**__",
+                value="""Commands related to titles and entitling characters\r\n\
+                **/Character Title Display** - Display Titles available in the store.  \n
+                **/Character Title Swap** - Swap the Gender used in your title.  \n
+                **/Character Title Use** - Use a title from the store to give your character a new title.. \n
+                """, inline=False)
+            embed.add_field(
+                name="**__Mythweavers Commands__**",
+                value="""Commands related to Mythweavers for characters\r\n
+                **/Character Mythweavers Attributes** - Display Character Attributes and rolls  \n
+                **/Character Mythweavers Combat** - Display Character combat attributes and rolls \n
+                **/Character Mythweavers Skills** - Display character skills and rolls. \n
+                **/Character Mythweavers Upload** - Upload a mythweavers sheet to the database.\n
+                """, inline=False)
             await interaction.followup.send(embed=embed)
         except discord.errors.HTTPException:
             logging.exception(f"Error in help command")
@@ -723,11 +794,14 @@ class CharacterCommands(commands.Cog, name='character'):
                        nickname: str = None,
                        titles: str = None, description: str = None, oath: discord.app_commands.Choice[int] = 1,
                        color: str = '#5865F2', backstory: str = None):
+        """Command to handle registering a character for a player"""
         await interaction.response.defer(thinking=True, ephemeral=True)
+
         guild_id = interaction.guild_id
         author = interaction.user.name
         author_id = interaction.user.id
         time = datetime.datetime.now()
+
         oath_name = 'No Oath' if oath == 1 else oath.name
         oath_name = 'Offerings' if oath_name == 'Oath of Offerings' else oath_name
         oath_name = 'Poverty' if oath_name == 'Oath of Poverty' else oath_name
@@ -735,26 +809,34 @@ class CharacterCommands(commands.Cog, name='character'):
 
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
+
             try:
                 if character_name is not None:
                     true_character_name, character_name = name_fix(character_name)
+
                 else:
                     await interaction.followup.send(f"Character Name is required")
                     return
+
                 if nickname is not None:
                     _, nickname = name_fix(nickname)
+
                 if backstory is not None:
                     if len(backstory) > 2000:
                         await interaction.followup.send(
                             f"Backstory is too long, please shorten it or use a google doc.")
                         return
+
                 if titles is not None:
                     titles, _ = name_fix(titles)
+
                 if description is not None:
                     description = str.replace(description, ";", "")
+
                 if mythweavers is not None:
                     validate_mythweavers = shared_functions.validate_mythweavers(mythweavers)
                     validate_worldanvil = shared_functions.validate_worldanvil(mythweavers)
+
                     if not validate_mythweavers[0] and not validate_worldanvil[0]:
                         # Handle exceptions and compare step indicators
                         if validate_mythweavers[2] == -1 and validate_worldanvil[2] != -1:
@@ -766,60 +848,84 @@ class CharacterCommands(commands.Cog, name='character'):
                         else:
                             await interaction.followup.send(validate_worldanvil[1])
                         return
+
                 else:
                     await interaction.followup.send(f"Mythweavers link is required", ephemeral=True)
                     return
+
                 if image_link is not None:
                     image_link = str.replace(str.replace(image_link, ";", ""), ")", "")
                     image_link_valid = str.lower(image_link[0:5])
+
                     if image_link_valid != 'https':
                         await interaction.followup.send(f"Image link is missing HTTPS:")
                         return
+
                 else:
                     await interaction.followup.send(f"image link is required", ephemeral=True)
                     return
+
                 regex = r'^#(?:[0-9a-fA-F]{3}){1,2}$'
                 match = re.search(regex, color)
+
                 if len(color) == 7 and match:
+
                     await cursor.execute(
                         "SELECT Player_Name, Character_Name from Player_Characters where Character_Name = ?",
                         (character_name,))
                     results_prod = await cursor.fetchone()
+
                     await cursor.execute(
                         "SELECT Player_Name, Character_Name from A_STG_Player_Characters where Character_Name = ?",
                         (character_name,))
                     results_stg = await cursor.fetchone()
+
                     if results_prod is None and results_stg is None:
+
                         try:
-                            await cursor.execute("SELECT search from admin where identifier = 'Starting_Level'")
-                            starting_level = await cursor.fetchone()
+
+                            async with shared_functions.config_cache.lock:
+                                configs = shared_functions.config_cache.cache.get(guild_id)
+
+                                if configs:
+                                    starting_level = configs.get('Starting_Level')
+
                             await cursor.execute(
                                 "SELECT Minimum_Milestones, Milestones_to_level, WPL FROM Milestone_System where level = ?",
-                                (starting_level[0],))
+                                (starting_level,))
                             starting_level_info = await cursor.fetchone()
+
                             (base, milestones_to_level, wpl) = starting_level_info
+
                             sql = """insert into A_STG_Player_Characters (
                             Player_Name, Player_ID, Character_Name, True_Character_Name, 
                             Nickname, Titles, Description, 
                             Oath, Level, Tier, Milestones, Milestones_Required, Trials, Trials_Required, Color, Mythweavers, 
                             Image_Link, Backstory, Created_Date) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+
                             val = (
                                 author, author_id, character_name, true_character_name,
                                 nickname, titles, description,
-                                oath_name, starting_level[0], 0, base, milestones_to_level, 0, 0, color, mythweavers,
+                                oath_name, starting_level, 0, base, milestones_to_level, 0, 0, color, mythweavers,
                                 image_link, backstory, time)
                             await cursor.execute(sql, val)
                             await conn.commit()
                             embed = await stg_character_embed(guild_id, character_name)
+
                             if isinstance(embed, tuple):
                                 await interaction.followup.send(embed=embed[0], content=embed[1])
+
                             else:
                                 await interaction.followup.send(
                                     "could not send message because of an error building the embed!")
+
                         except discord.errors.HTTPException:
+
                             embed[0].set_thumbnail(
                                 url=f'https://cdn.discordapp.com/attachments/977939245463392276/1194140952789536808/download.jpg?ex=65af456d&is=659cd06d&hm=1613025f9f1c1263823881c91a81fc4b93831ff91df9f4a84c813e9fab6467e9&')
+
                             embed[0].set_footer(text=f'Oops! You used a bad URL, please fix it.')
+
                             await interaction.followup.send(embed=embed)
                             sql = "Update A_STG_Player_Characters SET Image_Link = ? AND Mythweavers = ? WHERE Character_Name = ?"
                             val = (
@@ -828,10 +934,12 @@ class CharacterCommands(commands.Cog, name='character'):
                                 character_name)
                             await cursor.execute(sql, val)
                             await conn.commit()
+
                     else:
                         await interaction.followup.send(
                             f"{character_name} has already been registered by {author}",
                             ephemeral=True)
+
                 else:
                     await interaction.followup.send(f"Invalid Hex Color Code!", ephemeral=True)
             except (aiosqlite.Error, TypeError, ValueError) as e:
@@ -992,7 +1100,7 @@ class CharacterCommands(commands.Cog, name='character'):
                             await interaction.followup.send(
                                 f"{new_character_name} is already in use, please choose a different name.")
                             return
-                        shared_functions.autocomplete_cache.clear()
+                        shared_functions.autocomplete_cache.cache.clear()
                         character_changes = shared_functions.CharacterChange(character_name=new_character_name,
                                                                              author=author,
                                                                              source='Character Edit')
@@ -1121,16 +1229,16 @@ class CharacterCommands(commands.Cog, name='character'):
                                                       color=int(color[1:], 16))
                                 embed.set_author(name=f'{interaction.user.name}')
                                 embed.set_thumbnail(url=f'{image_link}')
-                                await cursor.execute(
-                                    "SELECT Search From Admin Where Identifier = ?",
-                                    ('Char_Eventlog_Channel',))
-                                channel_id = await cursor.fetchone()
+                                async with shared_functions.config_cache.lock:
+                                    configs = shared_functions.config_cache.cache.get(guild_id)
+                                    if configs:
+                                        channel_id = configs.get('Char_Eventlog_Channel')
                                 if not channel_id:
                                     await interaction.followup.send(f"Channel ID was not found in admin!")
                                     return
-                                channel = guild.get_channel(int(channel_id[0]))
+                                channel = guild.get_channel(int(channel_id))
                                 if not channel:
-                                    channel = await guild.fetch_channel(int(channel_id[0]))
+                                    channel = await guild.fetch_channel(int(channel_id))
                                 thread_message = await channel.fetch_message(info_thread_message)
                                 await thread_message.edit(embed=embed)
                                 thread_logging = interaction.guild.get_channel(info_thread_id)
@@ -1217,9 +1325,15 @@ class CharacterCommands(commands.Cog, name='character'):
                                 ephemeral=True
                             )
                         else:
-                            await cursor.execute("SELECT Search from Admin Where Identifier = 'UBB_Medium_Job'")
-                            item_id = await cursor.fetchone()
-                            item = await ubb_inventory_check(guild_id, interaction.user.id, item_id[0], amount)
+                            async with shared_functions.config_cache.lock:
+                                configs = shared_functions.config_cache.cache.get(guild_id)
+                                if configs:
+                                    item_id = configs.get('UBB_Medium_Job')
+                                    custom_store = configs.get('Use_Custom_Store')
+                            if not custom_store:
+                                item = await ubb_inventory_check(guild_id, interaction.user.id, item_id, amount)
+                            else:
+                                item = await server_inventory_check(guild_id, interaction.user.id, item_id, amount)
                             if item == 0:
                                 await interaction.followup.send(
                                     f"Insufficient Medium Jobs to level up {character_name}.",
@@ -1262,7 +1376,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                 )
                                 if tier != mythic_results[0]:
                                     character_updates.mythic_package = (
-                                        mythic_results[0], mythic_results[1], mythic_results[4])
+                                        mythic_results[0], mythic_results[1], mythic_results[3])
                                 await shared_functions.update_character(
                                     guild_id=guild_id,
                                     change=character_updates
@@ -1279,8 +1393,17 @@ class CharacterCommands(commands.Cog, name='character'):
                                     milestones_total=base,
                                     milestones_remaining=new_level_info[4]
                                 )
-                                await client.delete_inventory_item(guild_id, interaction.user.id, item_id[0], used)
-                                await client.close()
+                                if not custom_store:
+                                    await client.delete_inventory_item(guild_id, interaction.user.id, item_id, used)
+                                    await client.close()
+                                else:
+                                    await RP_Commands.handle_use(
+                                        db=conn,
+                                        interaction=interaction,
+                                        user_id=interaction.user.id,
+                                        item_id=item_id,
+                                        amount=used
+                                    )
                                 if mythic_results[0] != tier:
                                     character_changes.tier = mythic_results[0]
                                     character_changes.trials = mythic_results[1]
@@ -1326,26 +1449,35 @@ class CharacterCommands(commands.Cog, name='character'):
                         )
                     else:
                         (character_name, personal_cap, level, tier, trials, logging_thread_id) = player_info
-                        character_max_mythic = await get_max_mythic(cursor, guild_id, level)
+                        character_max_mythic = await get_max_mythic(guild_id, level)
+                        print(character_max_mythic)
                         if tier >= character_max_mythic:
                             await interaction.followup.send(
                                 f"{character_name} is already at the maximum tier of {character_max_mythic}.",
                                 ephemeral=True
                             )
                         else:
-                            await cursor.execute("SELECT Search from Admin Where Identifier = 'UBB_Mythic_Trial'")
-                            item_id = await cursor.fetchone()
-                            item = await ubb_inventory_check(guild_id, interaction.user.id, item_id[0], amount)
+                            async with shared_functions.config_cache.lock:
+                                configs = shared_functions.config_cache.cache.get(guild_id)
+                                if configs:
+                                    item_id = configs.get('UBB_Mythic_Trial')
+                                    use_custom_store = configs.get('Use_Custom_Store')
+                            if not use_custom_store:
+                                item = await ubb_inventory_check(guild_id, interaction.user.id, item_id, amount)
+                            else:
+                                item = await server_inventory_check(guild_id, interaction.user.id, item_id, amount)
+
                             if item == 0:
                                 await interaction.followup.send(
                                     f"Insufficient Mythic Trials to apply to {character_name}.",
                                     ephemeral=True
                                 )
+
                             else:
                                 used = 0
                                 mythic_results = None
                                 (tier, total_trials, trials_remaining, trial_change) = (0, 0, 0, 0)
-                                while used < item and tier <= character_max_mythic:
+                                while used < item and tier < character_max_mythic:
                                     used += 1
                                     mythic_results = await mythic_calculation(
                                         character_name=character_name,
@@ -1354,7 +1486,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                         trial_change=1,
                                         tier=tier,
                                         guild_id=guild_id)
-                                    (tier, total_trials, trials_remaining, trial_change) = mythic_results
+                                    (tier, trials, trials_remaining, trial_change) = mythic_results
 
                                 if not mythic_results:
                                     await interaction.followup.send(
@@ -1363,7 +1495,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                     return
 
                                 character_updates = shared_functions.UpdateCharacterData(
-                                    mythic_package=(tier, total_trials, trials_remaining),
+                                    mythic_package=(tier, trials, trials_remaining),
                                     character_name=character_name
                                 )
                                 await shared_functions.update_character(
@@ -1380,14 +1512,26 @@ class CharacterCommands(commands.Cog, name='character'):
                                     tier=tier,
                                     trial_change=used,
                                     trials_remaining=trials_remaining,
-                                    trials=total_trials)
+                                    trials=trials)
 
-                                character_log = await shared_functions.log_embed(character_changes, guild,
-                                                                                 logging_thread_id, self.bot)
+                                character_log = await shared_functions.log_embed(
+                                    character_changes,
+                                    guild,
+                                    logging_thread_id,
+                                    self.bot)
                                 await interaction.followup.send(embed=character_log, ephemeral=True)
-                                client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
-                                await client.delete_inventory_item(guild_id, interaction.user.id, item_id[0], used)
-                                await client.close()
+                                if not use_custom_store:
+                                    client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
+                                    await client.delete_inventory_item(guild_id, interaction.user.id, item_id, used)
+                                    await client.close()
+                                else:
+                                    await RP_Commands.handle_use(
+                                        db=conn,
+                                        interaction=interaction,
+                                        user_id=interaction.user.id,
+                                        item_id=item_id,
+                                        amount=used
+                                    )
                 except aiosqlite.Error as e:
                     logging.exception(f"A SQLite error occurred in the trialup command for: '{character_name}!: {e}")
                     await interaction.followup.send(
@@ -1439,10 +1583,15 @@ class CharacterCommands(commands.Cog, name='character'):
                                 ephemeral=True
                             )
                         else:
-                            gold_pouch -= gold_value_max
-                            await cursor.execute("SELECT Search from Admin Where Identifier = 'UBB_Gold_Pouch'")
-                            item_id = await cursor.fetchone()
-                            item = await ubb_inventory_check(guild_id, interaction.user.id, item_id[0], 1)
+                            async with shared_functions.config_cache.lock:
+                                configs = shared_functions.config_cache.cache.get(guild_id)
+                                if configs:
+                                    item_id = configs.get('UBB_Gold_Pouch')
+                                    custom_store = configs.get('Use_Custom_Store')
+                            if not custom_store:
+                                item = await ubb_inventory_check(guild_id, interaction.user.id, item_id, 1)
+                            else:
+                                item = await server_inventory_check(guild_id, interaction.user.id, item_id, 1)
                             if item <= 0:
                                 await interaction.followup.send(
                                     f"Insufficient Gold Pouches to apply to {character_name}.",
@@ -1456,10 +1605,10 @@ class CharacterCommands(commands.Cog, name='character'):
                                     author_id=interaction.user.id,
                                     level=level,
                                     oath=oath,
-                                    gold=gold,
-                                    gold_value=gold_value,
-                                    gold_value_max=gold_value_max,
-                                    gold_change=gold_pouch - gold_value_max,
+                                    gold=Decimal(gold),
+                                    gold_value=Decimal(gold_value),
+                                    gold_value_max=Decimal(gold_value_max),
+                                    gold_change=Decimal(gold_pouch - gold_value_max),
                                     gold_value_change=Decimal(0),
                                     gold_value_max_change=Decimal(0),
                                     source='Gold Pouch',
@@ -1473,19 +1622,32 @@ class CharacterCommands(commands.Cog, name='character'):
                                     )
                                 else:
                                     client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
-                                    await client.delete_inventory_item(guild_id, interaction.user.id, item_id[0])
+                                    if not custom_store:
+                                        await client.delete_inventory_item(guild_id, interaction.user.id, item_id)
+                                        await client.close()
+                                    else:
+                                        await RP_Commands.handle_use(
+                                            db=conn,
+                                            interaction=interaction,
+                                            user_id=interaction.user.id,
+                                            item_id=item_id,
+                                            amount=1,
+                                        )
+
                                     character_updates = shared_functions.UpdateCharacterData(
+
                                         gold_package=(
                                             calculated_gold, calculated_gold_value, calculated_gold_value_max),
-                                        character_name=character_name
-                                    )
+                                        character_name=character_name)
+
                                     await shared_functions.update_character(
                                         guild_id=guild_id,
-                                        change=character_updates
-                                    )
+                                        change=character_updates)
+
                                     await shared_functions.character_embed(
                                         character_name=character_name,
                                         guild=guild)
+
                                     character_changes = shared_functions.CharacterChange(
                                         character_name=character_name,
                                         author=author,
@@ -1493,8 +1655,12 @@ class CharacterCommands(commands.Cog, name='character'):
                                         gold_change=calculated_difference,
                                         gold=calculated_gold,
                                         gold_value=calculated_gold_value)
-                                    character_log = await shared_functions.log_embed(character_changes, guild,
-                                                                                     logging_thread_id, self.bot)
+
+                                    character_log = await shared_functions.log_embed(
+                                        character_changes,
+                                        guild,
+                                        logging_thread_id,
+                                        self.bot)
                                     await interaction.followup.send(embed=character_log, ephemeral=True)
             except aiosqlite.Error as e:
                 logging.exception(f"A SQLite error occurred in the pouch command for: '{character_name}!: {e}")
@@ -1523,8 +1689,12 @@ class CharacterCommands(commands.Cog, name='character'):
         try:
             offset = 1
             limit = 20
-            view = TitleShopView(user_id=interaction.user.id, guild_id=guild_id, offset=offset, limit=limit,
-                                 interaction=interaction)
+            view = TitleShopView(
+                user_id=interaction.user.id,
+                guild_id=guild_id,
+                offset=offset,
+                limit=limit,
+                interaction=interaction)
             await view.send_initial_message()
         except (TypeError, ValueError) as e:
             logging.exception(f"an error occurred attempting to generate display command!': {e}")
@@ -1571,6 +1741,7 @@ class CharacterCommands(commands.Cog, name='character'):
                     else:  # Title Found
                         title_name = title_information[2] if gender.value == 1 else title_information[3]
                         title_fame = 0 if title_information is None else title_information[1]
+                        title_id = title_information[0]
                         if player_title is not None:
                             logging.info(
                                 f"Player has a title {player_title}, validating if it is superior to the new title.")
@@ -1586,11 +1757,25 @@ class CharacterCommands(commands.Cog, name='character'):
                                 return
                             else:  # New Title is superior, remove fame from the older title.
                                 title_fame -= previous_title_information[1]
-                        ubb_validation = await ubb_inventory_check(guild_id,
-                                                                   interaction.user.id,
-                                                                   title_information[0],
-                                                                   1)
-                        if ubb_validation == 0:  # UBB Validation to ensure they have the title in their inventory.
+
+                        async with shared_functions.config_cache.lock:
+                            configs = shared_functions.config_cache.cache.get(guild_id)
+                            if configs:
+                                custom_store = configs.get('Use_Custom_Store')
+                        if not custom_store:
+                            item_validation = await ubb_inventory_check(
+                                guild_id,
+                                interaction.user.id,
+                                title_id,
+                                1)
+                        else:
+                            item_validation = await server_inventory_check(
+                                guild_id,
+                                interaction.user.id,
+                                title_id,
+                                1)
+
+                        if item_validation == 0:  # UBB Validation to ensure they have the title in their inventory.
                             await interaction.followup.send(
                                 f"Insufficient titles to apply to {character_name}.",
                                 ephemeral=True
@@ -1607,9 +1792,16 @@ class CharacterCommands(commands.Cog, name='character'):
                                 "UPDATE Player_Characters SET Title = ?, Fame = ?, prestige = ? WHERE Character_Name = ?",
                                 (title_name, total_fame, total_prestige, character_name))
                             await conn.commit()
-                            client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
-                            await client.delete_inventory_item(guild_id, interaction.user.id, title_information[0])
-                            await client.close()
+                            if not custom_store:
+                                client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
+                                await client.delete_inventory_item(guild_id, interaction.user.id, title_id)
+                                await client.close()
+                            else:
+                                await RP_Commands.handle_use(
+                                    db=conn,
+                                    interaction=interaction,
+                                    user_id=interaction.user.id,
+                                    item_id=title_id)
                             await shared_functions.character_embed(
                                 character_name=character_name,
                                 guild=guild)
@@ -1621,8 +1813,11 @@ class CharacterCommands(commands.Cog, name='character'):
                                 fame_change=adjusted_fame,
                                 prestige=total_prestige,
                                 prestige_change=adjusted_prestige)
-                            character_log = await shared_functions.log_embed(character_changes, guild,
-                                                                             logging_thread_id, self.bot)
+                            character_log = await shared_functions.log_embed(
+                                character_changes,
+                                guild,
+                                logging_thread_id,
+                                self.bot)
                             await interaction.followup.send(embed=character_log, ephemeral=True)
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(f"An error occurred in the retire command whilst looking for '{character_name}': {e}")
@@ -1858,7 +2053,6 @@ class CharacterCommands(commands.Cog, name='character'):
                     content=content
                 )
                 await view.send_initial_message()
-                message = await interaction.original_response()
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
                 f"An error occurred in the 'request' command for '{character_name}': {e}"
@@ -2251,8 +2445,11 @@ class CharacterCommands(commands.Cog, name='character'):
                 else:
                     (character_name, article_id, mythweavers, logging_thread_id) = character_info
                     if not article_id:
-                        await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'WA_Backstory_Category'")
-                        category = await cursor.fetchone()
+                        async with shared_functions.config_cache.lock:
+                            configs = shared_functions.config_cache.cache.get(guild_id)
+                            if configs:
+                                category = configs.get('WA_Backstory_Category')
+
                         if not category:
                             await interaction.followup.send(
                                 "Backstory category not found in the database.",
@@ -2430,7 +2627,7 @@ class CharacterCommands(commands.Cog, name='character'):
                             else:
                                 (target_player_id, character_to, target_level, target_oath, target_gold,
                                  target_gold_value, target_gold_value_max, target_logging_thread_id) = recipient_info
-                                print("I got this far")
+
                                 gold_results = await gold_calculation(
                                     guild_id=guild_id,
                                     character_name=character_from,
@@ -2830,7 +3027,9 @@ class CharacterCommands(commands.Cog, name='character'):
                     )
                     return
                 else:
-                    (fortitude, reflex, will, initiative, hit_points, armor_class, touch_armor_class, cmd, melee, ranged, cmb) = attributes
+                    (
+                    fortitude, reflex, will, initiative, hit_points, armor_class, touch_armor_class, cmd, melee, ranged,
+                    cmb) = attributes
                     embed = discord.Embed(
                         title=f"Defences for {character_name}",
                         description=f"**Hit Points**: {hit_points}\n"
@@ -2840,7 +3039,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                     f"**Melee**: {melee} **Ranged**: {ranged} **CMB**: {cmb}"
                     )
                     await interaction.followup.send(embed=embed)
-                    combat_dict= {
+                    combat_dict = {
                         'Fortitude': fortitude,
                         'Reflex': reflex,
                         'Will': will,
@@ -2874,7 +3073,7 @@ class CharacterCommands(commands.Cog, name='character'):
             await interaction.response.defer(thinking=True, ephemeral=True)
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as conn:
                 cursor = await conn.cursor()
-                print(character_name, ability_name)
+
                 await cursor.execute(
                     "SELECT Character_Name, Skill_Name, Ability, Skill_Rank, Skill_Modifier FROM Player_Characters_Skills WHERE Character_Name = ? AND Ability = ?",
                     (character_name, ability_name.title())
@@ -2955,7 +3154,7 @@ class CharacterCommands(commands.Cog, name='character'):
                         modifiers=attributes_dict
                     )
                     await interaction.followup.send(embed=embed, view=view)
-        except(aiosqlite.Error, TypeError, ValueError) as e:
+        except (aiosqlite.Error, TypeError, ValueError) as e:
             await interaction.followup.send(f"An error occurred in the attributes command: {e}")
             logging.exception(f"An error occurred in the attributes command: {e}")
 
@@ -2998,11 +3197,13 @@ class RetirementView(shared_functions.SelfAcknowledgementView):
                 await logging_thread.edit(name=f"{self.character_name} - Retired")
 
                 # Fetch channel ID
-                await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Accepted_Bio_Channel'")
-                channel_id_row = await cursor.fetchone()
+                async with shared_functions.config_cache.lock:
+                    configs = shared_functions.config_cache.cache.get(interaction.guild_id)
+                    if configs:
+                        channel_id_row = configs.get('Accepted_Bio_Channel')
                 if not channel_id_row:
                     return f"No channel found with Identifier 'Accepted_Bio_Channel' in Admin table."
-                channel_id = channel_id_row[0]
+                channel_id = channel_id_row
 
                 # Fetch the bio channel
                 bio_channel = interaction.guild.get_channel(channel_id)
@@ -3033,17 +3234,18 @@ class RetirementView(shared_functions.SelfAcknowledgementView):
                 # Proceed with deletion
                 sql_delete = """
                     DELETE FROM Player_Characters 
-                    WHERE Player_ID = ? AND (Character_Name = ? OR Nickname = ?)
+                    WHERE Character_Name = ?
                 """
-                await cursor.execute(sql_delete, (interaction.user.id, self.character_name, self.character_name))
+                await cursor.execute(sql_delete, (self.character_name,))
                 await conn.commit()
                 self.embed = discord.Embed(
                     title="Character Retirement",
                     description=f"Character '{self.character_name}' has been successfully retired and deleted from the database."
                 )
-                await self.message.edit(
+                await interaction.edit_original_response(
                     content="Character successfully retired and deleted from the database.",
-                    view=self.embed
+                    embed=self.embed,
+                    view=None
                 )
             except Exception as e:
                 logging.exception(f"Failed to delete character '{self.character_name}': {e}")
@@ -3121,7 +3323,7 @@ class PrestigeShopView(shared_functions.ShopView):
     async def update_results(self):
         """Fetch the title results for the current page."""
         statement = """
-            SELECT ID, fame_Required, Prestige_Cost, Name, Effect, Use_Limit
+            SELECT fame_Required, Prestige_Cost, Name, Effect, Use_Limit
             FROM Store_Fame 
             LIMIT ? OFFSET ?
         """
@@ -3135,9 +3337,10 @@ class PrestigeShopView(shared_functions.ShopView):
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(title="Fame Store", description=f"Page {current_page} of {total_pages}")
         for fame in self.results:
-            self.embed.add_field(name=f'**Name**: {fame[2]}',
-                                 value=f'**Fame Required**: {fame[0]} **Prestige Cost**: {fame[1]}, **Limit**: {fame[4]} '
-                                       f'\r\n **Effect**: {fame[3]}',
+            (fame_required, prestige_cost, name, effect, limit) = fame
+            self.embed.add_field(name=f'**Name**: {name}',
+                                 value=f'**Fame Required**: {fame_required} **Prestige Cost**: {prestige_cost}, **Limit**: {limit} '
+                                       f'\r\n **Effect**: {effect}',
                                  inline=False)
 
     async def get_max_items(self):
@@ -3785,7 +3988,7 @@ class AttributesView(discord.ui.View):
 
         async def callback(interaction: discord.Interaction):
             roll = random.randint(1, 20)
-            content =f"**Rolling :game_die: {attribute.capitalize()}** base: {roll}: total: {roll + self.modifiers[attribute]}"
+            content = f"**Rolling :game_die: {attribute.capitalize()}** base: {roll}: total: {roll + self.modifiers[attribute]}"
             content += ":broken_heart: **Critical Failure**" if roll == 1 else ""
             content += ":sparkles: **Critical Success**" if roll == 20 else ""
             await interaction.response.send_message(content=content)
