@@ -18,7 +18,7 @@ import discord
 import matplotlib.pyplot as plt
 import numpy as np
 import pytz
-from dateutil import parser
+from dateutil import parser, tz
 from discord import app_commands
 from dotenv import load_dotenv
 from google.oauth2 import service_account
@@ -546,10 +546,11 @@ async def rp_inventory_autocomplete(
     data = []
     guild_id = interaction.guild.id
     current = unidecode(current.lower())
+    print(current)
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
             # Correct parameterized query
-            cursor = await db.execute("SELECT name FROM rp_players_items WHERE item_name LIKE ? and player_id = ? LIMIT 20",
+            cursor = await db.execute("SELECT item_name FROM rp_players_items WHERE item_name LIKE ? and player_id = ? LIMIT 20",
                                       (f"%{current}%", interaction.user.id))
             items_list = await cursor.fetchall()
 
@@ -1408,40 +1409,29 @@ def parse_hammer_time_to_timestamp(hammer_time_str: str) -> datetime:
     return datetime.fromisoformat(hammer_time_str)
 
 
-def validate_hammertime(
-        hammertime: Union[str, datetime]) -> Union[Tuple[bool, bool, Tuple[str, str, str, str]], Tuple[bool, str]]:
+def validate_hammertime(timestamp_str):
     try:
-        # Check if hammertime is already a 10-digit Unix timestamp
-        if len(hammertime) == 10 or len(hammertime) == 16:
-            if len(hammertime) == 10:
-                # Use only the first 10 digits if length is 16 (e.g., with milliseconds)
-                hammertime = hammertime
-                dt_hammertime = datetime.fromtimestamp(int(hammertime))
-            elif len(hammertime) == 16:
-                hammertime = hammertime[3:13]
-                # Convert hammertime to datetime object
-                dt_hammertime = datetime.fromtimestamp(int(hammertime))
-            else:
-                raise ValueError("Invalid timestamp format. Please provide a valid timestamp.")
-            # Generate time formats for the Discord message
-            date = f"<t:{hammertime}:D>"
-            hour = f"<t:{hammertime}:t>"
-            arrival = f"<t:{hammertime}:R>"
-            success = True
+        timestamp = int(timestamp_str)
+        now = int(datetime.now().timestamp())
 
-            # Check if the datetime is more than 5 years in the past or in the future
-            if dt_hammertime > datetime.now() or dt_hammertime < (datetime.now() - timedelta(days=365 * 5)):
-                valid_time = True  # valid if it's in the future or more than 5 years ago
-            else:
-                valid_time = False  # invalid if it's in the past 5 years
+        # Define acceptable time range (e.g., within the next 5 years)
+        five_years_earlier = now - (5 * 365 * 24 * 60 * 60)
 
-            return success, valid_time, (date, hour, arrival, hammertime)
+        if five_years_earlier < timestamp < now:
+            return False, "The time you provided is in the past."
+        elif timestamp < five_years_earlier:
+            # Handle special cases like "99 years ago"
+            return True, False, ("Special Date", None, "Arrival", "Hammer Time")
         else:
-            return True, f"{hammertime}"
-    except (ValueError, IndexError) as e:
-        logging.exception(f"Error validating hammertime '{hammertime}': {e}")
-        return False, "Invalid timestamp format. Please provide a valid timestamp."
+            # Time is acceptable
+            date = f"<t:{timestamp}:D>"  # Long date
+            time = f"<t:{timestamp}:t>"  # Long time
+            arrival = f"<t:{timestamp}:R>"  # Relative time
+            hammer_time_stamp = timestamp_str  # Keep the timestamp string if needed
 
+            return True, True, (date, time, arrival, hammer_time_stamp)
+    except ValueError:
+        return False, "Invalid timestamp format. Please provide a valid timestamp."
 
 def convert_datetime_to_unix(time_str, timezone_str):
     # Define possible date formats
@@ -1469,14 +1459,9 @@ def convert_datetime_to_unix(time_str, timezone_str):
 async def complex_validate_hammertime(
         guild_id,
         author_name,
-        hammertime: Union[str, datetime]) -> Union[Tuple[bool, bool, Tuple[str, str, str, str]], Tuple[bool, str]]:
+        hammertime: Union[str, datetime]) -> Union[Tuple[bool, Tuple[bool, bool, Tuple[str, str, str, str]]], Tuple[bool, str]]:
     try:
-        # If hammertime is either 10 or 16 characters long, assume it's a date or timestamp format that can be validated directly.
-        if len(hammertime) == 10 or len(hammertime) == 16:
-            hammertime_result = validate_hammertime(hammertime)
-            return hammertime_result
-
-        # Otherwise, connect to the database to retrieve the user's UTC offset.
+        # Attempt to retrieve the user's timezone
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
@@ -1484,59 +1469,43 @@ async def complex_validate_hammertime(
             )
             utc_result = await cursor.fetchone()
 
-            # Proceed only if UTC offset was successfully retrieved.
-            if utc_result:
-                # Check if hammertime includes "AM" or "PM" and is likely in a 12-hour format (3 to 8 characters).
-                if (hammertime[-2:] == 'PM' or hammertime[-2:] == 'AM') and 3 < len(hammertime) < 8:
-                    midday = hammertime[-2:]  # Extract 'AM' or 'PM'
-                    midday_hours = 0 if midday == 'AM' else 12
-                    hammertime = hammertime[:-2].strip()  # Remove 'AM'/'PM' and strip whitespace
+        if not utc_result:
+            # Player not found, attempt to validate hammertime directly
+            return False, "Player not found in the database."
 
-                    # Get current time in user's timezone.
-                    now = datetime.now(tz=pytz.timezone(utc_result[0]))
+        (utc_offset,) = utc_result
+        user_timezone = tz.gettz(utc_offset)
 
-                    # Depending on length, set the hour and minute, handling single and double-digit hours.
-                    if len(hammertime) == 4:
-                        updated_time = now.replace(hour=int(hammertime[:1]) + midday_hours, minute=int(hammertime[2:]))
-                    elif len(hammertime) == 5:
-                        updated_time = now.replace(hour=int(hammertime[:2]) + midday_hours, minute=int(hammertime[3:]))
+        # Check if hammertime is a Unix timestamp
+        if hammertime.isdigit():
+            timestamp = int(hammertime)
+            # Convert timestamp to datetime in user's timezone
+            parsed_time = datetime.fromtimestamp(timestamp, tz=user_timezone)
+        else:
+            # Attempt to parse the input time
+            parsed_time = parser.parse(hammertime, fuzzy=True, default=datetime.now(tz=user_timezone))
+            # Ensure the parsed time is timezone-aware
+            if parsed_time.tzinfo is None:
+                parsed_time = parsed_time.replace(tzinfo=user_timezone)
 
-                    # If the computed time has already passed today, set it to the same time tomorrow.
-                    if now > updated_time:
-                        updated_time += timedelta(days=1)
+        # If the time has already passed, adjust to the next day
+        now = datetime.now(tz=user_timezone)
+        if parsed_time < now:
+            parsed_time += timedelta(days=1)
 
-                    # Convert to Unix timestamp and validate.
-                    create_timestamp = int(updated_time.timestamp())
-                    hammertime_result = validate_hammertime(str(create_timestamp))
+        # Convert to Unix timestamp
+        create_timestamp = int(parsed_time.timestamp())
 
-                # If hammertime is in 24-hour format without AM/PM, handle it here.
-                elif len(hammertime) == 5:
-                    now = datetime.now(tz=pytz.timezone(utc_result[0]))
-                    updated_time = now.replace(hour=int(hammertime[:2]), minute=int(hammertime[3:]))
+        # Validate the hammertime
+        hammertime_result = validate_hammertime(str(create_timestamp))
 
-                    if now > updated_time:
-                        updated_time += timedelta(days=1)
+        return True, hammertime_result
 
-                    create_timestamp = int(updated_time.timestamp())
-                    hammertime_result = validate_hammertime(str(create_timestamp))
-
-                # If hammertime format is non-standard, use a conversion function with UTC offset.
-                else:
-                    (utc_offset,) = utc_result
-                    create_timestamp = convert_datetime_to_unix(hammertime, utc_offset)
-                    hammertime_result = validate_hammertime(str(create_timestamp))
-
-                return hammertime_result
-
-            # If no UTC offset was found, return an error message.
-            else:
-                return False, "Player not found in the database."
-
-    # Exception handling for common errors like ValueError, IndexError, or database errors.
-    except (ValueError, IndexError, aiosqlite.Error) as e:
+    except Exception as e:
         logging.exception(f"Error validating hammertime '{hammertime}': {e}")
-        return False, "Invalid timestamp format. Please provide a valid timestamp."
-
+        # Attempt to validate hammertime directly
+        hammertime_result = validate_hammertime(hammertime)
+        return True, hammertime_result
 
 def validate_worldanvil_link(guild_id: int, article_id: str) -> (
         Optional)[dict]:
@@ -1938,7 +1907,7 @@ class ShopView(discord.ui.View):
                 view=self
             )
         else:
-            await interaction.response.send_message("You are on the first page.", ephemeral=True)
+            await interaction.followup.send("You are on the first page.", ephemeral=True)
 
     async def next_page(self, interaction: discord.Interaction):
         """Handle moving to the next page."""
@@ -1954,7 +1923,7 @@ class ShopView(discord.ui.View):
                 view=self
             )
         else:
-            await interaction.response.send_message("You are on the last page.", ephemeral=True)
+            await interaction.followup.send("You are on the last page.", ephemeral=True)
 
     async def last_page(self, interaction: discord.Interaction):
         """Handle moving to the last page."""
@@ -1971,7 +1940,7 @@ class ShopView(discord.ui.View):
                 view=self
             )
         else:
-            await interaction.response.send_message("You are on the last page.", ephemeral=True)
+            await interaction.followup.send("You are on the last page.", ephemeral=True)
 
     async def update_buttons(self):
         """Update the enabled/disabled state of buttons based on the current page."""

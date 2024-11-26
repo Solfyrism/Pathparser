@@ -117,7 +117,7 @@ async def on_ready():
     await bot.add_cog(RPCommands(bot))
     await bot.tree.sync()
     await reinstate_reminders(bot)
-    await reinstate_session_buttons(bot)
+    #await reinstate_session_buttons(bot)
     await reinstate_cache(bot)
     await reinstate_rp_cache(bot)
     await shared_functions.config_cache.initialize_configuration(discord_bot=bot)

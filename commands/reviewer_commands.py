@@ -184,6 +184,33 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
         parent=reviewer_group
     )
 
+    @reviewer_group.command(name='help', description="Display help with the reviewer commands.")
+    async def help(self, interaction: discord.Interaction):
+        """Help commands for the associated tree"""
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        embed = discord.Embed(
+            title=f"Gamemaster Help",
+            description=f'This is a list of GM administrative commands',
+            colour=discord.Colour.blurple())
+
+        embed.add_field(
+            name=f'__**Registration Commands**__',
+            value="""
+            Commands for Accepting or rejecting a character! \r\n
+            **/Reviewer Registration Manage** - manage a character's acceptance into the server! \n
+            **/Reviewer Registration Wipe** - Wipe out old characters from the stg table! \n
+            """, inline=False)
+
+        embed.add_field(
+            name=f'__**Customize Commands**__',
+            value="""
+            Commands for customizing a character! \r\n
+            **/Reviewer Customize Tradition** - manage a character's tradition! \n
+            **/Reviewer Customize Template** - Manage a character's template! \n
+                    """, inline=False)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     @registration_group.command(name='wipe', description="Clean out database entries older than a certain age!")
     @app_commands.describe(remove="if yes, remove all inactive players!")
     @app_commands.choices(

@@ -284,7 +284,7 @@ class AdminCommands(commands.Cog, name='admin'):
     @admin_group.command(name='help', description='Help commands for the character tree')
     async def help(self, interaction: discord.Interaction):
         """Display the help command for the admin commands."""
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             embed = discord.Embed(title=f"Admin Help", description=f'This is a list of Admin help commands',
                                   colour=discord.Colour.blurple())
@@ -347,6 +347,9 @@ class AdminCommands(commands.Cog, name='admin'):
                             **/admin RP_Store Cancel_Requirement** - List all roleplay channels in the server\n
                             **/admin RP_Store Edit** - Adjust the roleplay balance of a user.\n
                             **/Admin RP_Store Give** - Adjust the number of items a user has** \n
+                            """, inline=False)
+            embed.add_field(name=f'__**More RP Store Commands**__',
+                            value="""
                             **/Admin RP_Store Take** - Take Items from the inventory of a player \n
                             **/admin RP_Store List** - Adjust the roleplay balance of a role.\n
                             **/admin RP_Store Matching** - Adjust a roleplay setting.\n
@@ -373,7 +376,7 @@ class AdminCommands(commands.Cog, name='admin'):
                             **/Admin Test Worldanvil** - Test the worldanvil API\n""",
                             inline=False)
 
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=False)
         except discord.errors.HTTPException:
             logging.exception(f"Error in help command")
         finally:
@@ -393,7 +396,7 @@ class AdminCommands(commands.Cog, name='admin'):
         _, unidecode_name = name_fix(character_name)
         guild_id = interaction.guild_id
         guild = interaction.guild
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
@@ -406,7 +409,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 else:
                     if not player_info:
                         await interaction.followup.send(
-                            f"there is no {character_name} registered.", ephemeral=True)
+                            f"there is no {character_name} registered.", ephemeral=False)
                     else:
                         # Unpack discovered player information
                         (true_character_name, character_name, essence, thread_id) = player_info
@@ -429,7 +432,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         if not isinstance(updated_character, tuple):
                             await interaction.followup.send(
                                 f"An error occurred whilst updating the character's essence for '{character_name}'!.",
-                                ephemeral=True)
+                                ephemeral=False)
                             return
                         if isinstance(updated_character, tuple):
                             success = updated_character[0]
@@ -437,7 +440,7 @@ class AdminCommands(commands.Cog, name='admin'):
                                 # If the update failed, respond with the error message explaining why. Stop further steps.
                                 await interaction.followup.send(
                                     f"An error occurred whilst updating the character's essence for '{character_name}'!. \r\n {updated_character[1]}",
-                                    ephemeral=True)
+                                    ephemeral=False)
                                 return
 
                         # Log the character's essence change
@@ -458,12 +461,12 @@ class AdminCommands(commands.Cog, name='admin'):
                         # respond successfully with logged changes
                         await interaction.followup.send(embed=character_log,
                                                         content=f"Essence changes for {character_name} have been made: {essence_change}.",
-                                                        ephemeral=True)
+                                                        ephemeral=False)
             except (aiosqlite.Error, TypeError, ValueError, character_commands.CalculationAidFunctionError) as e:
                 logging.exception(
                     f"an error occurred for {interaction.user.name} whilst adjusting essence for {character_name}': {e}")
                 await interaction.followup.send(
-                    f"An error occurred whilst adjusting essence for '{character_name}' Error: {e}.", ephemeral=True)
+                    f"An error occurred whilst adjusting essence for '{character_name}' Error: {e}.", ephemeral=False)
 
     gold_group = discord.app_commands.Group(
         name='gold',
@@ -487,7 +490,7 @@ class AdminCommands(commands.Cog, name='admin'):
         _, unidecode_name = name_fix(character_name)
         guild_id = interaction.guild_id
         guild = interaction.guild
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
 
         # Convert input values to Decimal
         amount = Decimal(str(amount))
@@ -500,7 +503,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 if amount == 0 and effective_gold == 0 and lifetime_gold == 0:
                     await interaction.followup.send(
                         "If you don't intend to change anything, why initiate the command?",
-                        ephemeral=True
+                        ephemeral=False
                     )
                     return
 
@@ -519,7 +522,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 if not player_info:
                     await interaction.followup.send(
                         f"No character found with the name or nickname '{character_name}'.",
-                        ephemeral=True
+                        ephemeral=False
                     )
                     return
 
@@ -588,7 +591,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 await interaction.followup.send(
                     embed=character_log,
                     content=f"Gold changes for {character_name} have been made.",
-                    ephemeral=True
+                    ephemeral=False
                 )
             except Exception as e:
                 logging.exception(
@@ -596,7 +599,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 )
                 await interaction.followup.send(
                     f"An error occurred while adjusting gold for '{character_name}'. Error: {e}.",
-                    ephemeral=True
+                    ephemeral=False
                 )
 
     @gold_group.command(name="undo_transaction",
@@ -606,13 +609,13 @@ class AdminCommands(commands.Cog, name='admin'):
         guild_id = interaction.guild_id
         guild = interaction.guild
 
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             transactions_undo = await transactions_reverse(
                 guild_id=guild_id, transaction_id=transaction_id,
                 author_id=interaction.user.id, author_name=interaction.user.name, reason=reason)
             if isinstance(transactions_undo, str):
-                await interaction.followup.send(transactions_undo, ephemeral=True)
+                await interaction.followup.send(transactions_undo, ephemeral=False)
             else:
                 (new_transaction_id, related_transaction_id, character_name, thread_id, amount, gold_total,
                  gold_value_total,
@@ -659,13 +662,13 @@ class AdminCommands(commands.Cog, name='admin'):
                             character_name=character_name,
                             guild=guild)
                         content += f"\r\n undid related transaction {transaction_id} for {character_name} with a new transaction id of {new_transaction_id}."
-                await interaction.followup.send(embed=character_log, content=content, ephemeral=True)
+                await interaction.followup.send(embed=character_log, content=content, ephemeral=False)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
                 f"an error occurred for {interaction.user.name} whilst undoing a gold transaction with ID: {transaction_id}': {e}")
             await interaction.followup.send(
                 f"An error occurred whilst undoing a gold transaction with ID: '{transaction_id}' Error: {e}.",
-                ephemeral=True)
+                ephemeral=False)
 
     session_group = discord.app_commands.Group(
         name='session',
@@ -685,7 +688,7 @@ class AdminCommands(commands.Cog, name='admin'):
         guild_id = interaction.guild_id
         guild = interaction.guild
 
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
 
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
@@ -697,7 +700,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 session_info = await cursor.fetchone()
 
                 if not session_info:
-                    await interaction.followup.send(f'invalid session ID of {session_id}', ephemeral=True)
+                    await interaction.followup.send(f'invalid session ID of {session_id}', ephemeral=False)
 
                 else:
                     (gm_name, session_name, play_time, session_range, session_gold, session_essence, session_easy,
@@ -746,7 +749,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     if rewarded_gold < 0 or rewarded_easy < 0 or rewarded_medium < 0 or rewarded_hard < 0 or rewarded_deadly < 0 or rewarded_essence < 0 or rewarded_trials < 0:
                         await interaction.followup.send(
                             f"Minimum Session Rewards may only be 0, if a player receives a lesser reward, have them claim the transaction.",
-                            ephemeral=True)
+                            ephemeral=False)
 
                     else:
                         await cursor.execute(
@@ -757,7 +760,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         if not session_complex:
                             await interaction.followup.send(
                                 f"there are no players registered for this session.",
-                                ephemeral=True)
+                                ephemeral=False)
 
                         else:
                             embed = discord.Embed(title="Session Adjustment Report",
@@ -849,14 +852,14 @@ class AdminCommands(commands.Cog, name='admin'):
                                         value="Additional players have been adjusted, please check the session log for more information.",
                                         inline=False)
 
-                            await interaction.followup.send(embed=embed, ephemeral=True)
+                            await interaction.followup.send(embed=embed, ephemeral=False)
 
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(
                     f"an error occurred for {interaction.user.name} whilst adjusting session with ID {session_id}': {e}")
 
                 await interaction.followup.send(
-                    f"An error occurred whilst adjusting session with ID '{session_id}' Error: {e}.", ephemeral=True)
+                    f"An error occurred whilst adjusting session with ID '{session_id}' Error: {e}.", ephemeral=False)
 
     settings_group = discord.app_commands.Group(
         name='settings',
@@ -869,7 +872,7 @@ class AdminCommands(commands.Cog, name='admin'):
         """Display a player's inventory to identify their owned items and set the serverside items for pouches, milestones, and other"""
         guild_id = interaction.guild_id
         client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             shop = await client.get_inventory_items_all(guild_id, player.id)
             if shop is not None:
@@ -883,13 +886,13 @@ class AdminCommands(commands.Cog, name='admin'):
                         embed.add_field(name=f'**Additional Items**',
                                         value=f'Additional items exist, please narrow down the inventory for more information. Yes I could paginate this. No. I will not. Use a Dummy player with less items',
                                         inline=False)
-                await interaction.followup.send(embed=embed, ephemeral=True)
+                await interaction.followup.send(embed=embed, ephemeral=False)
             else:
                 await interaction.followup.send(f"This player does not have any items in their inventory.")
         except unbelievaboat.errors.HTTPError as e:
             logging.exception(f"An error occurred whilst trying to get the inventory for {player.name}: {e}")
             await interaction.followup.send(
-                f"An error occurred whilst trying to get the inventory for {player.name}: {e}", ephemeral=True)
+                f"An error occurred whilst trying to get the inventory for {player.name}: {e}", ephemeral=False)
 
     @settings_group.command(name='display',
                             description='Display server settings')
@@ -898,7 +901,7 @@ class AdminCommands(commands.Cog, name='admin'):
                       page_number: int = 1):
         """Display server setting information. This is used to know to where key server settings are pointing to."""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
 
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
@@ -916,7 +919,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     if not setting:
                         await interaction.followup.send(
                             f"Character '{setting}' not found.",
-                            ephemeral=True
+                            ephemeral=False
                         )
                         return
                     else:
@@ -948,7 +951,7 @@ class AdminCommands(commands.Cog, name='admin'):
             )
             await interaction.followup.send(
                 f"An error occurred whilst fetching data. Please try again later.",
-                ephemeral=True
+                ephemeral=False
             )
 
     @settings_group.command(name='update',
@@ -961,13 +964,13 @@ class AdminCommands(commands.Cog, name='admin'):
             cursor = await conn.cursor()
 
             try:
-                await interaction.response.defer(thinking=True, ephemeral=True)
+                await interaction.response.defer(thinking=True, ephemeral=False)
 
                 if not setting:
-                    await interaction.followup.send(f"cannot replace a search key with None", ephemeral=True)
+                    await interaction.followup.send(f"cannot replace a search key with None", ephemeral=False)
 
                 elif not revision:
-                    await interaction.followup.send(f"Yeah... that would break shit, no", ephemeral=True)
+                    await interaction.followup.send(f"Yeah... that would break shit, no", ephemeral=False)
 
                 else:
                     await cursor.execute(
@@ -985,7 +988,7 @@ class AdminCommands(commands.Cog, name='admin'):
 
                             if not channel:
                                 await interaction.followup.send("Error: Could not find the requested channel.",
-                                                                ephemeral=True)
+                                                                ephemeral=False)
                                 return
 
                         elif information[1] == 'Level':
@@ -996,13 +999,13 @@ class AdminCommands(commands.Cog, name='admin'):
                             if int(revision) > max_level[0]:
                                 await interaction.followup.send(
                                     f"Your server does not have a milestone system for above level {max_level[0]}",
-                                    ephemeral=True)
+                                    ephemeral=False)
                                 return
 
                             elif int(revision) < max_level[1]:
                                 await interaction.followup.send(
                                     f"Your server does not have a milestone system for below level {max_level[1]}",
-                                    ephemeral=True)
+                                    ephemeral=False)
                                 return
 
                         elif information[2] == 'Tier':
@@ -1013,7 +1016,7 @@ class AdminCommands(commands.Cog, name='admin'):
                             if int(revision) > max_tier[0]:
                                 await interaction.followup.send(
                                     f"Your server does not have a milestone system for above tier {max_tier[0]}",
-                                    ephemeral=True)
+                                    ephemeral=False)
                                 return
 
                         elif information[1] == 'item':
@@ -1030,11 +1033,11 @@ class AdminCommands(commands.Cog, name='admin'):
 
                                         if not item:
                                             await interaction.followup.send("Error: Could not find the requested item.",
-                                                                            ephemeral=True)
+                                                                            ephemeral=False)
                                             return
                                     except unbelievaboat.HTTPError as e:
                                         await interaction.followup.send(f"Error: Could not find the requested item. {e}",
-                                                                        ephemeral=True)
+                                                                        ephemeral=False)
                                         logging.error(f"Error: Could not find the requested item. {e}")
                                         return
 
@@ -1043,18 +1046,18 @@ class AdminCommands(commands.Cog, name='admin'):
                                     item = await cursor.fetchone()
                                     if not item:
                                         await interaction.followup.send("Error: Could not find the requested item.",
-                                                                        ephemeral=True)
+                                                                        ephemeral=False)
                                         return
 
                         await cursor.execute("Update Admin set Search = ? WHERE identifier = ?", (revision, setting))
                         await conn.commit()
                         await shared_functions.config_cache.load_configurations(guild_id=guild_id)
-                        await interaction.followup.send(f"Updated {setting} to {revision}", ephemeral=True)
+                        await interaction.followup.send(f"Updated {setting} to {revision}", ephemeral=False)
 
                     else:
                         await interaction.followup.send(
                             'The identifier you have supplied is incorrect.',
-                            ephemeral=True)
+                            ephemeral=False)
 
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(
@@ -1062,7 +1065,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 )
                 await interaction.followup.send(
                     f"An error occurred whilst updating data. Please try again later.",
-                    ephemeral=True
+                    ephemeral=False
                 )
 
     @settings_group.command()
@@ -1082,11 +1085,11 @@ class AdminCommands(commands.Cog, name='admin'):
                 content=content,
                 embed=view.embed,
                 view=view,
-                ephemeral=True
+                ephemeral=False
             )
 
         else:
-            await interaction.followup.send(f"I'M FIRING MY LAS--- What?", ephemeral=True)
+            await interaction.followup.send(f"I'M FIRING MY LAS--- What?", ephemeral=False)
 
     @settings_group.command(name='fame', description='Administrative commands for the fame store.')
     @app_commands.describe(modify="add, remove, or edit something in the store.")
@@ -1099,7 +1102,7 @@ class AdminCommands(commands.Cog, name='admin'):
                          modify: discord.app_commands.Choice[int]):
         """Add, edit, or remove items from the fame store."""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
@@ -1116,7 +1119,7 @@ class AdminCommands(commands.Cog, name='admin'):
                             f"Please provide all required information for adding a new item to the fame store. \r\n "
                             f"You provided: Name: {name}, Fame required: {fame_required}, Prestige Cost: {prestige_cost}, Limit: {limit} \r\n"
                             f"EFFECT: {effect}.",
-                            ephemeral=True)
+                            ephemeral=False)
                         return
 
                     else:
@@ -1130,7 +1133,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         embed.add_field(name=name,
                                         value=f"Fame Required: {fame_required}, Prestige Cost: {prestige_cost}, Limit: {limit} \r\n"
                                               f"Effect: {effect}")
-                        await interaction.followup.send(embed=embed, ephemeral=True)
+                        await interaction.followup.send(embed=embed, ephemeral=False)
 
                 elif modify.value == 1 and fame_item:
                     (info_name, info_fame_required, info_prestige_cost, info_limit, info_effect) = fame_item
@@ -1149,25 +1152,25 @@ class AdminCommands(commands.Cog, name='admin'):
                     embed.add_field(name=name,
                                     value=f"Fame Required: {fame_required}, Prestige Cost: {prestige_cost}, Limit: {limit} \r\n"
                                           f"Effect: {effect}")
-                    await interaction.followup.send(embed=embed, ephemeral=True)
+                    await interaction.followup.send(embed=embed, ephemeral=False)
 
                 elif modify.value == 2 and fame_item:
                     # Remove the item from the fame store
                     await cursor.execute("DELETE FROM Store_Fame WHERE Name = ?",
                                          (name,))
                     await conn.commit()
-                    await interaction.followup.send(f"Removed {name} from the fame store.", ephemeral=True)
+                    await interaction.followup.send(f"Removed {name} from the fame store.", ephemeral=False)
 
                 else:
                     await interaction.followup.send(
                         f"An error occurred whilst adjusting the fame store. Please ensure that the item exists and that all required fields are filled out",
-                        ephemeral=True)
+                        ephemeral=False)
 
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(
                     f"an error occurred for {interaction.user.name} whilst adjusting fame store': {e}")
                 await interaction.followup.send(
-                    f"An error occurred whilst adjusting fame store. Error: {e}.", ephemeral=True)
+                    f"An error occurred whilst adjusting fame store. Error: {e}.", ephemeral=False)
 
     @settings_group.command(name='titles', description='Administrative commands for the title store.')
     @app_commands.describe(modify="add, remove, or edit something in the store.")
@@ -1181,7 +1184,7 @@ class AdminCommands(commands.Cog, name='admin'):
                           modify: discord.app_commands.Choice[int] = 1):
         """Add, edit, or remove items from the fame store."""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
 
@@ -1197,7 +1200,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         await interaction.followup.send(
                             f"Please provide all required information for adding a new item to the fame store. \r\n "
                             f"You provided: Name: {masculine_name}/{feminine_name}, Fame bestowed: {fame}, Item_ID: {item_id}"
-                            f"EFFECT: {effect}.", ephemeral=True)
+                            f"EFFECT: {effect}.", ephemeral=False)
                         return
 
                     else:
@@ -1231,12 +1234,12 @@ class AdminCommands(commands.Cog, name='admin'):
                                 embed.add_field(name="Titles:", value=f"Updated Name: {masculine_name}/{feminine_name}")
                                 embed.add_field(name="Fame:", value=f"Fame bestowed: {fame}")
                                 embed.add_field(name="Item_ID:", value=f"Item_ID: {item_id}")
-                                await interaction.followup.send(embed=embed, ephemeral=True)
+                                await interaction.followup.send(embed=embed, ephemeral=False)
 
                             else:
                                 await interaction.followup.send(
                                     f"Item_ID: {item_id} not found in the inventory.",
-                                    ephemeral=True)
+                                    ephemeral=False)
 
                 elif modify_value == 1 and fame_item:
                     # Fame item was found, so update it instead of adding a new one.
@@ -1308,12 +1311,12 @@ class AdminCommands(commands.Cog, name='admin'):
                         embed.add_field(name="Titles:", value=f"Updated Name: {updated_masculine_name}/{updated_feminine_name}")
                         embed.add_field(name="Fame:", value=f"Fame bestowed: {updated_fame}")
                         embed.add_field(name="Item_ID:", value=f"Item_ID: {updated_ubb_id}")
-                        await interaction.followup.send(embed=embed, ephemeral=True)
+                        await interaction.followup.send(embed=embed, ephemeral=False)
 
                     else:
                         await interaction.followup.send(
                             f"Item_ID: {item_id} not found in inventory.",
-                            ephemeral=True)
+                            ephemeral=False)
 
                 elif modify_value == 2 and fame_item:
                     # CAST THE ITEM INTO THE FIRES OF MOUNT DOOM
@@ -1327,13 +1330,13 @@ class AdminCommands(commands.Cog, name='admin'):
                 else:
                     await interaction.followup.send(
                         f"An error occurred whilst adjusting the title store. Please ensure that the item exists and that all required fields are filled out",
-                        ephemeral=True)
+                        ephemeral=False)
 
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(
                     f"an error occurred for {interaction.user.name} whilst adjusting title store': {e}")
                 await interaction.followup.send(
-                    f"An error occurred whilst adjusting title store. Error: {e}.", ephemeral=True)
+                    f"An error occurred whilst adjusting title store. Error: {e}.", ephemeral=False)
 
     level_group = discord.app_commands.Group(
         name='level',
@@ -1357,16 +1360,16 @@ class AdminCommands(commands.Cog, name='admin'):
         _, unidecode_name = name_fix(character_name)
         guild_id = interaction.guild_id
         guild = interaction.guild
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
 
                 if amount == 0 and misc_milestones == 0:
-                    await interaction.followup.send("No Change in Milestones!", ephemeral=True)
+                    await interaction.followup.send("No Change in Milestones!", ephemeral=False)
 
                 elif job == 'None' and misc_milestones == 0:
-                    await interaction.followup.send("No Change in Milestones!", ephemeral=True)
+                    await interaction.followup.send("No Change in Milestones!", ephemeral=False)
 
                 else:
                     await cursor.execute(
@@ -1375,7 +1378,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     player_info = await cursor.fetchone()
                     if not player_info:
                         await interaction.followup.send(f"There is no player character with this name or nickname.",
-                                                        ephemeral=True)
+                                                        ephemeral=False)
                     if player_info:
                         (true_character_name, character_name, thread_id, character_level, milestones, tier, trials,
                          personal_cap) = player_info
@@ -1440,19 +1443,19 @@ class AdminCommands(commands.Cog, name='admin'):
                         await interaction.followup.send(
                             embed=character_log,
                             content=f"milestone changes for {character_name} have been made.",
-                            ephemeral=True)
+                            ephemeral=False)
             except (aiosqlite.Error, TypeError, ValueError, character_commands.CalculationAidFunctionError) as e:
                 logging.exception(
                     f"an error occurred for {interaction.user.name} whilst adjusting milestones for {character_name}': {e}")
                 await interaction.followup.send(
-                    f"An error occurred whilst adjusting milestones for '{character_name}' Error: {e}.", ephemeral=True)
+                    f"An error occurred whilst adjusting milestones for '{character_name}' Error: {e}.", ephemeral=False)
 
     @level_group.command(name='cap', description='command for adjusting the level cap of the server')
     async def level_cap(self, interaction: discord.Interaction, new_level: int):
         """This allows the admin to adjust the server wide level cap"""
         guild_id = interaction.guild_id
         guild = interaction.guild
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
@@ -1461,11 +1464,11 @@ class AdminCommands(commands.Cog, name='admin'):
                 if new_level < level_minmax[0]:
                     await interaction.followup.send(
                         f"Your server does not have a milestone system for below level {level_minmax[0]}",
-                        ephemeral=True)
+                        ephemeral=False)
                 elif new_level > level_minmax[1]:
                     await interaction.followup.send(
                         f"Your server does not have a milestone system for above level {level_minmax[1]}",
-                        ephemeral=True)
+                        ephemeral=False)
                 else:
                     await cursor.execute("Select minimum_milestones FROM Milestone_System where Level = ?",
                                          (new_level,))
@@ -1577,18 +1580,18 @@ class AdminCommands(commands.Cog, name='admin'):
                                 cap_embed.add_field(name=f"Additional Characters",
                                                     value=f"{idx} additional characters have been adjusted.\r\n{additional_characters}",
                                                     inline=False)
-                            await interaction.followup.send(embed=cap_embed, ephemeral=True)
+                            await interaction.followup.send(embed=cap_embed, ephemeral=False)
                             logging.info(
                                 f"{interaction.user.name} has adjusted the tier cap to {new_level} for {guild.name} with {idx} characters adjusted.")
 
                         else:
                             await interaction.followup.send(
                                 f"You have increased your cap to {new_level}! However your server does not have any characters that meet the minimum milestone requirement it!",
-                                ephemeral=True)
+                                ephemeral=False)
 
                     else:
                         await interaction.followup.send(
-                            f"Your server does not have a milestone system for level {new_level}", ephemeral=True)
+                            f"Your server does not have a milestone system for level {new_level}", ephemeral=False)
 
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(
@@ -1597,7 +1600,7 @@ class AdminCommands(commands.Cog, name='admin'):
 
                 await interaction.followup.send(
                     f"An error occurred whilst fetching data. Please try again later.",
-                    ephemeral=True
+                    ephemeral=False
                 )
 
     @level_group.command(name='milestones',
@@ -1609,7 +1612,7 @@ class AdminCommands(commands.Cog, name='admin'):
     async def define_milestone(self, interaction: discord.Interaction, level: int, minimum_milestones: int):
         """This allows the admin to adjust the milestone floor of a level among other things."""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
@@ -1619,13 +1622,13 @@ class AdminCommands(commands.Cog, name='admin'):
                 if level < level_minmax[0] - 1:
                     await interaction.followup.send(
                         f"Your minimum server level was {level_minmax[0]} You cannot add levels which break the sequence!",
-                        ephemeral=True)
+                        ephemeral=False)
                     return
 
                 elif level > level_minmax[1] + 1:
                     await interaction.followup.send(
                         f"Your maximum server level was {level_minmax[1]}! You cannot add numbers which break the sequence!",
-                        ephemeral=True)
+                        ephemeral=False)
                     return
 
                 await cursor.execute(
@@ -1653,7 +1656,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         if lower_milestones_required < 0:
                             await interaction.followup.send(
                                 f"Your input of level: {level} minimum_milestones: {minimum_milestones} cannot be less than level: {lower_level} minimum_milestones: {lower_milestones}.",
-                                ephemeral=True)
+                                ephemeral=False)
                             return
                     await cursor.execute("UPDATE Milestone_System SET milestones_to_level = ? WHERE Level = ?",
                                          (lower_milestones_required, lower_level_info[0]))
@@ -1666,7 +1669,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     if minimum_milestones > higher_milestones:
                         await interaction.followup.send(
                             f"Your input of level: {level} minimum_milestones: {minimum_milestones} cannot be more than level: {higher_level} minimum_milestones: {higher_milestones}.",
-                            ephemeral=True)
+                            ephemeral=False)
                         return
                     center_milestones_required = higher_milestones - minimum_milestones
 
@@ -1688,12 +1691,12 @@ class AdminCommands(commands.Cog, name='admin'):
                         await conn.commit()
 
                         await interaction.followup.send(f"Level of {level} removed from milestone system.",
-                                                        ephemeral=True)
+                                                        ephemeral=False)
                     else:
                         await cursor.execute("UPDATE Milestone_System SET milestones_to_level = ? WHERE Level = ?",
                                              (center_milestones_required, level))
                         await interaction.followup.send(f"Level of {level} updated in milestone system.",
-                                                        ephemeral=True)
+                                                        ephemeral=False)
                 else:
                     wpl = higher_level_info[2] - 1 if not lower_level_info else lower_level_info[2] + 1
                     wpl_heroic = higher_level_info[3] - 1 if not lower_level_info else lower_level_info[3] + 1
@@ -1702,7 +1705,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         (level, minimum_milestones, center_milestones_required, wpl, wpl_heroic))
                     await interaction.followup.send(
                         f"Level of {level} added to milestone system. PLEASE REMEMBER TO UPDATE WPL VALUES.",
-                        ephemeral=True)
+                        ephemeral=False)
 
                 await conn.commit()
                 center_milestones_range = minimum_milestones if minimum_milestones != -1 else center_level_info[1]
@@ -1784,7 +1787,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 )
                 await interaction.followup.send(
                     f"An error occurred whilst fetching data. Please try again later.",
-                    ephemeral=True
+                    ephemeral=False
                 )
 
     @level_group.command(name='wpl',
@@ -1792,7 +1795,7 @@ class AdminCommands(commands.Cog, name='admin'):
     async def define_wpl(self, interaction: discord.Interaction, level: int, wpl: int, wpl_heroic: int):
         """This allows the admin to adjust the milestone floor of a level among other things."""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
@@ -1813,7 +1816,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         if wpl < lower_wpl or wpl_heroic < lower_wpl_heroic:
                             await interaction.followup.send(
                                 f"Your input of level: {level} WPL: {wpl} wpl_heroic: {wpl_heroic} cannot be less than level: {lower_level} WPL: {lower_wpl} Heroic WPL: {lower_wpl_heroic}.",
-                                ephemeral=True)
+                                ephemeral=False)
                             return
 
                     if higher_level_info:
@@ -1822,7 +1825,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         if wpl > higher_wpl or wpl_heroic < higher_wpl_heroic:
                             await interaction.followup.send(
                                 f"Your input of level: {level} WPL: {wpl} wpl_heroic: {wpl_heroic} cannot be less than level: {higher_level} WPL: {higher_wpl} Heroic WPL: {higher_wpl_heroic}.",
-                                ephemeral=True)
+                                ephemeral=False)
                             return
 
                     await cursor.execute("UPDATE Milestone_System SET WPL = ?, WPL_Heroic = ? WHERE Level = ?",
@@ -1831,11 +1834,11 @@ class AdminCommands(commands.Cog, name='admin'):
 
                     await interaction.followup.send(
                         f"Level of {level} updated in milestone system. WPL: {wpl} Heroic WPL: {wpl_heroic}",
-                        ephemeral=True)
+                        ephemeral=False)
 
                 else:
                     await interaction.followup.send(
-                        f"Your server does not have a milestone system for level {level}", ephemeral=True)
+                        f"Your server does not have a milestone system for level {level}", ephemeral=False)
 
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(
@@ -1843,7 +1846,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 )
                 await interaction.followup.send(
                     f"An error occurred whilst fetching data. Please try again later.",
-                    ephemeral=True
+                    ephemeral=False
                 )
 
     @level_group.command(name='jobs', description='command for adjusting the job rewards for a session.')
@@ -1851,7 +1854,7 @@ class AdminCommands(commands.Cog, name='admin'):
                           medium: typing.Optional[int], hard: typing.Optional[int], deadly: typing.Optional[int]):
         """This allows the admin to adjust the milestone floor of a level among other things."""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
 
@@ -1871,12 +1874,12 @@ class AdminCommands(commands.Cog, name='admin'):
                     if new_easy < 0 or new_medium < 0 or new_hard < 0 or new_deadly < 0:
                         await interaction.followup.send(
                             "Why do you hate your players so fucking much that you want to have them get a negative reward on a job?!",
-                            ephemeral=True)
+                            ephemeral=False)
 
                     elif new_easy > new_medium or new_medium > new_hard or new_hard > new_deadly:
                         await interaction.followup.send(
                             f"Please give your players higher rewards on more punishing jobs. the punishment is the job. \r\n Easy: {new_easy}, Medium: {new_medium}, Hard: {new_hard}, Deadly: {new_deadly}",
-                            ephemeral=True)
+                            ephemeral=False)
 
                     else:
                         await cursor.execute(
@@ -1885,11 +1888,11 @@ class AdminCommands(commands.Cog, name='admin'):
                         await conn.commit()
                         await interaction.followup.send(
                             f"Successfully updated level: {level} to have the following rewards \r\n Easy: {new_easy}, Medium: {new_medium}, Hard: {new_hard}, Deadly: {new_deadly}",
-                            ephemeral=True)
+                            ephemeral=False)
 
                 else:
                     await interaction.followup.send(f"Your server does not have a milestone system for level {level}",
-                                                    ephemeral=True)
+                                                    ephemeral=False)
 
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(
@@ -1897,7 +1900,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 )
                 await interaction.followup.send(
                     f"An error occurred whilst fetching data. Please try again later.",
-                    ephemeral=True
+                    ephemeral=False
                 )
 
     @level_group.command(
@@ -1913,7 +1916,7 @@ class AdminCommands(commands.Cog, name='admin'):
             role: discord.Role
     ):
         """Allows the admin to adjust the associated levels with a role."""
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
 
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as conn:
@@ -1924,7 +1927,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 if min_level < level_minmax[0] or max_level > level_minmax[1]:
                     await interaction.followup.send(
                         f"Your server does not support levels below {level_minmax[0]} or above {level_minmax[1]}.",
-                        ephemeral=True
+                        ephemeral=False
                     )
                     return
 
@@ -1938,7 +1941,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 # Prepare progress message
                 progress_message = await interaction.followup.send(
                     "Processing level range adjustments...",
-                    ephemeral=True
+                    ephemeral=False
                 )
 
                 # Remove roles from players who no longer qualify
@@ -2030,7 +2033,7 @@ class AdminCommands(commands.Cog, name='admin'):
 
                 await interaction.followup.send(
                     f"Successfully updated role: {role.name} with level range {min_level}-{max_level}.",
-                    ephemeral=True
+                    ephemeral=False
                 )
 
         except Exception as e:
@@ -2039,7 +2042,7 @@ class AdminCommands(commands.Cog, name='admin'):
             )
             await interaction.followup.send(
                 "An error occurred while adjusting level ranges. Please try again later.",
-                ephemeral=True
+                ephemeral=False
             )
 
     @level_range.error
@@ -2047,13 +2050,13 @@ class AdminCommands(commands.Cog, name='admin'):
         if isinstance(error, checks.MissingPermissions):
             await interaction.response.send_message(
                 "You do not have permission to use this command.",
-                ephemeral=True
+                ephemeral=False
             )
         else:
             logging.exception(f"An error occurred in level_range command: {error}")
             await interaction.response.send_message(
                 "An unexpected error occurred. Please contact the administrator.",
-                ephemeral=True
+                ephemeral=False
             )
 
     @level_group.command(name='display',
@@ -2061,7 +2064,7 @@ class AdminCommands(commands.Cog, name='admin'):
     async def display_milestones(self, interaction: discord.Interaction, page_number: int = 1):
         """Display Milestone Information and further context about levels."""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
 
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
@@ -2087,7 +2090,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 )
                 await view.update_results()
                 await view.create_embed()
-                await interaction.followup.send(embed=view.embed, view=view, ephemeral=True)
+                await interaction.followup.send(embed=view.embed, view=view, ephemeral=False)
 
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
@@ -2095,7 +2098,7 @@ class AdminCommands(commands.Cog, name='admin'):
             )
             await interaction.followup.send(
                 f"An error occurred whilst fetching data. Please try again later.",
-                ephemeral=True
+                ephemeral=False
             )
 
     mythic_group = discord.app_commands.Group(
@@ -2112,7 +2115,7 @@ class AdminCommands(commands.Cog, name='admin'):
         _, unidecode_name = name_fix(character_name)
         guild_id = interaction.guild_id
         guild = interaction.guild
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
 
@@ -2124,12 +2127,12 @@ class AdminCommands(commands.Cog, name='admin'):
                 player_info = cursor.fetchone()
 
                 if amount == 0:
-                    await interaction.followup.send(f"No changes to trial total required.", ephemeral=True)
+                    await interaction.followup.send(f"No changes to trial total required.", ephemeral=False)
 
                 else:
                     if not player_info:
                         await interaction.followup.send(
-                            f"there is no {character_name} registered.", ephemeral=True)
+                            f"there is no {character_name} registered.", ephemeral=False)
 
                     else:
                         (true_character_name, character_name, character_level, tier, trials, thread_id) = player_info
@@ -2164,19 +2167,19 @@ class AdminCommands(commands.Cog, name='admin'):
                         await interaction.followup.send(
                             embed=character_log,
                             content=f"Trial changes for {character_name} have been made.",
-                            ephemeral=True)
+                            ephemeral=False)
 
             except (aiosqlite.Error, TypeError, ValueError, character_commands.CalculationAidFunctionError) as e:
                 logging.exception(
                     f"an error occurred for {interaction.user.name} whilst adjusting trials for {character_name}': {e}")
                 await interaction.followup.send(
-                    f"An error occurred whilst adjusting trials for '{character_name}' Error: {e}.", ephemeral=True)
+                    f"An error occurred whilst adjusting trials for '{character_name}' Error: {e}.", ephemeral=False)
 
     @mythic_group.command(name='cap', description='command for adjusting the tier cap of the server')
     async def tier_cap(self, interaction: discord.Interaction, new_tier: int):
         guild_id = interaction.guild_id
         guild = interaction.guild
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
 
@@ -2186,11 +2189,11 @@ class AdminCommands(commands.Cog, name='admin'):
 
                 if new_tier < tier_minmax[0]:
                     await interaction.followup.send(
-                        f"Your server does not have a trial system for below tier {tier_minmax[0]}", ephemeral=True)
+                        f"Your server does not have a trial system for below tier {tier_minmax[0]}", ephemeral=False)
 
                 elif new_tier > tier_minmax[1]:
                     await interaction.followup.send(
-                        f"Your server does not have a trial system for above tier {tier_minmax[1]}", ephemeral=True)
+                        f"Your server does not have a trial system for above tier {tier_minmax[1]}", ephemeral=False)
 
                 else:
                     await cursor.execute("Select Trials FROM AA_Trials where Tier = ?", (new_tier,))
@@ -2271,7 +2274,7 @@ class AdminCommands(commands.Cog, name='admin'):
                                     value=f"{idx} additional characters have been adjusted.\r\n{additional_characters}",
                                     inline=False)
 
-                            await interaction.followup.send(embed=cap_embed, ephemeral=True)
+                            await interaction.followup.send(embed=cap_embed, ephemeral=False)
 
                             logging.info(
                                 f"{interaction.user.name} has adjusted the tier cap to {new_tier} for {guild.name} with {idx} characters adjusted.")
@@ -2279,11 +2282,11 @@ class AdminCommands(commands.Cog, name='admin'):
                         else:
                             await interaction.followup.send(
                                 f"The Tier cap is now {new_tier} however your server does not have any characters that meet the minimum trial to be adjusted",
-                                ephemeral=True)
+                                ephemeral=False)
 
                     else:
                         await interaction.followup.send(
-                            f"Your server does not have a milestone system for tier {new_tier}", ephemeral=True)
+                            f"Your server does not have a milestone system for tier {new_tier}", ephemeral=False)
 
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(
@@ -2291,12 +2294,12 @@ class AdminCommands(commands.Cog, name='admin'):
                 )
                 await interaction.followup.send(
                     f"An error occurred whilst fetching data. Please try again later.",
-                    ephemeral=True)
+                    ephemeral=False)
 
     @mythic_group.command(name='define', description='command for defining the trials required for a tier')
     async def define_tier(self, interaction: discord.Interaction, tier: int, trials: int):
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
 
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
@@ -2307,12 +2310,12 @@ class AdminCommands(commands.Cog, name='admin'):
 
                 if tier < tier_minmax[0] - 1:
                     await interaction.followup.send(
-                        f"Your server does not have a trial system for below tier {tier_minmax[0]}", ephemeral=True)
+                        f"Your server does not have a trial system for below tier {tier_minmax[0]}", ephemeral=False)
                     return
 
                 elif tier > tier_minmax[1] + 1:
                     await interaction.followup.send(
-                        f"Your server does not have a trial system for above tier {tier_minmax[1]}", ephemeral=True)
+                        f"Your server does not have a trial system for above tier {tier_minmax[1]}", ephemeral=False)
                     return
 
                 await cursor.execute("SELECT Trials FROM AA_Trials WHERE Tier = ?", (tier - 1,))
@@ -2337,7 +2340,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         if low_trials_required < 0:
                             await interaction.followup.send(
                                 f"Your input of tier: {tier} trials: {trials} cannot be less than tier: {tier - 1} trials: {low_tier_info[0]}.",
-                                ephemeral=True)
+                                ephemeral=False)
                             return
 
                     await cursor.execute(
@@ -2349,7 +2352,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     if trials > high_tier_info[0]:
                         await interaction.followup.send(
                             f"Your input of tier: {tier} trials: {trials} cannot be more than tier: {tier + 1} trials: {high_tier_info[0]}.",
-                            ephemeral=True)
+                            ephemeral=False)
                         return
 
                     else:
@@ -2409,7 +2412,7 @@ class AdminCommands(commands.Cog, name='admin'):
                             await cursor.execute("UPDATE AA_Trials SET Tier = Tier + 1 where Tier < ?",
                                                  (tier,))
 
-                        await interaction.followup.send(f"Tier of {tier} removed from trial system.", ephemeral=True)
+                        await interaction.followup.send(f"Tier of {tier} removed from trial system.", ephemeral=False)
 
                     else:
                         await cursor.execute(
@@ -2417,14 +2420,14 @@ class AdminCommands(commands.Cog, name='admin'):
                             (trials, center_trials_required, tier))
 
                         await interaction.followup.send(
-                            f"Tier of {tier} updated in trial system. Now requires {trials} trials.", ephemeral=True)
+                            f"Tier of {tier} updated in trial system. Now requires {trials} trials.", ephemeral=False)
 
                 else:
                     await cursor.execute("INSERT INTO AA_Trials (Tier, Trials, Trials_Required) VALUES (?, ?, ?)",
                                          (tier, trials, center_trials_required))
 
                     await interaction.followup.send(
-                        f"Tier of {tier} added to trial system. It requires {trials} trials.", ephemeral=True)
+                        f"Tier of {tier} added to trial system. It requires {trials} trials.", ephemeral=False)
                 await conn.commit()
 
             except (aiosqlite.Error, TypeError, ValueError) as e:
@@ -2434,13 +2437,13 @@ class AdminCommands(commands.Cog, name='admin'):
 
                 await interaction.followup.send(
                     f"An error occurred whilst fetching data. Please try again later.",
-                    ephemeral=True)
+                    ephemeral=False)
 
     @mythic_group.command(name='display', description='Display the mythic system')
     async def display_mythic(self, interaction: discord.Interaction, page_number: int = 1):
         """Display Mythic Information and further context about levels."""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
 
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
@@ -2466,7 +2469,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 )
                 await view.update_results()
                 await view.create_embed()
-                await interaction.followup.send(embed=view.embed, view=view, ephemeral=True)
+                await interaction.followup.send(embed=view.embed, view=view, ephemeral=False)
 
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
@@ -2474,7 +2477,7 @@ class AdminCommands(commands.Cog, name='admin'):
             )
             await interaction.followup.send(
                 f"An error occurred whilst fetching data. Please try again later.",
-                ephemeral=True
+                ephemeral=False
             )
 
     test_group = discord.app_commands.Group(
@@ -2486,7 +2489,7 @@ class AdminCommands(commands.Cog, name='admin'):
     @test_group.command(name='worldanvil', description='Test command for the worldanvil API')
     async def worldanvil(self, interaction: discord.Interaction):
         """This is a test command for the wa command."""
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         client = WaClient(
             'Pathparser',
             'https://github.com/Solfyrism/Pathparser',
@@ -2540,11 +2543,11 @@ class AdminCommands(commands.Cog, name='admin'):
             #    world_id = 'f7a60480-ea15-4867-ae03-e9e0c676060a'
 
             await interaction.followup.send(
-                f"Authenticated User Connection Successful: \r\nWorlds: {worlds}", ephemeral=True)
+                f"Authenticated User Connection Successful: \r\nWorlds: {worlds}", ephemeral=False)
 
         except Exception as e:
             # If the user is not authenticated, the bot will raise an exception. I don't know the intended exceptions. but this is to tell the user it failed
-            await interaction.followup.send(f"An error occurred: {e}", ephemeral=True)
+            await interaction.followup.send(f"An error occurred: {e}", ephemeral=False)
             logging.exception("An error occurred whilst testing the WorldAnvil API")
 
     archive = discord.app_commands.Group(
@@ -2561,7 +2564,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 Display A specific view when a specific character is provided,
                 refine the list of characters when a specific player is provided."""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
 
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
@@ -2589,7 +2592,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     if not character:
                         await interaction.followup.send(
                             f"Character '{character_name}' not found.",
-                            ephemeral=True
+                            ephemeral=False
                         )
                         return
 
@@ -2627,7 +2630,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 )
                 await view.update_results()
                 await view.create_embed()
-                await interaction.followup.send(embed=view.embed, view=view, ephemeral=True)
+                await interaction.followup.send(embed=view.embed, view=view, ephemeral=False)
 
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
@@ -2635,7 +2638,7 @@ class AdminCommands(commands.Cog, name='admin'):
 
             await interaction.followup.send(
                 f"An error occurred whilst fetching data. Please try again later.",
-                ephemeral=True)
+                ephemeral=False)
 
     @archive.command(name='inactive', description='Archive inactive players')
     @app_commands.describe(confirmation="if yes, remove all inactive players!")
@@ -2648,14 +2651,14 @@ class AdminCommands(commands.Cog, name='admin'):
         """Archive inactive players."""
         guild_id = interaction.guild_id
         guild = interaction.guild
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
             try:
                 if confirmation == 1:
                     await interaction.followup.send(
                         f"Archive Inactive Players has been cancelled.",
-                        ephemeral=True
+                        ephemeral=False
                     )
                     return
 
@@ -2670,7 +2673,7 @@ class AdminCommands(commands.Cog, name='admin'):
 
                         if not player_info:
                             await interaction.followup.send("No character found with that name to archive.",
-                                                            ephemeral=True)
+                                                            ephemeral=False)
                             return
 
                     elif player_name:
@@ -2682,7 +2685,7 @@ class AdminCommands(commands.Cog, name='admin'):
 
                         if not player_info:
                             await interaction.followup.send("No player found with that name to archive.",
-                                                            ephemeral=True)
+                                                            ephemeral=False)
                             return
 
                     else:
@@ -2695,7 +2698,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     if not accepted_bio_channel:
                         await interaction.followup.send(
                             "No accepted bio channel found. Please set an accepted bio channel to continue.",
-                            ephemeral=True)
+                            ephemeral=False)
                         return
 
                     content = "These player characters will be moved to an Archived table and their Character Bios cleared from the server."
@@ -2713,7 +2716,7 @@ class AdminCommands(commands.Cog, name='admin'):
 
                 await interaction.followup.send(
                     f"An error occurred whilst archiving inactive players. Please try again later.",
-                    ephemeral=True)
+                    ephemeral=False)
 
     roleplay_group = discord.app_commands.Group(
         name='roleplay',
@@ -2723,21 +2726,21 @@ class AdminCommands(commands.Cog, name='admin'):
 
     @roleplay_group.command(name='add_channel', description='Add a channel to the RP channels')
     async def add_rp_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.execute("SELECT 1 FROM rp_Approved_Channels WHERE channel_id = ?", (channel.id,))
                 existing_channel = await cursor.fetchone()
 
                 if existing_channel:
-                    await interaction.followup.send(f"{channel.mention} is already an RP channel.", ephemeral=True)
+                    await interaction.followup.send(f"{channel.mention} is already an RP channel.", ephemeral=False)
                     return
 
                 await db.execute("INSERT INTO rp_Approved_Channels (channel_id) VALUES (?)", (channel.id,))
                 await db.commit()
 
                 await shared_functions.add_guild_to_cache(interaction.guild.id)
-                await interaction.followup.send(f"{channel.mention} has been added to the RP channels.", ephemeral=True)
+                await interaction.followup.send(f"{channel.mention} has been added to the RP channels.", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(
@@ -2745,12 +2748,12 @@ class AdminCommands(commands.Cog, name='admin'):
             )
             await interaction.followup.send(
                 f"An error occurred whilst fetching data. Please try again later.",
-                ephemeral=True
+                ephemeral=False
             )
 
     @roleplay_group.command(name='remove_channel', description='Remove a channel from the RP channels')
     async def remove_rp_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.execute("SELECT 1 FROM rp_Approved_Channels WHERE channel_id = ?", (channel.id,))
@@ -2764,10 +2767,10 @@ class AdminCommands(commands.Cog, name='admin'):
                     await shared_functions.add_guild_to_cache(interaction.guild.id)
                     await interaction.followup.send(
                         f"{channel.mention} has been removed from the RP channels.",
-                        ephemeral=True)
+                        ephemeral=False)
 
                 else:
-                    await interaction.followup.send(f"{channel.mention} is not an RP channel.", ephemeral=True)
+                    await interaction.followup.send(f"{channel.mention} is not an RP channel.", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(
@@ -2775,11 +2778,11 @@ class AdminCommands(commands.Cog, name='admin'):
             )
             await interaction.followup.send(
                 f"An error occurred whilst fetching data. Please try again later.",
-                ephemeral=True)
+                ephemeral=False)
 
     @roleplay_group.command(name='list_channels', description='List the RP channels')
     async def list_rp_channels(self, interaction: discord.Interaction):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.execute("SELECT channel_id FROM rp_Approved_Channels")
@@ -2788,10 +2791,10 @@ class AdminCommands(commands.Cog, name='admin'):
                 if rp_channels:
                     channels = [f"<#{channel_id}>" for (channel_id,) in rp_channels]
                     channels_list = "\n".join(channels)
-                    await interaction.followup.send(f"Current RP channels:\n{channels_list}", ephemeral=True)
+                    await interaction.followup.send(f"Current RP channels:\n{channels_list}", ephemeral=False)
 
                 else:
-                    await interaction.followup.send("There are no RP channels set.", ephemeral=True)
+                    await interaction.followup.send("There are no RP channels set.", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(
@@ -2799,12 +2802,12 @@ class AdminCommands(commands.Cog, name='admin'):
 
             await interaction.followup.send(
                 f"An error occurred whilst fetching data. Please try again later.",
-                ephemeral=True)
+                ephemeral=False)
 
     @roleplay_group.command(name='adjust_rp', description='Adjust the RP amount for a player')
     async def adjust_rp(self, interaction: discord.Interaction, player: discord.Member, amount: int):
         """Adjust the RP amount for a player."""
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -2812,7 +2815,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 rp_balance = await cursor.fetchone()
 
                 if not rp_balance:
-                    await interaction.followup.send(f"{player.mention} does not have an RP balance.", ephemeral=True)
+                    await interaction.followup.send(f"{player.mention} does not have an RP balance.", ephemeral=False)
                     return
 
                 else:
@@ -2821,19 +2824,19 @@ class AdminCommands(commands.Cog, name='admin'):
                     await db.commit()
                     await interaction.followup.send(
                         f"RP balance for {player.mention} has been adjusted by {amount} they now have {rp_balance[0] + amount}.",
-                        ephemeral=True)
+                        ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(
                 f"An error occurred whilst listing RP channels: {e}")
             await interaction.followup.send(
                 f"An error occurred whilst fetching data. Please try again later.",
-                ephemeral=True)
+                ephemeral=False)
 
     @roleplay_group.command(name='adjust_role', description='Adjust the RP amount for a player')
     async def adjust_role_rp(self, interaction: discord.Interaction, group: discord.Role, amount: int):
         """Adjust the RP amount for a player."""
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -2848,7 +2851,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         pass
 
                 await interaction.followup.send(
-                    f"RP balance for all members of {group.name} has been adjusted by {amount}.", ephemeral=True)
+                    f"RP balance for all members of {group.name} has been adjusted by {amount}.", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(
@@ -2856,7 +2859,7 @@ class AdminCommands(commands.Cog, name='admin'):
 
             await interaction.followup.send(
                 f"An error occurred whilst fetching data. Please try again later.",
-                ephemeral=True)
+                ephemeral=False)
 
     @roleplay_group.command(name="update", description="Update the server RP generation settings")
     @app_commands.describe(similarity_threshold="The similarity threshold for RP generation 90 is 90% 10 is 10%")
@@ -2867,7 +2870,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         reward_multiplier: typing.Optional[int], reward_name: typing.Optional[str],
                         reward_emoji: typing.Optional[str]):
         """Update the RP generation settings for the server."""
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -2891,7 +2894,7 @@ class AdminCommands(commands.Cog, name='admin'):
                      reward_name, reward_emoji))
                 await db.commit()
 
-                await interaction.followup.send("RP settings have been updated.", ephemeral=True)
+                await interaction.followup.send("RP settings have been updated.", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(
@@ -2899,11 +2902,11 @@ class AdminCommands(commands.Cog, name='admin'):
 
             await interaction.followup.send(
                 f"An error occurred whilst updating RP settings. Please try again later.",
-                ephemeral=True)
+                ephemeral=False)
 
     @roleplay_group.command(name="list", description="List all RP settings for the server")
     async def list_rp(self, interaction: discord.Interaction):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -2921,10 +2924,10 @@ class AdminCommands(commands.Cog, name='admin'):
                         f"Similarity Threshold: {similarity_threshold}%\n"
                         "Minimum Reward: {minimum_reward}\n"
                         f"Maximum Reward: {maximum_reward}\n"
-                        f"Reward Multiplier: {reward_multiplier}", ephemeral=True)
+                        f"Reward Multiplier: {reward_multiplier}", ephemeral=False)
 
                 else:
-                    await interaction.followup.send("There are no RP settings set.", ephemeral=True)
+                    await interaction.followup.send("There are no RP settings set.", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(
@@ -2932,7 +2935,7 @@ class AdminCommands(commands.Cog, name='admin'):
 
             await interaction.followup.send(
                 f"An error occurred whilst fetching data. Please try again later.",
-                ephemeral=True)
+                ephemeral=False)
 
     rp_store_group = discord.app_commands.Group(
         name='rp_store',
@@ -2967,7 +2970,7 @@ class AdminCommands(commands.Cog, name='admin'):
             sellable: discord.app_commands.Choice[int] = 1,
             usable: discord.app_commands.Choice[int] = 1
     ):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             sellable_value = sellable if isinstance(sellable, int) else sellable.value
             storable_value = storable if isinstance(storable, int) else storable.value
@@ -2987,17 +2990,17 @@ class AdminCommands(commands.Cog, name='admin'):
             )
 
             if isinstance(result, str):
-                await interaction.followup.send(result, ephemeral=True)
+                await interaction.followup.send(result, ephemeral=False)
                 return
 
             else:
-                await interaction.followup.send(f"{name} has been added to the store.", ephemeral=True)
+                await interaction.followup.send(f"{name} has been added to the store.", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(f"an issue occurred in the add_rp_store command {e}")
 
             await interaction.followup.send(
-                f"An error occurred whilst responding. Please try again later.", ephemeral=True)
+                f"An error occurred whilst responding. Please try again later.", ephemeral=False)
 
     @rp_store_group.command(name='edit', description='edit the store by adding or editing an item')
     @app_commands.describe(stock="The amount of stock available for the item, x<0 for infinite")
@@ -3027,7 +3030,7 @@ class AdminCommands(commands.Cog, name='admin'):
             storable: typing.Optional[discord.app_commands.Choice[int]],
             sellable: typing.Optional[discord.app_commands.Choice[int]],
             usable: discord.app_commands.Choice[int]):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             sellable_value = sellable.value if sellable else None
             storable_value = storable.value if storable else None
@@ -3047,17 +3050,17 @@ class AdminCommands(commands.Cog, name='admin'):
             )
 
             if isinstance(result, str):
-                await interaction.followup.send(result, ephemeral=True)
+                await interaction.followup.send(result, ephemeral=False)
                 return
 
             else:
-                await interaction.followup.send(f"{name} has been updated in the store!", ephemeral=True)
+                await interaction.followup.send(f"{name} has been updated in the store!", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(f"an issue occurred in the edit_rp_store command: {e}")
 
             await interaction.followup.send(
-                f"An error occurred whilst responding. Please try again later.", ephemeral=True)
+                f"An error occurred whilst responding. Please try again later.", ephemeral=False)
 
     @rp_store_group.command(name='give', description='give an item to a user')
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
@@ -3075,12 +3078,12 @@ class AdminCommands(commands.Cog, name='admin'):
                 item = await cursor.fetchone()
 
                 if not item:
-                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=True)
+                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=False)
                     return
 
                 (item_id, stock, storable, custom_message) = item
                 if stock < quantity and stock != -1:
-                    await interaction.followup.send(f"Insufficient stock for {item_name}.", ephemeral=True)
+                    await interaction.followup.send(f"Insufficient stock for {item_name}.", ephemeral=False)
                     return
 
                 if stock > 0:
@@ -3107,7 +3110,7 @@ class AdminCommands(commands.Cog, name='admin'):
             logging.exception(f"an issue occurred in the give_item_to_player command: {e}")
 
             await interaction.followup.send(
-                f"An error occurred whilst responding. Please try again later.", ephemeral=True)
+                f"An error occurred whilst responding. Please try again later.", ephemeral=False)
 
     @rp_store_group.command(name='take', description='take an item from a user')
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
@@ -3115,7 +3118,7 @@ class AdminCommands(commands.Cog, name='admin'):
         await interaction.response.defer(thinking=True)
         try:
             if quantity < 1:
-                await interaction.followup.send(f"Quantity must be a positive integer.", ephemeral=True)
+                await interaction.followup.send(f"Quantity must be a positive integer.", ephemeral=False)
                 return
 
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
@@ -3125,7 +3128,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 item = await cursor.fetchone()
 
                 if not item:
-                    await interaction.followup.send(f"{item_name} is not in the player's inventory.", ephemeral=True)
+                    await interaction.followup.send(f"{item_name} is not in the player's inventory.", ephemeral=False)
                     return
 
                 (item_name, stored) = item
@@ -3139,19 +3142,19 @@ class AdminCommands(commands.Cog, name='admin'):
                 await db.commit()
 
                 content = f"{quantity} {item_name} has been taken from {player.mention}, they have {stored} remaining."
-                await interaction.followup.send(content=content, ephemeral=True)
+                await interaction.followup.send(content=content, ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(f"an issue occurred in the take_item_from_player command: {e}")
 
             await interaction.followup.send(
-                f"An error occurred whilst responding. Please try again later.", ephemeral=True)
+                f"An error occurred whilst responding. Please try again later.", ephemeral=False)
 
 
     @rp_store_group.command(name='remove', description='remove an item from the store')
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
     async def remove_rp_store(self, interaction: discord.Interaction, item_name: str):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -3160,19 +3163,19 @@ class AdminCommands(commands.Cog, name='admin'):
                 item = await cursor.fetchone()
 
                 if not item:
-                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=True)
+                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=False)
                     return
 
                 await cursor.execute("DELETE FROM rp_store_items WHERE name = ?", (item_name,))
                 await db.commit()
 
-                await interaction.followup.send(f"{item_name} has been removed from the store.", ephemeral=True)
+                await interaction.followup.send(f"{item_name} has been removed from the store.", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(f"an issue occurred in trying to remove an item from the store: {e}")
 
             await interaction.followup.send(
-                f"An error occurred whilst responding. Please try again later.", ephemeral=True)
+                f"An error occurred whilst responding. Please try again later.", ephemeral=False)
 
     @rp_store_group.command(name='requirements', description='adjust the requirements of an item in the store')
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
@@ -3185,7 +3188,7 @@ class AdminCommands(commands.Cog, name='admin'):
     async def requirements_rp_store(self, interaction: discord.Interaction, item_name: str,
                                     requirement_type: discord.app_commands.Choice[int],
                                     requirement: discord.app_commands.Choice[int], value: str):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -3194,21 +3197,21 @@ class AdminCommands(commands.Cog, name='admin'):
                 item = await cursor.fetchone()
 
                 if not item:
-                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=True)
+                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=False)
                     return
 
                 try:
                     value = int(value)
 
                 except ValueError:
-                    await interaction.followup.send(f"Value must be an integer.", ephemeral=True)
+                    await interaction.followup.send(f"Value must be an integer.", ephemeral=False)
                     return
 
                 if requirement_type.value == 1:
                     get_role = interaction.guild.get_role(value)
 
                     if not get_role:
-                        await interaction.followup.send(f"Role not found.", ephemeral=True)
+                        await interaction.followup.send(f"Role not found.", ephemeral=False)
                         return
 
                 elif requirement_type.value == 3:
@@ -3216,12 +3219,12 @@ class AdminCommands(commands.Cog, name='admin'):
                     item = await cursor.fetchone()
 
                     if not item:
-                        await interaction.followup.send(f"Item not found.", ephemeral=True)
+                        await interaction.followup.send(f"Item not found.", ephemeral=False)
                         return
 
                 else:
                     if value < 0:
-                        await interaction.followup.send(f"Value must be a positive integer.", ephemeral=True)
+                        await interaction.followup.send(f"Value must be a positive integer.", ephemeral=False)
                         return
 
                 requirement_value = requirement if isinstance(requirement, int) else requirement.value
@@ -3246,13 +3249,13 @@ class AdminCommands(commands.Cog, name='admin'):
                         (requirement_type_value, value, item_name))
                     await db.commit()
 
-                await interaction.followup.send(f"Requirements for {item_name} have been updated.", ephemeral=True)
+                await interaction.followup.send(f"Requirements for {item_name} have been updated.", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(f"an issue occurred in the requirements_rp_store_items command: {e}")
 
             await interaction.followup.send(
-                f"An error occurred whilst responding. Please try again later.", ephemeral=True)
+                f"An error occurred whilst responding. Please try again later.", ephemeral=False)
 
     @rp_store_group.command(name='matching', description='Specify the matching requirements of an item in the store')
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
@@ -3261,7 +3264,7 @@ class AdminCommands(commands.Cog, name='admin'):
                                     discord.app_commands.Choice(name='Not Match', value=3)])
     async def matching_rp_store(self, interaction: discord.Interaction, item_name: str,
                                 matching: discord.app_commands.Choice[int]):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -3270,7 +3273,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 item = await cursor.fetchone()
 
                 if not item:
-                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=True)
+                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=False)
                     return
 
                 matching_value = matching if isinstance(matching, int) else matching.value
@@ -3280,13 +3283,13 @@ class AdminCommands(commands.Cog, name='admin'):
                 await db.commit()
 
                 await interaction.followup.send(f"Matching requirements for {item_name} have been updated.",
-                                                ephemeral=True)
+                                                ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(f"an issue occurred in the matching_rp_store_items command: {e}")
 
             await interaction.followup.send(
-                f"An error occurred whilst responding. Please try again later.", ephemeral=True)
+                f"An error occurred whilst responding. Please try again later.", ephemeral=False)
 
     @rp_store_group.command(name='behavior', description='Specify the behavior of an item in the store')
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
@@ -3301,7 +3304,7 @@ class AdminCommands(commands.Cog, name='admin'):
     async def behavior_rp_store(self, interaction: discord.Interaction, item_name: str,
                                 slot: discord.app_commands.Choice[int], behavior: discord.app_commands.Choice[int],
                                 change: discord.app_commands.Choice[int], value: str):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -3310,7 +3313,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 item = await cursor.fetchone()
 
                 if not item:
-                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=True)
+                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=False)
                     return
 
                 behavior_value = behavior if isinstance(behavior, int) else behavior.value
@@ -3320,7 +3323,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 if behavior_value == 1:
                     get_role = interaction.guild.get_role(int(value))
                     if not get_role:
-                        await interaction.followup.send(f"Role not found.", ephemeral=True)
+                        await interaction.followup.send(f"Role not found.", ephemeral=False)
                         return
 
                 elif behavior_value == 3:
@@ -3328,7 +3331,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     item = await cursor.fetchone()
 
                     if not item:
-                        await interaction.followup.send(f"Item not found.", ephemeral=True)
+                        await interaction.followup.send(f"Item not found.", ephemeral=False)
                         return
 
                 if slot_value == 1:
@@ -3347,12 +3350,12 @@ class AdminCommands(commands.Cog, name='admin'):
                         (behavior_value, change_value, value, item_name))
                 await db.commit()
 
-                await interaction.followup.send(f"Behavior for {item_name} has been updated.", ephemeral=True)
+                await interaction.followup.send(f"Behavior for {item_name} has been updated.", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(f"an issue occurred in the behavior_rp_store_items command: {e}")
             await interaction.followup.send(
-                f"An error occurred whilst responding. Please try again later.", ephemeral=True)
+                f"An error occurred whilst responding. Please try again later.", ephemeral=False)
 
     @rp_store_group.command(name='cancel_requirement', description='cancel a requirement for a shop item')
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
@@ -3361,7 +3364,7 @@ class AdminCommands(commands.Cog, name='admin'):
                                        discord.app_commands.Choice(name='slot 3', value=3)])
     async def cancel_requirement_rp_store(self, interaction: discord.Interaction, item_name: str,
                                           requirement: discord.app_commands.Choice[int]):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -3370,7 +3373,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 item = await cursor.fetchone()
 
                 if not item:
-                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=True)
+                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=False)
                     return
 
                 requirement_value = requirement if isinstance(requirement, int) else requirement.value
@@ -3391,13 +3394,13 @@ class AdminCommands(commands.Cog, name='admin'):
                         (item_name,))
                 await db.commit()
 
-                await interaction.followup.send(f"Requirement for {item_name} has been cancelled.", ephemeral=True)
+                await interaction.followup.send(f"Requirement for {item_name} has been cancelled.", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(f"an issue occurred in the cancel_requirement_rp_store_items command: {e}")
 
             await interaction.followup.send(
-                f"An error occurred whilst responding. Please try again later.", ephemeral=True)
+                f"An error occurred whilst responding. Please try again later.", ephemeral=False)
 
     @rp_store_group.command(name='cancel_behavior', description='cancel a matching requirement for a shop item')
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
@@ -3406,7 +3409,7 @@ class AdminCommands(commands.Cog, name='admin'):
                                        discord.app_commands.Choice(name='slot 3', value=3)])
     async def cancel_behavior_rp_store(self, interaction: discord.Interaction, item_name: str,
                                        requirement: discord.app_commands.Choice[int]):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -3415,7 +3418,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 item = await cursor.fetchone()
 
                 if not item:
-                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=True)
+                    await interaction.followup.send(f"{item_name} is not in the store.", ephemeral=False)
                     return
 
                 requirement_value = requirement if isinstance(requirement, int) else requirement.value
@@ -3436,17 +3439,17 @@ class AdminCommands(commands.Cog, name='admin'):
                         (item_name,))
 
                 await db.commit()
-                await interaction.followup.send(f"Behavior for {item_name} has been cancelled.", ephemeral=True)
+                await interaction.followup.send(f"Behavior for {item_name} has been cancelled.", ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(f"an issue occurred in the cancel_behavior_rp_store_items command: {e}")
 
             await interaction.followup.send(
-                f"An error occurred whilst responding. Please try again later.", ephemeral=True)
+                f"An error occurred whilst responding. Please try again later.", ephemeral=False)
 
     @rp_store_group.command(name='list', description='List all items in the store and their behavior')
     async def list_rp_store(self, interaction: discord.Interaction, page_number: int = 1):
-        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -3466,7 +3469,7 @@ class AdminCommands(commands.Cog, name='admin'):
 
                 await view.update_results()
                 await view.create_embed()
-                await interaction.followup.send(embed=view.embed, view=view, ephemeral=True)
+                await interaction.followup.send(embed=view.embed, view=view, ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(f"an issue occurred in the list_rp_store_items command: {e}")

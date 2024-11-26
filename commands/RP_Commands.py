@@ -75,13 +75,15 @@ async def handle_action(interaction: discord.Interaction, actions_type: str, act
             role = interaction.guild.get_role(int(actions_behavior))
             if int(actions_subtype) == 1 and role not in interaction.user.roles:
                 await interaction.user.add_roles(role)
+                return f"role of  {role.name} has been added!"
             elif int(actions_subtype) == 2 and role in interaction.user.roles:
                 await interaction.user.remove_roles(role)
+                return f"role of  {role.name} has been removed!"
             else:
                 if int(actions_subtype) == 1:
-                    raise "User already has role and does not need another..."
+                    return "User already has role and does not need another..."
                 else:
-                    raise "User does not have role and does not need it removed."
+                    return "User does not have role and does not need it removed."
         else:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
@@ -491,26 +493,61 @@ class RPCommands(commands.Cog, name='RP'):
 
     @roleplay_group.command(name="help", description="Get help with roleplay commands.")
     async def roleplay_help(self, interaction: discord.Interaction):
-        await interaction.response.defer(thinking=True)
-
+        """Help commands for the associated tree"""
+        await interaction.response.defer(thinking=True, ephemeral=False)
         embed = discord.Embed(
-            title="Roleplay Commands",
-            description="Here are the available roleplay commands:",
-            color=discord.Color.blurple()
-        )
-        await interaction.followup.send(embed=embed)
+            title=f"Roleplay Commands Help",
+            description=f'This is a list of GM administrative commands',
+            colour=discord.Colour.blurple())
+
+        embed.add_field(
+            name=f'__**Roleplay Commands**__',
+            value="""
+            Commands for handling your roleplay currency and items! \r\n
+            **/roleplay balance** - Check your roleplay balance! \n
+            **/roleplay buy** - Buy an item from the store! \n
+            **/roleplay inventory** - View your roleplay inventory! \n
+            **/roleplay item** - Display information about an item! \n
+            **/roleplay leaderboard** - View the roleplay leaderboard! \n
+            **/roleplay sell** - Sell an item from your inventory! \n
+            **/roleplay send** - Send RP to another user! \n
+            **/roleplay store** - Display the store! \n
+            **/roleplay use** - Use an item from your inventory! \n
+            """, inline=False)
+
+        await interaction.followup.send(embed=embed, ephemeral=False)
 
     @roleplay_group.command(name="balance", description="Check your roleplay balance")
     async def roleplay_balance(self, interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
-
+        async with roleplay_info_cache.lock:
+            if interaction.guild.id not in roleplay_info_cache.cache:
+                await add_guild_to_rp_cache(interaction.guild.id)
+            settings = roleplay_info_cache.cache[interaction.guild.id]
+            reward_name = settings.reward_name if settings.reward_name else "coins"
+            reward_emoji = settings.reward_emoji if settings.reward_emoji else "<:RPCash:884166313260503060>"
         user_id = interaction.user.id
         async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
-            cursor = await db.execute("SELECT balance FROM RP_Players WHERE user_id = ?", (user_id,))
+            cursor = await db.cursor()
+            await cursor.execute("SELECT balance FROM RP_Players WHERE user_id = ?", (user_id,))
             user_data = await cursor.fetchone()
+            await cursor.execute(
+                """
+                SELECT rank
+                FROM (SELECT user_id, 
+                balance, 
+                RANK() OVER (ORDER BY balance DESC) AS rank
+                FROM rp_players
+                ) ranked
+                WHERE user_id = ?;""",(user_id,))
+            user_rank = await cursor.fetchone()
             if user_data:
                 balance = user_data[0]
-                await interaction.followup.send(f"Your balance is {balance} :<:RPCash:884166313260503060>.")
+                ordinal_position = shared_functions.ordinal(user_rank[0])
+                embed = discord.Embed(title=interaction.user.name, description=f"Leaderboard Rank: {ordinal_position}")
+                embed.set_thumbnail(url=interaction.user.avatar.url)
+                embed.add_field(name="Balance", value=f"{balance} {reward_name} {reward_emoji}")
+                await interaction.followup.send(embed=embed)
             else:
                 await interaction.followup.send("You don't have a balance yet.")
 
@@ -612,7 +649,7 @@ class RPCommands(commands.Cog, name='RP'):
                 if user_data and user_item_data:
                     item_quantity = user_item_data[0]
                     balance = user_data[0]
-                    await cursor.execute("SELECT Price, Sellable FROM RP_Store_Items WHERE item_name = ?", (item_name,))
+                    await cursor.execute("SELECT Price, Sellable FROM RP_Store_Items WHERE name = ?", (item_name,))
                     sellable_data = await cursor.fetchone()
                     if sellable_data:
                         (item_value, sellable) = sellable_data
@@ -664,12 +701,17 @@ class RPCommands(commands.Cog, name='RP'):
             else:
 
                 response = f"You have used {amount}: {item_name}."
-                for _ in range(amount):
-                    actions_1, actions_2, actions_3 = await use_item(interaction=interaction, item_name=item_name)
-                    response += "\r\n" + item_quantity[1] if item_quantity[1] else ""
-                    if actions_1 == -1 or actions_2 == -1 or actions_3 == -1:
+
+                for x in range(amount):
+                    actions = await use_item(interaction=interaction, item_name=item_name)
+                    response += "\r\n" + item_data[0] if item_data[0] else ""
+                    if actions[0] == -1 or actions[1] == -1 or actions[2] == -1:
                         await interaction.followup.send("An error occurred while using the item.")
                         return
+                    if x == 1:
+                        response += "\n" + actions[0] if isinstance(actions[0], str) else ""
+                        response += "\n" + actions[1] if isinstance(actions[1], str) else ""
+                        response += "\n" + actions[2] if isinstance(actions[2], str) else ""
                 await interaction.followup.send(response)
 
     @roleplay_group.command(name="send", description="send RP to another user")
@@ -848,7 +890,7 @@ class LeaderboardView(shared_functions.ShopView):
     def __init__(self, user_id: int, guild_id: int, offset: int, limit: int,
                  interaction: discord.Interaction):
         super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction,
-                         content=self.content)
+                         content="")
         self.max_items = None  # Cache total number of items
         self.content = None
 
@@ -870,10 +912,17 @@ class LeaderboardView(shared_functions.ShopView):
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         embed_list = []
         x = 0
+        async with roleplay_info_cache.lock:
+            if self.guild_id not in roleplay_info_cache.cache:
+                await add_guild_to_rp_cache(self.guild_id)
+            settings = roleplay_info_cache.cache[self.guild_id]
+            reward_name = settings.reward_name if settings.reward_name else "coins"
+            reward_emoji = settings.reward_emoji if settings.reward_emoji else "<:RPCash:884166313260503060>"
+
         for item in self.results:
             x += 1
             (user_name, balance) = item
-            embed_list.append(f'**{self.offset - 1 + x}**: **Player**: {user_name} **Balance**: {balance}')
+            embed_list.append(f'**{self.offset - 1 +1 + x}**. {user_name} • {reward_emoji}{balance}')
         embed_list = "\n".join(embed_list)
         self.embed = discord.Embed(
             title=f"Leaderboard",
@@ -968,21 +1017,28 @@ class RPStoreView(shared_functions.ShopView):
             settings = roleplay_info_cache.cache[self.guild_id]
             reward_name = settings.reward_name if settings.reward_name else "coins"
             reward_emoji = settings.reward_emoji if settings.reward_emoji else "<:RPCash:884166313260503060>"
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = max(1, ((self.offset - 1) // self.limit))
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
-        self.embed = discord.Embed(title=f"items in store",
-                                   description=f"Page {current_page} of {total_pages}")
+        requirement_dict = {'1': "Role", '2': "Balance", '3': "Item"}
+        matching_dict = {'1': "All", '2': "Any", '3': "None"}
+        behavior_dict = {'1': "Add", '2': "Remove"}
+
+        self.embed = discord.Embed(
+            title=f"items in store",
+            description=f"Page {current_page} of {total_pages}")
+
         for item in self.results:
-            (item_ID, name, price, description, stock_remaining, inventory, usable, sellable, custom_message,
+            (item_id, name, price, description, stock_remaining, inventory, usable, sellable, custom_message,
              matching_requirements, requirements_1_type, requirements_1_pair, requirements_2_type, requirements_2_pair,
              requirements_3_type, requirements_3_pair,
              actions_1_type, actions_1_subtype, actions_1_behavior, actions_2_type, actions_2_subtype,
              actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior,
              image_link) = item
+            stock_remaining = '∞' if stock_remaining == -1 else stock_remaining
             content = f'**Price**: {price} {reward_name} {reward_emoji}, **Stock Remaining**: {stock_remaining}, **Inventory**: {inventory}\r\n' \
                       f'**Usable**: {usable}, **Sellable**: {sellable}\r\n'
             content += f'**Custom Message On Use**: {custom_message}\r\n'
-            self.embed.add_field(name=f'**Item Name**: {name}: **ID**: {item_ID}',
+            self.embed.add_field(name=f'**Item Name**: {name}: **ID**: {item_id}',
                                  value=content, inline=False)
             requirements_group = (
                 requirements_1_type, requirements_2_type, requirements_3_type,
@@ -993,16 +1049,18 @@ class RPStoreView(shared_functions.ShopView):
                 actions_1_behavior, actions_2_behavior, actions_3_behavior)
             additional_content = ""
             if any(requirements_group):
-                additional_content += "**Requirements**: {matching_requirements}\r\n"
-                additional_content += f'**Requirement 1**: {requirements_1_type}, {requirements_1_pair}\r\n' if requirements_1_type else ""
-                additional_content += f'**Requirement 2**: {requirements_2_type}, {requirements_2_pair}\r\n' if requirements_2_type else ""
-                additional_content += f'**Requirement 3**: {requirements_3_type}, {requirements_3_pair}\r\n' if requirements_3_type else ""
+                additional_content += f"**Requirements**: {matching_dict.get(matching_requirements, 'Unknown')}\r\n"
+                additional_content += f'**Requirement 1**: {requirement_dict.get(requirements_1_type, "Unknown")}, {requirements_1_pair}\r\n' if requirements_1_type else ""
+                additional_content += f'**Requirement 2**: {requirement_dict.get(requirements_2_type, "Unknown")}, {requirements_2_pair}\r\n' if requirements_2_type else ""
+                additional_content += f'**Requirement 3**: {requirement_dict.get(requirements_3_type, "Unknown")}, {requirements_3_pair}\r\n' if requirements_3_type else ""
+
             if any(actions_group):
-                additional_content += f'**Action 1**: {actions_1_type}, {actions_1_subtype}, {actions_1_behavior}\r\n' if actions_1_type else ""
-                additional_content += f'**Action 2**: {actions_2_type}, {actions_2_subtype}, {actions_2_behavior}\r\n' if actions_2_type else ""
-                additional_content += f'**Action 3**: {actions_3_type}, {actions_3_subtype}, {actions_3_behavior}\r\n' if actions_3_type else ""
-            self.embed.add_field(name=f'**Additional Info**',
-                                 value=additional_content, inline=False)
+                additional_content += f'**Action 1**: {requirement_dict.get(actions_1_type, "Unknown")}, {behavior_dict.get(actions_1_subtype, "Unknown")}, {actions_1_behavior}\r\n' if actions_1_type else ""
+                additional_content += f'**Action 2**: {requirement_dict.get(actions_2_type, "Unknown")}, {behavior_dict.get(actions_2_subtype, "Unknown")}, {actions_2_behavior}\r\n' if actions_2_type else ""
+                additional_content += f'**Action 3**: {requirement_dict.get(actions_3_type, "Unknown")}, {behavior_dict.get(actions_3_subtype, "Unknown")}, {actions_3_behavior}\r\n' if actions_3_type else ""
+            if any([requirements_group, actions_group]):
+                self.embed.add_field(name=f'**Additional Info**',
+                                     value=additional_content, inline=False)
 
     async def get_max_items(self):
         """Get the total number of levels."""
