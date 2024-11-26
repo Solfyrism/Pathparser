@@ -2125,7 +2125,6 @@ async def player_leave_session(guild: discord.Guild, session_id: int, player_nam
             logging.exception(f"Failed to remove player {player_name} from session {session_id}: {e}")
 
 
-
 async def update_report(guild_id: int, overview: str, world_id: str, article_id: str, character_name: str,
                         author_name: str):
     try:
@@ -3402,4 +3401,3 @@ class DisplayGroupTimesheet(discord.ui.View):
 
             self.max_range_id = count[0]
             return self.max_range_id
-

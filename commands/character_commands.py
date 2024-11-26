@@ -54,7 +54,7 @@ def safe_int_atk(value, default=0):
 
 
 # LEVEL INFORMATION
-async def get_max_level(cursor, guild_id: int) -> Optional[int]:
+async def get_max_level(guild_id: int) -> Optional[int]:
     async with shared_functions.config_cache.lock:
         configs = shared_functions.config_cache.cache.get(guild_id)
         if configs:
@@ -138,7 +138,7 @@ async def level_calculation(
             cursor = await conn.cursor()
 
             # Get maximum level cap
-            max_level = await get_max_level(cursor, guild_id)
+            max_level = await get_max_level(guild_id)
             if max_level is None:
                 logging.error(f"Max level cap not found for guild {guild_id}")
                 raise CalculationAidFunctionError(f"Max level cap not found for guild {guild_id}")
@@ -243,7 +243,6 @@ async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: i
                     character = await cursor.fetchone()
 
                     if character is None:
-
                         old_level_range_role = guild.get_role(int(old_role[0]))
 
                         await member.remove_roles(old_level_range_role)
@@ -263,7 +262,6 @@ async def get_max_mythic(guild_id: int, level: int) -> Optional[int]:
         async with shared_functions.config_cache.lock:
             configs = shared_functions.config_cache.cache.get(guild_id)
             if configs:
-
                 max_tier = configs.get('Tier_Cap')
                 rate_limit_1 = configs.get('Tier_Rate_Limit_1')
                 rate_limit_2 = configs.get('Tier_Rate_Limit_2')
@@ -325,12 +323,10 @@ async def mythic_calculation(
             async with shared_functions.config_cache.lock:
                 configs = shared_functions.config_cache.cache.get(guild_id)
                 if configs:
-
                     max_tier = configs.get('Tier_Cap')
                     rate_limit_1 = configs.get('Tier_Rate_Limit_1')
                     rate_limit_2 = configs.get('Tier_Rate_Limit_2')
                     rate_limit_breakpoint = configs.get('Tier_Rate_Limit_Breakpoint')
-
 
             # check if configurations are correct
             if not max_tier:
@@ -381,7 +377,8 @@ async def mythic_calculation(
             trials_remaining = max(trials_remaining, 0)
             new_tier = 0 if tier == 0 and trial_change == 0 else new_tier
             # Return mythic tier, total trials, trials remaining, and trial change
-            logging.info(f"Mythic calculation complete: new tier of {new_tier}, total_trials of {trial_total}, trials_remaining of {trials_remaining}, trial change: {trial_change}")
+            logging.info(
+                f"Mythic calculation complete: new tier of {new_tier}, total_trials of {trial_total}, trials_remaining of {trials_remaining}, trial change: {trial_change}")
             return new_tier, trial_total, trials_remaining, trial_change
 
     except (aiosqlite.Error, TypeError, ValueError, ZeroDivisionError) as e:
@@ -480,7 +477,8 @@ async def gold_calculation(
                 if gold_value_max_change else
                 gold_change.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
 
-            gold_value_max_total = (gold_value_max + gold_value_total_change).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            gold_value_max_total = (gold_value_max + gold_value_total_change).quantize(Decimal('0.01'),
+                                                                                       rounding=ROUND_HALF_UP)
 
             # Before inserting into the database, convert Decimal to string after rounding
             adjusted_gold_change_str = str(adjusted_gold_change.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
@@ -583,12 +581,12 @@ async def ubb_inventory_check(guild_id: int, author_id: int, item_id: str, amoun
 
 
 async def server_inventory_check(guild_id: int, player_id: int, item_id: str, amount: int) -> int:
-    client = unbelievaboat.Client(os.getenv('UBB_TOKEN'))
     try:
         logging.info(f"Retrieving server inventory item {item_id}")
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as conn:
             cursor = await conn.cursor()
-            await cursor.execute("SELECT item_quantity FROM RP_Players_Items WHERE Player_ID = ? and Item_ID = ?", (player_id, item_id,))
+            await cursor.execute("SELECT item_quantity FROM RP_Players_Items WHERE Player_ID = ? and Item_ID = ?",
+                                 (player_id, item_id,))
             item = await cursor.fetchone()
             if item is None:
                 logging.error(f"Item {item_id} not found in in inventory")
@@ -1313,7 +1311,7 @@ class CharacterCommands(commands.Cog, name='character'):
                             ephemeral=False
                         )
                     else:
-                        server_max_level = await get_max_level(cursor, guild_id)
+                        server_max_level = await get_max_level(guild_id)
                         (character_name, personal_cap, level, starting_base, tier, trials,
                          logging_thread_id) = player_info
                         base = starting_base
@@ -1630,8 +1628,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                             db=conn,
                                             interaction=interaction,
                                             user_id=interaction.user.id,
-                                            item_id=item_id,
-                                            amount=1,
+                                            item_id=item_id
                                         )
 
                                     character_updates = shared_functions.UpdateCharacterData(
@@ -2325,10 +2322,11 @@ class CharacterCommands(commands.Cog, name='character'):
                             await cursor.execute(
                                 "SELECT character_name from Player_Characters ORDER BY True_Character_Name asc")
                         results = await cursor.fetchall()
-                        if len(results) == 1:
+                        characters = [result[0] for result in results]
+                        if len(characters) == 1:
                             offset = 1
                         else:
-                            offset = results.index(character[0]) + 1
+                            offset = characters.index(character[0]) + 1
                 else:
                     view_type = 1
 
@@ -3028,8 +3026,9 @@ class CharacterCommands(commands.Cog, name='character'):
                     return
                 else:
                     (
-                    fortitude, reflex, will, initiative, hit_points, armor_class, touch_armor_class, cmd, melee, ranged,
-                    cmb) = attributes
+                        fortitude, reflex, will, initiative, hit_points, armor_class, touch_armor_class, cmd, melee,
+                        ranged,
+                        cmb) = attributes
                     embed = discord.Embed(
                         title=f"Defences for {character_name}",
                         description=f"**Hit Points**: {hit_points}\n"

@@ -58,7 +58,8 @@ async def transactions_reverse(guild_id: int, transaction_id: int, author_id: in
                     await cursor.execute(
                         "UPDATE Player_Characters SET Gold = ?, Gold_Value = ?, Gold_Value_Max = ? WHERE Character_Name = ?",
                         (
-                            gold_total - gold, gold_value_total - effective_gold, gold_value_max_total - max_effective_gold,
+                            gold_total - gold, gold_value_total - effective_gold,
+                            gold_value_max_total - max_effective_gold,
                             character_name))
                     await conn.commit()
                     # Insert the undo transaction into the audit table for auditing logs
@@ -725,8 +726,8 @@ class AdminCommands(commands.Cog, name='admin'):
                         "gold = ?, essence = ?, easy = ?, medium = ?, hard = ?, deadly = ?, trials = ?, "
                         "fame = ?, prestige = ?, alt_reward_party = ?, alt_reward_all = ? where Session_ID = ?",
                         (rewarded_gold, rewarded_essence, rewarded_easy, rewarded_medium, rewarded_hard,
-                        rewarded_deadly, rewarded_trials, rewarded_fame, rewarded_prestige,
-                        rewarded_reward_party, rewarded_reward_all, session_id))
+                         rewarded_deadly, rewarded_trials, rewarded_fame, rewarded_prestige,
+                         rewarded_reward_party, rewarded_reward_all, session_id))
                     await conn.commit()
 
                     base_session_info = gamemaster_commands.RewardSessionBaseInfo(
@@ -1036,13 +1037,15 @@ class AdminCommands(commands.Cog, name='admin'):
                                                                             ephemeral=False)
                                             return
                                     except unbelievaboat.HTTPError as e:
-                                        await interaction.followup.send(f"Error: Could not find the requested item. {e}",
-                                                                        ephemeral=False)
+                                        await interaction.followup.send(
+                                            f"Error: Could not find the requested item. {e}",
+                                            ephemeral=False)
                                         logging.error(f"Error: Could not find the requested item. {e}")
                                         return
 
                                 else:
-                                    await cursor.execute("Select name from rp_store_items where item_id = ?", (revision,))
+                                    await cursor.execute("Select name from rp_store_items where item_id = ?",
+                                                         (revision,))
                                     item = await cursor.fetchone()
                                     if not item:
                                         await interaction.followup.send("Error: Could not find the requested item.",
@@ -1174,7 +1177,8 @@ class AdminCommands(commands.Cog, name='admin'):
 
     @settings_group.command(name='titles', description='Administrative commands for the title store.')
     @app_commands.describe(modify="add, remove, or edit something in the store.")
-    @app_commands.describe(item_id="The item ID of the item in the store. If your system uses UBB the item needs to be in your inventory.")
+    @app_commands.describe(
+        item_id="The item ID of the item in the store. If your system uses UBB the item needs to be in your inventory.")
     @app_commands.choices(
         modify=[discord.app_commands.Choice(name='Add/Edit', value=1),
                 discord.app_commands.Choice(name='Remove', value=2)])
@@ -1279,10 +1283,12 @@ class AdminCommands(commands.Cog, name='admin'):
                         await conn.commit()
 
                         if masculine_name:
-                            await cursor.execute("SELECT Character_Name FROM Player_Characters WHERE title = ?", (info_masculine_name,))
+                            await cursor.execute("SELECT Character_Name FROM Player_Characters WHERE title = ?",
+                                                 (info_masculine_name,))
                             masculine_characters = await cursor.fetchall()
 
-                            await cursor.execute("Update Player_Characters SET title = ? WHERE title = ?", (masculine_name, info_masculine_name))
+                            await cursor.execute("Update Player_Characters SET title = ? WHERE title = ?",
+                                                 (masculine_name, info_masculine_name))
                             await conn.commit()
 
                             for character in masculine_characters:
@@ -1292,10 +1298,12 @@ class AdminCommands(commands.Cog, name='admin'):
                                     guild=interaction.guild)
 
                         if feminine_name:
-                            await cursor.execute("SELECT Character_Name FROM Player_Characters WHERE title = ?", (info_feminine_name,))
+                            await cursor.execute("SELECT Character_Name FROM Player_Characters WHERE title = ?",
+                                                 (info_feminine_name,))
                             feminine_characters = await cursor.fetchall()
 
-                            await cursor.execute("Update Player_Characters SET title = ? WHERE title = ?", (feminine_name, info_feminine_name))
+                            await cursor.execute("Update Player_Characters SET title = ? WHERE title = ?",
+                                                 (feminine_name, info_feminine_name))
                             await conn.commit()
 
                             for character in feminine_characters:
@@ -1308,7 +1316,8 @@ class AdminCommands(commands.Cog, name='admin'):
                             title="Title Store Adjustment",
                             description=f"Title Store Adjustment",
                             color=discord.Color.blue())
-                        embed.add_field(name="Titles:", value=f"Updated Name: {updated_masculine_name}/{updated_feminine_name}")
+                        embed.add_field(name="Titles:",
+                                        value=f"Updated Name: {updated_masculine_name}/{updated_feminine_name}")
                         embed.add_field(name="Fame:", value=f"Fame bestowed: {updated_fame}")
                         embed.add_field(name="Item_ID:", value=f"Item_ID: {updated_ubb_id}")
                         await interaction.followup.send(embed=embed, ephemeral=False)
@@ -1448,7 +1457,8 @@ class AdminCommands(commands.Cog, name='admin'):
                 logging.exception(
                     f"an error occurred for {interaction.user.name} whilst adjusting milestones for {character_name}': {e}")
                 await interaction.followup.send(
-                    f"An error occurred whilst adjusting milestones for '{character_name}' Error: {e}.", ephemeral=False)
+                    f"An error occurred whilst adjusting milestones for '{character_name}' Error: {e}.",
+                    ephemeral=False)
 
     @level_group.command(name='cap', description='command for adjusting the level cap of the server')
     async def level_cap(self, interaction: discord.Interaction, new_level: int):
@@ -1639,8 +1649,9 @@ class AdminCommands(commands.Cog, name='admin'):
                 await cursor.execute("SELECT level, minimum_milestones FROM Milestone_System WHERE Level = ?", (level,))
                 center_level_info = await cursor.fetchone()
 
-                await cursor.execute("SELECT level, minimum_milestones, wpl, wpl_heroic FROM Milestone_System WHERE Level = ?",
-                                     (level + 1,))
+                await cursor.execute(
+                    "SELECT level, minimum_milestones, wpl, wpl_heroic FROM Milestone_System WHERE Level = ?",
+                    (level + 1,))
                 higher_level_info = await cursor.fetchone()
 
                 if lower_level_info:
@@ -1648,7 +1659,7 @@ class AdminCommands(commands.Cog, name='admin'):
                     # found lower level, need to adjust it to account for potential removal of the upper level, or catch other changes.
                     if minimum_milestones == -1:
                         lower_milestones_required = 999999 if not higher_level_info else higher_level_info[1] - \
-                                                                                      lower_level_info[1]
+                                                                                         lower_level_info[1]
                     else:
                         (lower_level, lower_milestones, wpl, wpl_heroic) = lower_level_info
                         lower_milestones_required = minimum_milestones - lower_milestones
@@ -2530,7 +2541,8 @@ class AdminCommands(commands.Cog, name='admin'):
             except Exception as e:
                 print(e)
             try:
-                articles = [article for article in client.world.articles('f7a60480-ea15-4867-ae03-e9e0c676060a', 'b71f939a-f72d-413b-b4d7-4ebff1e162ca')]
+                articles = [article for article in client.world.articles('f7a60480-ea15-4867-ae03-e9e0c676060a',
+                                                                         'b71f939a-f72d-413b-b4d7-4ebff1e162ca')]
                 print(articles)
             except Exception as e:
                 print(e)
@@ -2740,7 +2752,8 @@ class AdminCommands(commands.Cog, name='admin'):
                 await db.commit()
 
                 await shared_functions.add_guild_to_cache(interaction.guild.id)
-                await interaction.followup.send(f"{channel.mention} has been added to the RP channels.", ephemeral=False)
+                await interaction.followup.send(f"{channel.mention} has been added to the RP channels.",
+                                                ephemeral=False)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(
@@ -2893,6 +2906,10 @@ class AdminCommands(commands.Cog, name='admin'):
                     (minimum_length, similarity_threshold, minimum_reward, maximum_reward, reward_multiplier,
                      reward_name, reward_emoji))
                 await db.commit()
+
+                async with RP_Commands.roleplay_info_cache.lock:
+                    RP_Commands.roleplay_info_cache.cache.pop(interaction.guild.id, None)
+                    await RP_Commands.add_guild_to_rp_cache(interaction.guild.id)
 
                 await interaction.followup.send("RP settings have been updated.", ephemeral=False)
 
@@ -3064,7 +3081,8 @@ class AdminCommands(commands.Cog, name='admin'):
 
     @rp_store_group.command(name='give', description='give an item to a user')
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
-    async def give_item_to_player(self, interaction: discord.Interaction, item_name: str, quantity: int, player: discord.Member):
+    async def give_item_to_player(self, interaction: discord.Interaction, item_name: str, quantity: int,
+                                  player: discord.Member):
         await interaction.response.defer(thinking=True)
         try:
             if quantity < 1:
@@ -3074,7 +3092,9 @@ class AdminCommands(commands.Cog, name='admin'):
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
 
-                await cursor.execute("SELECT item_id, stock_remaining, Inventory, custom_message FROM rp_store_items WHERE name = ?", (item_name,))
+                await cursor.execute(
+                    "SELECT item_id, stock_remaining, Inventory, custom_message FROM rp_store_items WHERE name = ?",
+                    (item_name,))
                 item = await cursor.fetchone()
 
                 if not item:
@@ -3087,7 +3107,9 @@ class AdminCommands(commands.Cog, name='admin'):
                     return
 
                 if stock > 0:
-                    await cursor.execute(f"Update rp_store_items SET stock_remaining = stock_remaining - ? WHERE name = ?", (quantity, item_name))
+                    await cursor.execute(
+                        f"Update rp_store_items SET stock_remaining = stock_remaining - ? WHERE name = ?",
+                        (quantity, item_name))
                     await db.commit()
 
                 await RP_Commands.handle_inventory_or_use(
@@ -3114,7 +3136,8 @@ class AdminCommands(commands.Cog, name='admin'):
 
     @rp_store_group.command(name='take', description='take an item from a user')
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)
-    async def take_item_from_player(self, interaction: discord.Interaction, item_name: str, quantity: int, player: discord.Member):
+    async def take_item_from_player(self, interaction: discord.Interaction, item_name: str, quantity: int,
+                                    player: discord.Member):
         await interaction.response.defer(thinking=True)
         try:
             if quantity < 1:
@@ -3124,7 +3147,9 @@ class AdminCommands(commands.Cog, name='admin'):
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
                 cursor = await db.cursor()
 
-                await cursor.execute("SELECT item_name, item_quantity FROM RP_Players_items WHERE player_id = ? and item_name = ?", (player.id, item_name))
+                await cursor.execute(
+                    "SELECT item_name, item_quantity FROM RP_Players_items WHERE player_id = ? and item_name = ?",
+                    (player.id, item_name))
                 item = await cursor.fetchone()
 
                 if not item:
@@ -3136,9 +3161,12 @@ class AdminCommands(commands.Cog, name='admin'):
                 stored -= quantity
 
                 if stored == 0:
-                    await cursor.execute("DELETE FROM RP_Players_items WHERE player_id = ? and item_name = ?", (player.id, item_name))
+                    await cursor.execute("DELETE FROM RP_Players_items WHERE player_id = ? and item_name = ?",
+                                         (player.id, item_name))
                 else:
-                    await cursor.execute("UPDATE RP_Players_items SET item_quantity = ? WHERE player_id = ? and item_name = ?", (stored, player.id, item_name))
+                    await cursor.execute(
+                        "UPDATE RP_Players_items SET item_quantity = ? WHERE player_id = ? and item_name = ?",
+                        (stored, player.id, item_name))
                 await db.commit()
 
                 content = f"{quantity} {item_name} has been taken from {player.mention}, they have {stored} remaining."
@@ -3149,7 +3177,6 @@ class AdminCommands(commands.Cog, name='admin'):
 
             await interaction.followup.send(
                 f"An error occurred whilst responding. Please try again later.", ephemeral=False)
-
 
     @rp_store_group.command(name='remove', description='remove an item from the store')
     @app_commands.autocomplete(item_name=shared_functions.rp_store_autocomplete)

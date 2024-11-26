@@ -315,7 +315,7 @@ def truncate_text(text):
     return text[:MAX_SIMILARITY_LENGTH]
 
 
-def calculate_reward(content_length, time_since_last_post, multiplier, minumum_reward, maximum_reward):
+def calculate_reward(content_length, time_since_last_post, multiplier, minimum_reward, maximum_reward):
     """
     Calculate the reward based on content length and time since last post.
     Rewards increase with longer intervals between posts, up to a maximum cap.
@@ -335,7 +335,7 @@ def calculate_reward(content_length, time_since_last_post, multiplier, minumum_r
     total_reward = base_reward + time_bonus
 
     # Enforce minimum and maximum rewards
-    total_reward = max(minumum_reward, min(total_reward, maximum_reward))
+    total_reward = max(minimum_reward, min(total_reward, maximum_reward))
 
     return total_reward
 
@@ -539,7 +539,7 @@ class RPCommands(commands.Cog, name='RP'):
                 RANK() OVER (ORDER BY balance DESC) AS rank
                 FROM rp_players
                 ) ranked
-                WHERE user_id = ?;""",(user_id,))
+                WHERE user_id = ?;""", (user_id,))
             user_rank = await cursor.fetchone()
             if user_data:
                 balance = user_data[0]
@@ -916,7 +916,6 @@ class LeaderboardView(shared_functions.ShopView):
             if self.guild_id not in roleplay_info_cache.cache:
                 await add_guild_to_rp_cache(self.guild_id)
             settings = roleplay_info_cache.cache[self.guild_id]
-            reward_name = settings.reward_name if settings.reward_name else "coins"
             reward_emoji = settings.reward_emoji if settings.reward_emoji else "<:RPCash:884166313260503060>"
 
         for item in self.results:

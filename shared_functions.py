@@ -40,7 +40,6 @@ class ConfigCache:
 
     async def initialize_configuration(self, discord_bot: discord.Client):
         for guild in discord_bot.guilds:
-
             await self.load_configurations(guild.id)
 
     async def load_configurations(self, guild_id: int):
@@ -128,7 +127,6 @@ async def add_guild_to_cache(guild_id: int) -> None:
                 approved_channel_cache.cache[guild_id] = channel_ids
     except aiosqlite.Error as e:
         logging.exception(f"Failed to add guild {guild_id} to cache with error: {e}")
-
 
 
 # *** AUTOCOMPLETION COMMANDS *** #
@@ -222,7 +220,6 @@ async def own_character_select_autocompletion(
 
 async def character_select_autocompletion(interaction: discord.Interaction, current: str
                                           ) -> List[app_commands.Choice[str]]:
-
     data = []
     user_id = interaction.user.id
     guild_id = interaction.guild_id
@@ -550,8 +547,9 @@ async def rp_inventory_autocomplete(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
             # Correct parameterized query
-            cursor = await db.execute("SELECT item_name FROM rp_players_items WHERE item_name LIKE ? and player_id = ? LIMIT 20",
-                                      (f"%{current}%", interaction.user.id))
+            cursor = await db.execute(
+                "SELECT item_name FROM rp_players_items WHERE item_name LIKE ? and player_id = ? LIMIT 20",
+                (f"%{current}%", interaction.user.id))
             items_list = await cursor.fetchall()
 
             # Populate choices
@@ -581,7 +579,6 @@ async def character_embed(
 
             if not channel_id:
                 return f"No channel found with Identifier 'Accepted_Bio_Channel' in Admin table."
-
 
             # Fetch character info
             await cursor.execute(
@@ -1090,7 +1087,7 @@ def fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset):
         select_clause = ', '.join(select_columns)
         day_two = adjust_day(day, 2, 4)
         cursor.execute(
-            "SELECT {select_clause} FROM Player_Timecard PT1 Left Join Player_Timecard PT2 on PT1.Player_Name = PT2.Player_Name where PT1.Player_Name = ? and PT1.Day = ? AND PT2.Day = ?",
+            f"SELECT {select_clause} FROM Player_Timecard PT1 Left Join Player_Timecard PT2 on PT1.Player_Name = PT2.Player_Name where PT1.Player_Name = ? and PT1.Day = ? AND PT2.Day = ?",
             (player_name, day_two, day))
         row = cursor.fetchone()
     elif utc_offset < 0:
@@ -1106,7 +1103,7 @@ def fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset):
         select_clause = ', '.join(select_columns)
         day_two = adjust_day(day, 23, -4)
         cursor.execute(
-            "SELECT {select_clause} FROM Player_Timecard PT1 Left Join Player_Timecard PT2 on PT1.Player_Name = PT2.Player_Name where PT1.Player_Name = ? and PT1.Day = ? AND PT2.Day = ?",
+            f"SELECT {select_clause} FROM Player_Timecard PT1 Left Join Player_Timecard PT2 on PT1.Player_Name = PT2.Player_Name where PT1.Player_Name = ? and PT1.Day = ? AND PT2.Day = ?",
             (player_name, day, day_two))
         row = cursor.fetchone()
     # Fetch time slots for the specific player and day
@@ -1425,13 +1422,14 @@ def validate_hammertime(timestamp_str):
         else:
             # Time is acceptable
             date = f"<t:{timestamp}:D>"  # Long date
-            time = f"<t:{timestamp}:t>"  # Long time
+            time_hhmm = f"<t:{timestamp}:t>"  # Long time
             arrival = f"<t:{timestamp}:R>"  # Relative time
             hammer_time_stamp = timestamp_str  # Keep the timestamp string if needed
 
-            return True, True, (date, time, arrival, hammer_time_stamp)
+            return True, True, (date, time_hhmm, arrival, hammer_time_stamp)
     except ValueError:
         return False, "Invalid timestamp format. Please provide a valid timestamp."
+
 
 def convert_datetime_to_unix(time_str, timezone_str):
     # Define possible date formats
@@ -1506,6 +1504,7 @@ async def complex_validate_hammertime(
         # Attempt to validate hammertime directly
         hammertime_result = validate_hammertime(hammertime)
         return True, hammertime_result
+
 
 def validate_worldanvil_link(guild_id: int, article_id: str) -> (
         Optional)[dict]:
@@ -1665,7 +1664,8 @@ async def put_wa_report(guild_id: int, session_id: int, overview: str, author: s
                     "SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Archive as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
                     (session_id, author))
                 characters = await cursor.fetchall()
-                if len(characters) == 0:
+                character_list = [character_row for character_row in characters]
+                if len(character_list) == 0:
                     await cursor.execute(
                         "SELECT SA.Character_Name, PC.Article_Link, Article_ID FROM Sessions_Participants as SA left join Player_Characters AS PC on PC.Character_Name = SA.Character_Name WHERE SA.Session_ID = ? and SA.Player_Name != ? ",
                         (session_id, author))
@@ -2043,38 +2043,36 @@ class RecipientAcknowledgementView(discord.ui.View):
         """Send the initial message with the view."""
         await self.create_embed()
         try:
-            async with aiosqlite.connect(f"Pathparser_{self.interaction.guild_id}_test.sqlite") as conn:
-                cursor = await conn.cursor()
-                async with config_cache.lock:
-                    configs = config_cache.cache.get(self.interaction.guild_id)
-                    if configs:
-                        channel_id = configs.get('Character_Transaction_Channel')
+            async with config_cache.lock:
+                configs = config_cache.cache.get(self.interaction.guild_id)
+                if configs:
+                    channel_id = configs.get('Character_Transaction_Channel')
 
-                if channel_id is None:
-                    await self.interaction.followup.send(
-                        "Character Transaction Channel not found in the database.",
-                        ephemeral=True
-                    )
-                    return
-                channel = self.interaction.guild.get_channel(int(channel_id))
-                if not channel:
-                    channel = await self.interaction.guild.fetch_channel(int(channel_id))
-                if channel:
-                    send_message = await channel.send(
-                        content=self.content,
-                        embed=self.embed,
-                        view=self
-                    )
-                    await self.interaction.followup.send(
-                        f"Message sent to the Character Transaction Channel. {send_message.jump_url}",
-                        ephemeral=True
-                    )
-                else:
-                    await self.interaction.followup.send(
-                        content=self.content,
-                        embed=self.embed,
-                        view=self
-                    )
+            if channel_id is None:
+                await self.interaction.followup.send(
+                    "Character Transaction Channel not found in the database.",
+                    ephemeral=True
+                )
+                return
+            channel = self.interaction.guild.get_channel(int(channel_id))
+            if not channel:
+                channel = await self.interaction.guild.fetch_channel(int(channel_id))
+            if channel:
+                send_message = await channel.send(
+                    content=self.content,
+                    embed=self.embed,
+                    view=self
+                )
+                await self.interaction.followup.send(
+                    f"Message sent to the Character Transaction Channel. {send_message.jump_url}",
+                    ephemeral=True
+                )
+            else:
+                await self.interaction.followup.send(
+                    content=self.content,
+                    embed=self.embed,
+                    view=self
+                )
         except (discord.HTTPException, AttributeError, aiosqlite.Error) as e:
             logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id}")
             await self.interaction.followup.send(
