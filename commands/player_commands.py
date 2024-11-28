@@ -3009,7 +3009,7 @@ class GroupManyView(shared_functions.ShopView):
 
     async def create_embed(self):
         """Create the embed for the titles."""
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(
             title=f"Group: {self.group_id}: {self.group_name} hosted by {self.host_player_name}'s {self.host_character}",
@@ -3052,7 +3052,7 @@ class GroupView(shared_functions.ShopView):
 
     async def create_embed(self):
         """Create the embed for the titles."""
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(
             title=f"Group Requests",

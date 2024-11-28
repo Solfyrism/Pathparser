@@ -3523,7 +3523,7 @@ class MilestoneDisplayView(shared_functions.ShopView):
 
     async def create_embed(self):
         """Create the embed for the levels."""
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(title=f"Milestone System",
                                    description=f"Page {current_page} of {total_pages}")
@@ -3567,7 +3567,7 @@ class MythicDisplayView(shared_functions.ShopView):
 
     async def create_embed(self):
         """Create the embed for the levels."""
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(title=f"Mythic System",
                                    description=f"Page {current_page} of {total_pages}")
@@ -3610,7 +3610,7 @@ class RPStoreView(shared_functions.ShopView):
     async def create_embed(self):
         """Create the embed for the levels."""
 
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(title=f"Item List System",
                                    description=f"Page {current_page} of {total_pages}")
@@ -3696,12 +3696,12 @@ class ArchiveDisplayView(shared_functions.DualView):
         """Create the embed for the titles."""
         if self.view_type == 1:
             if not self.player_name:
-                current_page = ((self.offset - 1) // self.limit) + 1
+                current_page = (self.offset // self.limit) + 1
                 total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
                 self.embed = discord.Embed(title=f"Character Summary",
                                            description=f"Page {current_page} of {total_pages}")
             else:
-                current_page = ((self.offset - 1) // self.limit) + 1
+                current_page = (self.offset // self.limit) + 1
                 total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
                 self.embed = discord.Embed(title=f"Character Summary for {self.player_name}",
                                            description=f"Page {current_page} of {total_pages}")
@@ -3726,7 +3726,7 @@ class ArchiveDisplayView(shared_functions.DualView):
                 if not tradition_name or not template_name:
                     self.embed.add_field(name=f'Additional Info', value=linkage, inline=False)
         else:
-            current_page = ((self.offset - 1) // self.limit) + 1
+            current_page = (self.offset // self.limit) + 1
             total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
             for result in self.results:
                 (player_name, player_id, true_character_name, title, titles, description, oath, level,
@@ -3811,7 +3811,7 @@ class SettingDisplayView(shared_functions.DualView):
         try:
             if self.view_type == 1:
 
-                current_page = ((self.offset - 1) // self.limit) + 1
+                current_page = (self.offset // self.limit) + 1
                 total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
                 self.embed = discord.Embed(title=f"Settings Summary",
                                            description=f"Page {current_page} of {total_pages}")
@@ -3821,7 +3821,7 @@ class SettingDisplayView(shared_functions.DualView):
                                          value=f'current setting: {search}\r\n{description}',
                                          inline=False)
             else:
-                current_page = ((self.offset - 1) // self.limit) + 1
+                current_page = (self.offset // self.limit) + 1
                 total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
                 for result in self.results:
                     (search, data_type, identifier, description) = result

@@ -3293,7 +3293,9 @@ class TitleShopView(shared_functions.ShopView):
 
     async def create_embed(self):
         """Create the embed for the titles."""
-        current_page = ((self.offset - 1) // self.limit) + 1
+
+        current_page = (self.offset // self.limit) + 1
+
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(title="Titles", description=f"Page {current_page} of {total_pages}")
         for title in self.results:
@@ -3332,7 +3334,7 @@ class PrestigeShopView(shared_functions.ShopView):
 
     async def create_embed(self):
         """Create the embed for the titles."""
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = ((self.offset) // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(title="Fame Store", description=f"Page {current_page} of {total_pages}")
         for fame in self.results:
@@ -3385,7 +3387,7 @@ class PrestigeHistoryView(shared_functions.ShopView):
 
     async def create_embed(self):
         """Create the embed for the titles."""
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = ((self.offset) // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(title=f"Prestige History for {self.character_name}",
                                    description=f"Page {current_page} of {total_pages}")
@@ -3435,7 +3437,7 @@ class GoldHistoryView(shared_functions.ShopView):
 
     async def create_embed(self):
         """Create the embed for the titles."""
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(title=f"Gold History for {self.character_name}",
                                    description=f"Page {current_page} of {total_pages}")
@@ -3496,12 +3498,12 @@ class CharacterDisplayView(shared_functions.DualView):
         """Create the embed for the titles."""
         if self.view_type == 1:
             if not self.player_name:
-                current_page = ((self.offset - 1) // self.limit) + 1
+                current_page = (self.offset // self.limit) + 1
                 total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
                 self.embed = discord.Embed(title=f"Character Summary",
                                            description=f"Page {current_page} of {total_pages}")
             else:
-                current_page = ((self.offset - 1) // self.limit) + 1
+                current_page = (self.offset // self.limit) + 1
                 total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
                 self.embed = discord.Embed(title=f"Character Summary for {self.player_name}",
                                            description=f"Page {current_page} of {total_pages}")
@@ -3525,7 +3527,7 @@ class CharacterDisplayView(shared_functions.DualView):
                 if tradition_name or template_name:
                     self.embed.add_field(name=f'Additional Info', value=linkage, inline=False)
         else:
-            current_page = ((self.offset - 1) // self.limit) + 1
+            current_page = (self.offset // self.limit) + 1
             total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
             for result in self.results:
                 (player_name, true_character_name, title, titles, description, oath, level, tier, milestones,
@@ -3602,7 +3604,7 @@ class LevelRangeDisplayView(shared_functions.DualView):
     async def create_embed(self):
         """Create the embed for the titles."""
         if self.view_type == 1:
-            current_page = ((self.offset - 1) // self.limit) + 1
+            current_page = (self.offset // self.limit) + 1
             total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
             self.embed = discord.Embed(title=f"Character Summary",
                                        description=f"Page {current_page} of {total_pages}")
@@ -3626,7 +3628,7 @@ class LevelRangeDisplayView(shared_functions.DualView):
                 if not tradition_name or not template_name:
                     self.embed.add_field(name=f'Additional Info', value=linkage, inline=False)
         else:
-            current_page = ((self.offset - 1) // self.limit) + 1
+            current_page = (self.offset // self.limit) + 1
             total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
             for result in self.results:
                 (player_name, player_id, true_character_name, title, titles, description, oath, level, tier, milestones,

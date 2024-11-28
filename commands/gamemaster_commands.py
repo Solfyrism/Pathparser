@@ -2285,7 +2285,7 @@ class SessionDisplayView(shared_functions.DualView):
 
     async def create_embed(self):
         """Create the embed for the titles."""
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         title = "Participants Summary" if self.view_type == 1 else "Sign-ups Summary"
         title = "All Players Summary" if self.view_type == 0 else title
@@ -2972,7 +2972,7 @@ class DisplayTimeGroupView(discord.ui.View):
 
     async def create_embed(self):
         """Create the embed for the titles."""
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(
             title=f"Group Requests",

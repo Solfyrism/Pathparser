@@ -908,7 +908,7 @@ class LeaderboardView(shared_functions.ShopView):
 
     async def create_embed(self):
         """Create the embed for the titles."""
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         embed_list = []
         x = 0
@@ -963,7 +963,7 @@ class InventoryView(shared_functions.ShopView):
 
     async def create_embed(self):
         """Create the embed for the titles."""
-        current_page = ((self.offset - 1) // self.limit) + 1
+        current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(
             title=self.member.name,
@@ -1016,7 +1016,7 @@ class RPStoreView(shared_functions.ShopView):
             settings = roleplay_info_cache.cache[self.guild_id]
             reward_name = settings.reward_name if settings.reward_name else "coins"
             reward_emoji = settings.reward_emoji if settings.reward_emoji else "<:RPCash:884166313260503060>"
-        current_page = max(1, ((self.offset - 1) // self.limit))
+        current_page = max(1, (self.offset // self.limit))
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         requirement_dict = {'1': "Role", '2': "Balance", '3': "Item"}
         matching_dict = {'1': "All", '2': "Any", '3': "None"}
