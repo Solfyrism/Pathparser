@@ -14,7 +14,6 @@ from zoneinfo import ZoneInfo, available_timezones
 import logging
 from dateutil import parser
 import os
-
 from matplotlib import pyplot as plt
 from pywaclient.api import BoromirApiClient as WaClient
 import shared_functions

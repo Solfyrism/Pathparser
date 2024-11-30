@@ -197,123 +197,182 @@ SIMILARITY_TIMEOUT = 0.05  # Maximum time in seconds for similarity checks
 
 
 # Handler for RP messages
+
 async def handle_rp_message(message):
-    # Ignore messages wrapped in parentheses (OOC)
-    guild_id = message.guild.id
-    content = message.content.strip()
-    if content.startswith('(') and content.endswith(')'):
-        return
-    # Ensure the guild's settings are in the cache
-    async with roleplay_info_cache.lock:
-        if guild_id not in roleplay_info_cache.cache:
-            await add_guild_to_rp_cache(guild_id)
-        settings = roleplay_info_cache.cache[guild_id]
-        min_content_length = settings.min_post_length if settings.min_post_length else 50
-        similarity_threshold = settings.similarity_threshold if settings.similarity_threshold else 0.8
-        minimum_reward = settings.min_rewards if settings.min_rewards else 1
-        maximum_reward = settings.max_rewards if settings.max_rewards else 100
-        reward_multiplier = settings.reward_multiplier if settings.reward_multiplier else 1
-        reward_name = settings.reward_name if settings.reward_name else "coins"
-        reward_emoji = settings.reward_emoji if settings.reward_emoji else "<:RPCash:884166313260503060>"
-    user_id = message.author.id
-    user_name = message.author.name
-    now = datetime.utcnow()
-    async with aiosqlite.connect(f"Pathparser_{message.guild.id}_test.sqlite") as db:
-        # Fetch user data
-        cursor = await db.execute("SELECT balance, last_post_time, recent_posts FROM RP_Players WHERE user_id = ?",
-                                  (user_id,))
-        user_data = await cursor.fetchone()
+    try:
+        logging.debug(f"Received message from {message.author} in guild {message.guild.id}: {message.content}")
 
-        if user_data:
-            balance, last_post_time_str, recent_posts_str = user_data
-            if last_post_time_str:
-                last_post_time = datetime.fromisoformat(last_post_time_str)
-            else:
-                last_post_time = None
-            recent_posts = json.loads(recent_posts_str)
-        else:
-            # Create a new user record
-            balance = 0
-            last_post_time = None
-            recent_posts = []
-            await db.execute(
-                "INSERT INTO RP_Players (user_id, user_name, balance, last_post_time, recent_posts) VALUES (?, ?, ?, ?, ?)",
-                (user_id, user_name, balance, None, json.dumps(recent_posts)))
-            await db.commit()
-
-        # Content Quality Check
-        if len(content) < min_content_length:
-            await message.channel.send(
-                f"{message.author.mention}, your post is too short to earn rewards."
-            )
+        # Ignore messages wrapped in parentheses (OOC)
+        guild_id = message.guild.id
+        content = message.content.strip()
+        if content.startswith('(') and content.endswith(')'):
+            logging.debug("Message is OOC (wrapped in parentheses); ignoring.")
             return
 
-        # Content Similarity Check
-        is_similar = False
-        truncated_content = truncate_text(content)
+        # Ensure the guild's settings are in the cache
+        async with roleplay_info_cache.lock:
+            if guild_id not in roleplay_info_cache.cache:
+                logging.debug(f"Guild {guild_id} not in roleplay_info_cache. Adding to cache.")
+                await add_guild_to_rp_cache(guild_id)
+            settings = roleplay_info_cache.cache[guild_id]
+            logging.debug(f"Retrieved settings for guild {guild_id}: {settings}")
 
-        for past_content in recent_posts[-MAX_COMPARISONS:]:
-            truncated_past_content = truncate_text(past_content)
-
-            # Time the similarity calculation
-            start_time = asyncio.get_event_loop().time()
-
-            similarity_ratio = difflib.SequenceMatcher(None, truncated_content, truncated_past_content).ratio()
-
-            elapsed_time = asyncio.get_event_loop().time() - start_time
-
-            if elapsed_time > SIMILARITY_TIMEOUT:
-                # Skip this check if it takes too long
-                continue
-
-            if similarity_ratio > similarity_threshold:
-                is_similar = True
-                break
-
-        if is_similar:
-            await message.channel.send(
-                f"{message.author.mention}, your post is too similar to your recent posts and won't earn rewards."
-            )
-            return
-
-        # Time since last post
-        if last_post_time:
-            time_since_last_post = (now - last_post_time).total_seconds()
-        else:
-            time_since_last_post = None  # First recorded post
-
-        # Update user's last post time
-        last_post_time_str = now.isoformat()
-
-        # Append current post to recent posts
-        recent_posts.append(content)
-        # Keep only the last 5 posts
-        recent_posts = recent_posts[-5:]
-        recent_posts_str = json.dumps(recent_posts)
-
-        # Calculate Reward
-        content_length = len(content)
-        reward = calculate_reward(content_length, time_since_last_post, reward_multiplier, minimum_reward,
-                                  maximum_reward)
-
-        # Update user's balance and other data in the database
-        balance += reward
-        await db.execute(
-            "UPDATE RP_Players SET balance = ?, last_post_time = ?, recent_posts = ? WHERE user_id = ?",
-            (balance, last_post_time_str, recent_posts_str, user_id)
+        # Extract settings with defaults
+        min_content_length = settings.min_post_length or 50
+        similarity_threshold = settings.similarity_threshold or 0.8
+        minimum_reward = settings.min_rewards or 1
+        maximum_reward = settings.max_rewards or 100
+        reward_multiplier = settings.reward_multiplier or 1
+        reward_name = settings.reward_name or "coins"
+        reward_emoji = settings.reward_emoji or "<:RPCash:884166313260503060>"
+        logging.debug(
+            f"Settings for guild {guild_id}: min_content_length={min_content_length}, "
+            f"similarity_threshold={similarity_threshold}, minimum_reward={minimum_reward}, "
+            f"maximum_reward={maximum_reward}, reward_multiplier={reward_multiplier}, "
+            f"reward_name='{reward_name}', reward_emoji='{reward_emoji}'"
         )
-        await db.commit()
 
-    # Provide feedback to the user
-    await message.channel.send(
-        f"{message.author.mention}, you have earned {reward} {reward_name}! Your new balance is {balance} {reward_name} {reward_emoji}."
-    )
+        user_id = message.author.id
+        user_name = message.author.name
+        now = datetime.utcnow()
+        logging.debug(f"Processing message at {now.isoformat()} from user {user_id} ({user_name})")
+
+        async with aiosqlite.connect(f"Pathparser_{message.guild.id}_test.sqlite") as db:
+            # Fetch user data
+            cursor = await db.execute(
+                "SELECT balance, last_post_time, recent_posts FROM RP_Players WHERE user_id = ?",
+                (user_id,)
+            )
+            user_data = await cursor.fetchone()
+
+            if user_data:
+                balance, last_post_time_str, recent_posts_str = user_data
+                logging.debug(
+                    f"Retrieved user data for {user_id}: balance={balance}, last_post_time={last_post_time_str}"
+                )
+                if last_post_time_str:
+                    last_post_time = datetime.fromisoformat(last_post_time_str)
+                else:
+                    last_post_time = None
+                recent_posts = json.loads(recent_posts_str)
+            else:
+                # Create a new user record
+                balance = 0
+                last_post_time = None
+                recent_posts = []
+                await db.execute(
+                    "INSERT INTO RP_Players (user_id, user_name, balance, last_post_time, recent_posts) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (user_id, user_name, balance, None, json.dumps(recent_posts))
+                )
+                await db.commit()
+                logging.debug(f"Created new user record for {user_id}")
+
+            # Content Quality Check
+            if len(content) < min_content_length:
+                logging.debug(
+                    f"Message is too short ({len(content)} characters); minimum is {min_content_length}"
+                )
+                await message.channel.send(
+                    f"{message.author.mention}, your post is too short to earn rewards."
+                )
+                return
+
+            # Content Similarity Check
+            is_similar = False
+            truncated_content = truncate_text(content)
+            logging.debug(f"Truncated content for similarity check: {truncated_content}")
+
+            for past_content in recent_posts[-MAX_COMPARISONS:]:
+                truncated_past_content = truncate_text(past_content)
+                logging.debug(f"Comparing to past content: {truncated_past_content}")
+
+                # Time the similarity calculation
+                start_time = asyncio.get_event_loop().time()
+
+                similarity_ratio = difflib.SequenceMatcher(
+                    None, truncated_content, truncated_past_content
+                ).ratio()
+
+                elapsed_time = asyncio.get_event_loop().time() - start_time
+
+                logging.debug(
+                    f"Similarity ratio: {similarity_ratio}, elapsed time: {elapsed_time}s"
+                )
+
+                if elapsed_time > SIMILARITY_TIMEOUT:
+                    # Skip this check if it takes too long
+                    logging.warning(
+                        f"Similarity check took too long ({elapsed_time}s); skipping this comparison"
+                    )
+                    continue
+
+                if similarity_ratio > similarity_threshold:
+                    logging.debug(
+                        f"Message is too similar to recent post (similarity_ratio={similarity_ratio})"
+                    )
+                    is_similar = True
+                    break
+
+            if is_similar:
+                await message.channel.send(
+                    f"{message.author.mention}, your post is too similar to your recent posts and won't earn rewards."
+                )
+                return
+
+            # Time since last post
+            if last_post_time:
+                time_since_last_post = (now - last_post_time).total_seconds()
+                logging.debug(f"Time since last post: {time_since_last_post} seconds")
+            else:
+                time_since_last_post = None  # First recorded post
+                logging.debug("This is the user's first recorded post")
+
+            # Update user's last post time
+            last_post_time_str = now.isoformat()
+
+            # Append current post to recent posts
+            recent_posts.append(content)
+            # Keep only the last 5 posts
+            recent_posts = recent_posts[-MAX_COMPARISONS:]
+            recent_posts_str = json.dumps(recent_posts)
+
+            # Calculate Reward
+            content_length = len(content)
+            reward = calculate_reward(
+                content_length, time_since_last_post, reward_multiplier, minimum_reward, maximum_reward
+            )
+            logging.debug(f"Calculated reward: {reward}")
+
+            # Update user's balance and other data in the database
+            balance += reward
+            logging.debug(f"Updated balance for user {user_id}: {balance}")
+
+            await db.execute(
+                "UPDATE RP_Players SET balance = ?, last_post_time = ?, recent_posts = ? WHERE user_id = ?",
+                (balance, last_post_time_str, recent_posts_str, user_id)
+            )
+            await db.commit()
+            logging.debug(f"User {user_id}'s data updated in database")
+
+        # Provide feedback to the user
+        await message.channel.send(
+            f"{message.author.mention}, you have earned {reward} {reward_name}! "
+            f"Your new balance is {balance} {reward_name} {reward_emoji}."
+        )
+        logging.debug(f"Sent reward message to user {user_id}")
+
+    except Exception as e:
+        logging.exception(f"Error in handle_rp_message: {e}")
+        # Optionally, send a message to the channel or notify an admin
+        await message.channel.send(
+            f"{message.author.mention}, an error occurred while processing your message."
+        )
 
 
 def truncate_text(text):
     """Truncate text to the maximum similarity length."""
     return text[:MAX_SIMILARITY_LENGTH]
-
 
 def calculate_reward(content_length, time_since_last_post, multiplier, minimum_reward, maximum_reward):
     """

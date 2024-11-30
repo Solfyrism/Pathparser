@@ -133,6 +133,8 @@ async def on_disconnect():
 async def on_message(message):
     if message.author.bot:
         return
+    guild_id = message.guild.id
+    logging.debug(f"Processing message in guild {guild_id} from {message.author}")
     random_number = random.randint(1, 50)
     if 'einstein' in message.content.lower():
         await message.channel.send("https://i.insider.com/641ca0f5d67fe70018a376ca?width=800&format=jpeg&auto=webp")
@@ -193,17 +195,24 @@ async def on_message(message):
     async with shared_functions.approved_channel_cache.lock:
         if guild_id in shared_functions.approved_channel_cache.cache:
             if channel_id in shared_functions.approved_channel_cache.cache[guild_id]:
+                logging.debug(f"Channel {channel_id} is approved for RP messages.")
                 await handle_rp_message(message)
             else:
+                logging.debug(f"Channel {channel_id} is not approved. Processing commands.")
                 await bot.process_commands(message)
         else:
             # Guild not in cache, add it
-
+            logging.debug(f"Guild {guild_id} not in cache. Adding.")
             await shared_functions.add_guild_to_cache(guild_id)
             if channel_id in shared_functions.approved_channel_cache.cache[guild_id]:
+                logging.debug(f"Channel {channel_id} is approved after cache update.")
                 await handle_rp_message(message)
             else:
+                logging.debug(f"Channel {channel_id} is still not approved. Processing commands.")
                 await bot.process_commands(message)
+
+    # Make sure commands are processed for messages not handled
+    await bot.process_commands(message)
 
 
 @bot.event
