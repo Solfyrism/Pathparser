@@ -1,3 +1,4 @@
+import asyncio
 import math
 import typing
 from dataclasses import dataclass
@@ -88,6 +89,29 @@ class BuildingInfo:
     settlement_limit: int
     district_limit: int
     description: str
+
+@dataclass
+class HexImprovementInfo:
+    improvement: str
+    road_multiplier: int
+    build_points: int
+    economy: int
+    loyalty: int
+    stability: int
+    unrest: int
+    consumption: int
+    defence: int
+    taxation: int
+    cavernous: int
+    coastline: int
+    desert: int
+    forest: int
+    hills: int
+    jungle: int
+    marsh: int
+    mountains: int
+    plains: int
+    water: int
 
 
 # autocompletes functions for kingdom
@@ -253,16 +277,18 @@ class AttributeSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         try:
+            await interaction.response.defer()
             self.view.attribute = self.values[0]
-
-            await self.view.leadership_modifier_select
+            # Remove the attribute select from the view
+            self.view.clear_items()
+            # Proceed to modifier selection
+            await self.view.proceed_to_modifier_selection()
         except Exception as e:
             logging.exception(f"Error in AttributeSelect callback: {e}")
-            await interaction.response.send_message(
-                "An error occurred while selecting the attribute.", ephemeral=False
+            await interaction.followup.send(
+                "An error occurred while selecting the attribute.", ephemeral=True
             )
             self.view.stop()
-
 
 class LeadershipModifier(discord.ui.Select):
     def __init__(self, options):
@@ -273,19 +299,28 @@ class LeadershipModifier(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         try:
-            self.view.attribute = self.values[0]
-
-            await self.view.leadership_modifier_select
+            await interaction.response.defer()
+            selected_modifier = self.values[0]
+            modifier_value = getattr(self.view, selected_modifier.lower())
+            # Update the modified value
+            setattr(self.view, f'{selected_modifier.lower()}_modified', modifier_value)
+            self.view.modifier_selection_count += 1
+            # Remove previous modifier select
+            self.view.clear_items()
+            # Proceed to the next modifier selection
+            await self.view.proceed_to_modifier_selection()
         except Exception as e:
             logging.exception(f"Error in LeadershipModifier callback: {e}")
-            await interaction.response.send_message(
-                "An error occurred while selecting the modifier.", ephemeral=False
+            await interaction.followup.send(
+                "An error occurred while selecting the modifier.", ephemeral=True
             )
             self.view.stop()
-
 class LeadershipView(discord.ui.View):
-    def __init__(self, options, guild_id: int, user_id: int, kingdom: str, role: str, character_name: str, additional: int, economy: int, loyalty: int, stability: int, hexes: int):
+    def __init__(self, options, guild_id: int, user_id: int, kingdom: str, role: str,
+                 character_name: str, additional: int, economy: float, loyalty: float,
+                 stability: float, hexes: int):
         super().__init__()
+        self.options = options  # Store options
         self.guild_id = guild_id
         self.user_id = user_id
         self.kingdom = kingdom
@@ -298,39 +333,72 @@ class LeadershipView(discord.ui.View):
         self.stability = stability
         self.stability_modified = 0
         self.hexes = hexes
-        self.additional=additional
+        self.additional = additional
+        self.modifier_selection_count = 0  # Counter for modifiers selected
 
-        if options is None:
+        # Determine which modifiers are applicable
+        self.modifier_fields = []
+        if self.economy > 0:
+            self.modifier_fields.append('Economy')
+        if self.loyalty > 0:
+            self.modifier_fields.append('Loyalty')
+        if self.stability > 0:
+            self.modifier_fields.append('Stability')
+
+        # Attribute Selection
+        if options is None or len(options) == 0:
             self.stop()
-
-        if len(options) == 1: # Only a single option, so we can skip the attribute select and process.
+        elif len(options) == 1:
             self.attribute = options[0].value
-            if economy + loyalty + stability > 1: # In most systems this means that the there are 2 fields applicable.
-                # Need to build options based on which is present.
-                self.leadership_modifier_select = LeadershipModifier(options=options)
-                self.add_item(self.leadership_modifier_select)
-            else:
-                ... # Only A single option, so we can skip the next step and process.
+            # Proceed to modifier selection
+            asyncio.create_task(self.proceed_to_modifier_selection())
         else:
+            # Multiple attributes, show selection
             self.add_item(AttributeSelect(options=options))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        """Ensure that only the user who initiated the view can interact with the buttons."""
         if interaction.user.id != self.user_id:
             await interaction.response.send_message(
                 "You cannot interact with this button.",
-                ephemeral=False
+                ephemeral=True
             )
             return False
         return True
 
-    async def leadership_modifier_select(self):
-        if self.additional > 0:
-            self.additional -= 1
-            # define options based off economy, loyalty, and stability.
-            if self.economy + self.loyalty + self.stability > 1: # In most systems this means that the there are 2 fields applicable.
-                self.add_item(LeadershipModifier(options=options)) #OPTIONS IS NOT DEFINED HERE
+    async def proceed_to_modifier_selection(self):
+        if self.modifier_selection_count < len(self.modifier_fields):
+            # Create options for modifiers
+            options = [
+                discord.SelectOption(label=field, value=field)
+                for field in self.modifier_fields
+                if getattr(self, f'{field.lower()}_modified') == 0  # Skip already selected
+            ]
+            if options:
+                # Remove previous modifier select if exists
+                for child in self.children.copy():
+                    if isinstance(child, LeadershipModifier):
+                        self.remove_item(child)
+                # Add new modifier select
+                self.add_item(LeadershipModifier(options=options))
+                # Edit the message to update the view
+                await self.message.edit(content="Please select a kingdom stat to modify:", view=self)
+            else:
+                # All modifiers selected
+                await self.finish_selection()
         else:
+            # No modifiers to select
+            await self.finish_selection()
+
+    async def finish_selection(self):
+        # Remove all items from the view
+        self.clear_items()
+        # Provide feedback to the user
+        confirmation_message = (
+            f"You have completed the selection process for your role '{self.role}' "
+            f"in kingdom '{self.kingdom}'."
+        )
+        # Update the leader with the selected attributes and modifiers
+        try:
             await update_leader(
                 guild_id=self.guild_id,
                 author=self.user_id,
@@ -338,11 +406,21 @@ class LeadershipView(discord.ui.View):
                 title=self.role,
                 character_name=self.character_name,
                 stat=self.attribute,
-                modifier=self.economy_modified,
+                modifier=self.economy_modified + self.loyalty_modified + self.stability_modified,
                 economy=self.economy_modified,
                 loyalty=self.loyalty_modified,
                 stability=self.stability_modified
             )
+            # Edit the original message to show confirmation
+            await self.message.edit(content=confirmation_message, view=None)
+        except Exception as e:
+            logging.exception(f"Error in finish_selection: {e}")
+            # Inform the user of the error
+            await self.message.edit(
+                content="An error occurred while updating your leadership role.", view=None
+            )
+        # Stop the view
+        self.stop()
 
 
 async def create_a_kingdom(
@@ -424,7 +502,7 @@ async def edit_a_kingdom(
                 sum_lore = new_lore - old_lore
                 sum_productivity = new_productivity - old_productivity
                 sum_society = new_society - old_society
-                await cursor.execute("UPDATE Settlements SET Corruption = Corruption + ?, Crime = Crime + ?, Law = Law + ?, Lore = Lore + ?, Productivity = Productivity + ?, Society = Society + ? WHERE Kingdom = ?", (sum_corruption, sum_crime, sum_law, sum_lore, sum_productivity, sum_society, old_kingdom))
+                await cursor.execute("UPDATE Settlements SET Corruption = Corruption + ?, Crime = Crime + ?, Law = Law + ?, Lore = Lore + ?, Productivity = Productivity + ?, Society = Society + ? WHERE Kingdom = ?", (sum_corruption, sum_crime, sum_law, sum_lore, sum_productivity, sum_society, old_kingdom_info.kingdom))
             await cursor.execute("UPDATE Kingdoms SET Kingdom = ?, Password = ?, Government = ?, Alignment = ?, Economy = ?, Loyalty = ?, Stability = ? WHERE Kingdom = ?", (new_kingdom, government, alignment, old_kingdom_info.economy, old_kingdom_info.loyalty, old_kingdom_info.stability, old_kingdom_info.kingdom))
             await cursor.execute("UPDATE Kingdoms_Custom SET Kingdom = ? WHERE Kingdom = ?", (new_kingdom, old_kingdom_info.kingdom))
             await cursor.execute("UPDATE settlements SET Kingdom = ? WHERE Kingdom = ?", (new_kingdom, old_kingdom_info.kingdom))
@@ -502,6 +580,9 @@ async def adjust_sp(
             await cursor.execute("Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)", (author, datetime.datetime.now(), "Kingdoms", "Increase SP", f"Increased the stabilization points of {kingdom} by {amount}"))
             await db.commit()
             return f"The stabilization points of {kingdom} have been increased by {amount}."
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error increasing stabilization points: {e}")
+        return "An error occurred while increasing stabilization points."
 
 
 async def fetch_kingdom(
@@ -544,6 +625,20 @@ async def fetch_building(
             return BuildingInfo(*building_info)
         return None
 
+
+async def fetch_hex_improvement(
+        guild_id: int,
+        improvement: str) -> typing.Union[HexImprovementInfo, None]:
+    async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+        cursor = await db.cursor()
+        await cursor.execute(
+            """SELECT Improvement, Road_Multiplier, Build_Points, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation, Cavernous, Coastline, Desert, Forest, Hills, Jungle, Marsh, Mountains, Plains, Water FROM Hexes_Improvements WHERE Improvement = ?""",
+            (improvement,))
+        improvement_info = await cursor.fetchone()
+        if improvement_info is not None:
+            return HexImprovementInfo(*improvement_info)
+        return None
+
 async def update_leader(
         guild_id: int,
         author: int,
@@ -577,18 +672,254 @@ async def update_leader(
         return "An error occurred while updating the leader."
 
 
+async def remove_leader(
+        guild_id: int,
+        author: int,
+        kingdom: str,
+        title: str) -> str:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("SELECT Economy, Loyalty, Stability, Unrest FROM Leadership WHERE Kingdom = ? AND Title = ?", (kingdom, title))
+            leader_info = await cursor.fetchone()
+            await cursor.execute("SELECT VPEconomy, VPLoyalty, VPStability, VPUnrest FROM AA_Leadership WHERE Title = ?", (title,))
+            base_info = await cursor.fetchone()
+            (base_economy, base_loyalty, base_stability, base_unrest) = base_info
+            if leader_info is None:
+                return "The leader does not exist."
+            (old_economy, old_loyalty, old_stability, old_unrest) = leader_info
+            sum_economy = -old_economy + base_economy
+            sum_loyalty = -old_loyalty + base_loyalty
+            sum_stability = -old_stability + base_stability
+            sum_unrest = -old_unrest + base_unrest
+            await cursor.execute("UPDATE Leadership SET Character_Name = 'Vacant', Economy = ?, Loyalty = ? , Stability = ?, Unrest = ? WHERE Kingdom = ? AND Title = ?", (base_economy, base_loyalty, base_stability, base_unrest, kingdom, title))
+            await cursor.execute("UPDATE Kingdoms SET Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Kingdom = ?", (sum_economy, sum_loyalty, sum_stability, sum_unrest, kingdom))
+            await cursor.execute("Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)", (author, datetime.datetime.now(), "Leadership", "Remove", f"Removed the leader of {kingdom}"))
+            await db.commit()
+            return f"The leader of {kingdom} has been removed."
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error removing leader: {e}")
+        return "An error occurred while removing the leader."
+
+async def claim_hex(
+        guild_id: int,
+        author: int,
+        kingdom: str,
+        hex: str) -> str:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("SELECT Kingdom FROM Hexes WHERE Hex_Terrain = ? and Improvement is Null", (hex,))
+            hex_info = await cursor.fetchone()
+            if hex_info is not None:
+                await cursor.execute("Update Hexes set Amount = Amount + 1 WHERE Hex_Terrain = ? and improvement is Null", (hex,))
+            else:
+                await cursor.execute("INSERT INTO Hexes (Kingdom, Hex_Terrain, Amount) VALUES (?, ?, 1)", (kingdom, hex))
+            await cursor.execute("UPDATE Kingdoms SET Size = Size + 1, Control_DC = Control_DC + 1 WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)", (author, datetime.datetime.now(), "Hexes", "Claim", f"Claimed the hex of {hex}"))
+            await db.commit()
+            return f"The hex of {hex} has been claimed by {kingdom}."
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error claiming hex: {e}")
+        return "An error occurred while claiming the hex."
+
+async def unclaim_hex(
+        guild_id: int,
+        author: int,
+        kingdom: str,
+        hex: str) -> str:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("SELECT Kingdom FROM Hexes WHERE Hex_Terrain = ? and Improvement is Null", (hex,))
+            hex_info = await cursor.fetchone()
+            if hex_info is None:
+                return "The hex does not exist."
+            await cursor.execute("Update Hexes set Amount = Amount - 1 WHERE Hex_Terrain = ? and improvement is Null", (hex,))
+            await cursor.execute("UPDATE Kingdoms SET Size = Size - 1, Control_DC = Control_DC - 1 WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)", (author, datetime.datetime.now(), "Hexes", "Unclaim", f"Unclaimed the hex of {hex}"))
+            await db.commit()
+            return f"The hex of {hex} has been unclaimed by {kingdom}."
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error unclaiming hex: {e}")
+        return "An error occurred while unclaiming the hex."
+
+async def add_improvement(
+        guild_id: int,
+        author: int,
+        kingdom: str,
+        hex_information: HexImprovementInfo,
+        hex_terrain: str
+        ) -> str:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute(
+                "SELECT Amount FROM Hexes WHERE Hex_Terrain = ? and Improvement = Null",
+                (hex_terrain,))
+            availability = await cursor.fetchone()
+            if not availability:
+                return f"No hexes of {hex_terrain} are available for improvement."
+            elif availability[0] == 1:
+                await cursor.execute(
+                    "DELETE FROM Hexes WHERE Hex_Terrain = ? and Improvement = Null",
+                    (hex_terrain,))
+            else:
+                await cursor.execute(
+                    "UPDATE Hexes SET Amount = Amount - 1 WHERE Hex_Terrain = ? and Improvement = Null",
+                    (hex_terrain,))
+            await cursor.execute("SELECT Amount FROM Hexes WHERE Hex_Terrain = ? and Improvement = ?", (hex_terrain, hex_information.improvement))
+            hex_info = await cursor.fetchone()
+            if not hex_info:
+                await cursor.execute(
+                    "INSERT INTO Hexes (Kingdom, Hex_Terrain, Amount, Improvement, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (kingdom, hex_terrain, hex_information.improvement, hex_information.economy, hex_information.loyalty, hex_information.stability, hex_information.unrest, hex_information.consumption, hex_information.defence, hex_information.taxation))
+            else:
+                await cursor.execute(
+                    "UPDATE Hexes SET Amount = Amount + 1 WHERE Hex_Terrain = ? and Improvement = ?",
+                    (hex_terrain, hex_information.improvement))
+            await cursor.execute("Update Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ?, Consumption = Consumption + ? WHERE Kingdom = ?", (hex_information.economy, hex_information.loyalty, hex_information.stability, hex_information.unrest, hex_information.consumption, hex_information.defence, hex_information.taxation, kingdom))
+            await cursor.execute("Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)", (author, datetime.datetime.now(), "Hexes", "Add Improvement", f"Added the improvement of {hex_information.improvement} to the hex of {hex_information.hex_terrain}"))
+            await db.commit()
+            return f"The improvement of {hex_information.improvement} has been added to the hex of {hex_terrain}."
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error adding improvement: {e}")
+        return "An error occurred while adding the improvement."
+
+async def remove_improvement(
+        guild_id: int,
+        author: int,
+        kingdom: str,
+        hex_information: HexImprovementInfo,
+        hex_terrain: str
+        ) -> str:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute(
+                "SELECT Amount FROM Hexes WHERE Hex_Terrain = ? and Improvement = ?",
+                (hex_terrain, hex_information.improvement))
+            availability = await cursor.fetchone()
+            if not availability:
+                return f"No hexes of {hex_terrain} have the improvement of {hex_information.improvement}."
+            elif availability[0] == 1:
+                await cursor.execute(
+                    "DELETE FROM Hexes WHERE Hex_Terrain = ? and Improvement = ?",
+                    (hex_terrain, hex_information.improvement))
+            else:
+                await cursor.execute(
+                    "UPDATE Hexes SET Amount = Amount - 1 WHERE Hex_Terrain = ? and Improvement = ?",
+                    (hex_terrain, hex_information.improvement))
+            await cursor.execute("Update Kingdoms SET Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ?, Consumption = Consumption - ? WHERE Kingdom = ?", (hex_information.economy, hex_information.loyalty, hex_information.stability, hex_information.unrest, hex_information.consumption, kingdom))
+            await cursor.execute("Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)", (author, datetime.datetime.now(), "Hexes", "Remove Improvement", f"Removed the improvement of {hex_information.improvement} from the hex of {hex_information.hex_terrain}"))
+            await db.commit()
+            return f"The improvement of {hex_information.improvement} has been removed from the hex of {hex_terrain}."
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error removing improvement: {e}")
+        return "An error occurred while removing the improvement."
+
+
+async def add_building(
+        guild_id: int,
+        author: int,
+        kingdom: str,
+        settlement: str,
+        building_info: BuildingInfo,
+        size: int,
+        amount) -> str:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("SELECT Building FROM Buildings WHERE Building = ? and Settlement = ?", (building_info.building, settlement))
+            building_presence = await cursor.fetchone()
+            if not building_presence:
+                await cursor.execute(
+                    """INSERT INTO Buildings (
+                    Kingdom, Settlement, 
+                    Building, Constructed, Lots, 
+                    Economy, Loyalty, Stability, 
+                    Fame, Unrest, Corruption, Crime, Productivity, Law, Lore, Society, 
+                    Danger, Defence, Base_Value, Spellcasting, Supply) 
+                    VALUES 
+                    (?, ?,
+                    ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?)""",
+                    (kingdom, settlement,
+                     building_info.building, amount, building_info.lots,
+                     building_info.economy, building_info.loyalty, building_info.stability,
+                     building_info.fame, building_info.unrest, building_info.corruption, building_info.crime, building_info.productivity, building_info.law, building_info.lore, building_info.society,
+                     building_info.danger, building_info.defence, building_info.base_value, building_info.spellcasting, building_info.supply))
+            else:
+                await cursor.execute("Update Buildings Set Constructed = Constructed + ? WHERE Building = ? and Settlement = ?", (amount, building_info.building, settlement))
+            new_population_adjustment = amount * building_info.lots * 250
+            new_lots_adjustment = amount * building_info.lots
+            new_dc_adjustment = math.floor((size + new_lots_adjustment) / 36) - math.floor(size / 36)
+            await cursor.execute("Update Kingdoms Set Control_DC = Control_DC + ?, population = population + ?, Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ?, Consumption = Consumption + ? WHERE Kingdom = ?", (new_dc_adjustment, new_population_adjustment, building_info.economy, building_info.loyalty, building_info.stability, building_info.unrest, building_info.consumption, kingdom))
+            await cursor.execute("Update Settlements set size = size + ?, population = population + ?, Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ? WHERE Settlement = ?", (new_lots_adjustment, new_population_adjustment, building_info.economy, building_info.loyalty, building_info.stability, building_info.unrest, settlement))
+            await cursor.execute("Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)", (author, datetime.datetime.now(), "Buildings", "Add", f"Added the building of {building_info.building} to the settlement of {settlement}"))
+            await db.commit()
+            return f"{amount} building(s) of {building_info.building} have been added. Costing {building_info.build_points * amount} build points."
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error adding building: {e}")
+        return "An error occurred while adding the building."
+
+
+async def remove_building(
+        guild_id: int,
+        author: int,
+        kingdom: str,
+        settlement: str,
+        building_info: BuildingInfo,
+        size: int,
+        amount) -> str:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("SELECT Constructed FROM Buildings WHERE Building = ? and Settlement = ?", (building_info.building, settlement))
+            building_presence = await cursor.fetchone()
+            if not building_presence:
+                return f"No buildings of {building_info.building} are present in the settlement of {settlement}."
+            built = building_presence[0]
+            amount = min(int(built), amount)
+            if amount == built:
+                await cursor.execute("DELETE FROM Buildings WHERE Building = ? and Settlement = ?", (building_info.building, settlement))
+            else:
+                await cursor.execute("Update Buildings Set Constructed = Constructed - ? WHERE Building = ? and Settlement = ?", (amount, building_info.building, settlement))
+            new_population_adjustment = amount * building_info.lots * 250
+            new_lots_adjustment = amount * building_info.lots
+            new_dc_adjustment = math.floor((size - new_lots_adjustment) / 36) - math.floor(size / 36)
+            await cursor.execute("Update Kingdoms Set Control_DC = Control_DC - ?, population = population - ?, Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ?, Consumption = Consumption - ? WHERE Kingdom = ?", (new_dc_adjustment, new_population_adjustment, building_info.economy, building_info.loyalty, building_info.stability, building_info.unrest, building_info.consumption, kingdom))
+            await cursor.execute("Update Settlements set size = size - ?, population = population - ?, Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Settlement = ?", (new_lots_adjustment, new_population_adjustment, building_info.economy, building_info.loyalty, building_info.stability, building_info.unrest, settlement))
+            await cursor.execute("Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)", (author, datetime.datetime.now(), "Buildings", "Remove", f"Removed the building of {building_info.building} from the settlement of {settlement}"))
+            await db.commit()
+            return f"{amount} building(s) of {building_info.building} have been removed. Refunding {(building_info.build_points * amount) * .5} build points."
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error removing building: {e}")
+        return "An error occurred while removing the building."
+
+
+
+
 class KingdomCommands(commands.Cog, name='Kingdom'):
     def __init__(self, bot):
         self.bot = bot
 
     kingdom_group = discord.app_commands.Group(
         name='kingdom',
-        description='Commands related to playing'
+        description='Commands related to kingdom management'
     )
 
     leadership_group = discord.app_commands.Group(
         name='leadership',
-        description='Commands related to playing',
+        description='Commands related to leadership management',
+        parent=kingdom_group
+    )
+
+    hex_group = discord.app_commands.Group(
+        name='hex',
+        description='Commands related to hex management',
         parent=kingdom_group
     )
 
@@ -938,512 +1269,140 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
 
     @leadership_group.command(name="modify", description="Modify a leader, by changing their ability score or who is in charge")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    @app_commands.autocomplete(title=leadership_autocomplete)
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
-    async def modify_leadership(self, kingdom, password, character_name, modifier):
+    async def modify_leadership(self, interaction: discord.Interaction, kingdom, password, character_name, title, modifier):
         """This command is used to modify a leader's ability score or who is in charge of a kingdom"""
-        ...
-@leadership.command()
-async def remove(ctx: commands.Context, kingdom: str, password: str, title: str):
-    """This command is used to remove a leader and make it a vacant position"""
-    kingdom = str.replace(str.title(kingdom), ";", "")
-    title = str.replace(str.title(title), ";", "")
-    password = str.replace(password, ";", "")
-    guild_id = ctx.guild_id
-    author = ctx.user.name
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(f"""SELECT Name, Title FROM Leadership WHERE Title = '{title}' AND Kingdom = '{kingdom}'""", {'title': title, 'kingdom': kingdom})
-    leadership_results = cursor.fetchone()
-    cursor.execute(f"""SELECT password FROM Kingdoms WHERE kingdom = '{kingdom}'""", {'kingdom': kingdom})
-    kingdom_results = cursor.fetchone()
-    cursor.close()
-    db.close()
-    if kingdom_results[0] is None:
-        await ctx.response.send_message(f"{kingdom} is not a kingdom that exists.")
-    if leadership_results[0] is None:
-        await ctx.response.send_message(f"{title} was not a valid role to remove leadership from!")
-    if kingdom_results[0] != password:
-        await ctx.response.send_message(f"yametikeraSTOP giving me the wrong password for the kingdom of {kingdom}!")
-    if leadership_results[0] is not None and kingdom_results[0] == password:
-        await Event.remove_leader(self, kingdom, title, guild_id, author)
-        await ctx.response.send_message(f"You have removed {leadership_results[0]} from the position of {leadership_results[1]} for {kingdom}")
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password, Hexes FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                await cursor.execute("SELECT Ability, Economy, Loyalty, Stability FROM Leadership WHERE Kingdom = ? AND Title = ?", (kingdom, title))
+                leadership_info = await cursor.fetchone()
+                (ability, economy, loyalty, stability) = leadership_info
+                abilities = ability.split(" / ")
+                options = [
+                    discord.SelectOption(label=ability) for ability in abilities
+                ]
+                additional = 1 if title != "Ruler" and kingdom_results[1] < 26 else 2
+                additional = 3 if title == "Ruler" and kingdom_results[1] < 101 else additional
+                view = LeadershipView(
+                    options, interaction.guild_id, interaction.user.id, kingdom, title, character_name,
+                    additional, economy, loyalty, stability, kingdom_results[1]
+                )
+                await interaction.response.send_message("Please select an attribute:", view=view)
+            # Store the message object
+            view.message = await interaction.original_response()
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error modifying leadership: {e}")
+            await interaction.followup.send(content="An error occurred while modifying leadership.")
+
+    @leadership_group.command(name="remove", description="Remove a leader from a kingdom")
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    @app_commands.autocomplete(title=leadership_autocomplete)
+    async def remove(self, interaction: discord.Interaction, kingdom: str, password: str, title: str):
+        """This command is used to remove a leader and make it a vacant position"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                status = await remove_leader(interaction.guild_id, interaction.user.id, kingdom, title)
+                await interaction.followup.send(content=status)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error removing leader: {e}")
+            await interaction.followup.send(content="An error occurred while removing the leader.")
 
 
-@leadership.command()
-async def display(ctx: commands.Context, kingdom: str, current_page: int = 1, leader: str = 'All'):
-    """This command will either display all leaders for a kingdom, or a specific title."""
-    kingdom = str.replace(str.title(kingdom), ";", "")
-    leader = str.replace(str.title(leader), ";", "")
-    guild_id = ctx.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    if leader == 'All':
-        cursor.execute(f"""SELECT COUNT(title) FROM Leadership where Kingdom = '{kingdom}'""", {'Kingdom': kingdom})
-        leaders = cursor.fetchone()
-        max_page = math.ceil(leaders[0] / 5)
-        if current_page >= max_page:
-            current_page = max_page
-        buttons = ["⏪", "⬅", "➡", "⏩"]  # skip to start, left, right, skip to end
-        low = 0 + (5 * (current_page-1))
-        offset = 10
-        cursor.execute(f"""SELECT Name, Title, Stat, Modifier, Economy, Loyalty, Stability, Unrest from Leadership WHERE Kingdom = '{kingdom}' LIMIT {low}, {offset}""", {'Kingdom': kingdom})
-        pull = cursor.fetchall()
-        embed = discord.Embed(title=f"{kingdom} Leadership page {current_page}", description=f"This is list of {kingdom}'s leaders", colour=discord.Colour.blurple())
-        for result in pull:
-            embed.add_field(name=f'Leader info', value=f'**Name**: {result[0]}, **Title**: {result[1]}, **Stat**: {result[2]}, **Modifier**: {result[3]}', inline=False)
-            embed.add_field(name=f'Kingdom Benefits', value=f'**Economy**: {result[4]}, **Loyalty**: {result[5]}, **Stability**: {result[5]}, **Unrest**: {result[7]}', inline=False)
-        await ctx.response.send_message(embed=embed)
-        msg = await ctx.original_response()
-        for button in buttons:
-            await msg.add_reaction(button)
-        while True:
-            try:
-                reaction, user = await bot.wait_for('reaction_add', check=lambda reaction, user: user.id == ctx.user.id and reaction.emoji in buttons, timeout=60.0)
-            except asyncio.TimeoutError:
-                embed.set_footer(text="Request has timed out.")
-                await msg.edit(embed=embed)
-                await msg.clear_reactions()
-                return print("timed out")
-            else:
-                previous_page = current_page
-                if reaction.emoji == u"\u23EA":
-                    current_page = 1
-                    low = 0 + (10 * (current_page - 1))
-                    offset = 10
-                elif reaction.emoji == u"\u2B05" and current_page > 1:
-                    current_page -= 1
-                    low = 0 + (10 * (current_page - 1))
-                    offset = 10
-                elif reaction.emoji == u"\u27A1" and current_page < max_page:
-                    current_page += 1
-                    low = 0 + (10 * (current_page - 1))
-                    offset = 10
-                elif reaction.emoji == u"\u23E9":
-                    current_page = max_page
-                    low = 0 + (10 * (current_page - 1))
-                    offset = 10
-                for button in buttons:
-                    await msg.remove_reaction(button, ctx.user)
-                if current_page != previous_page:
-                    cursor.execute(f"""SELECT Name, Title, Stat, Modifier, Economy, Loyalty, Stability, Unrest from Leadership WHERE Kingdom = '{kingdom}' LIMIT {low}, {offset}""")
-                    edit_pull = cursor.fetchall()
-                    embed = discord.Embed(title=f"{kingdom} Leadership page {current_page}", description=f"This is list of {kingdom}'s leaders", colour=discord.Colour.blurple())
-                    for result in edit_pull:
-                        embed.add_field(name=f'Leader info', value=f'**Name**: {result[0]}, **Title**: {result[1]}, **Stat**: {result[2]}, **Modifier**: {result[3]}', inline=False)
-                        embed.add_field(name=f'Kingdom Benefits', value=f'**Economy**: {result[4]}, **Loyalty**: {result[5]}, **Stability**: {result[5]}, **Unrest**: {result[7]}', inline=False)
-                    await msg.edit(embed=embed)
-    elif leader != 'All':
-        cursor.execute(f"""SELECT Name, Title, Stat, Modifier, Economy, Loyalty, Stability, Unrest from Leadership WHERE Kingdom = '{kingdom}' AND Title = '{leader}'""", {'Kingdom': kingdom, 'Leader': leader})
-        pull = cursor.fetchone()
-        if pull is None:
-            cursor.execute(f"""SELECT Name, Title, Stat, Modifier, Economy, Loyalty, Stability, Unrest from Leadership WHERE Kingdom = '{kingdom}' AND Name = '{leader}'""", {'Kingdom': kingdom, 'Leader': leader})
-            pull = cursor.fetchone()
-            if pull is None:
-                await ctx.response.send_message(f"{leader} is not a valid leader for that kingdom.")
+    @hex_group.command(name="claim", description="Claim a hex for a kingdom")
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    @app_commands.autocomplete(hex_terrain=hex_terrain_autocomplete)
+    async def claim(self, interaction: discord.Interaction, kingdom: str, password: str, hex_terrain: str):
+        """This command is used to claim a hex for a kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                await cursor.execute("SELECT Hex_Terrain FROM AA_Hex_Terrains WHERE Hex_Terrain = ?", (hex_terrain,))
+                hex_results = await cursor.fetchone()
+                if not hex_results:
+                    await interaction.followup.send(content=f"The hex terrain of {hex_terrain} does not exist.")
+                    return
+                status = await claim_hex(interaction.guild_id, kingdom, hex_terrain, interaction.user.name)
+                await interaction.followup.send(content=status)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error claiming hex: {e}")
+            await interaction.followup.send(content="An error occurred while claiming a hex.")
 
-                cursor.close()
-                db.close()
+    @hex_group.command(name="unclaim", description="Unclaim a hex for a kingdom")
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    @app_commands.autocomplete(hex_terrain=hex_terrain_autocomplete)
+    async def unclaim(self, interaction: discord.Interaction, kingdom: str, password: str, hex_terrain: str):
+        """This command is used to unclaim a hex for a kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                await cursor.execute("SELECT Hex_Terrain FROM AA_Hex_Terrains WHERE Hex_Terrain = ?", (hex_terrain,))
+                hex_results = await cursor.fetchone()
+                if not hex_results:
+                    await interaction.followup.send(content=f"The hex terrain of {hex_terrain} does not exist.")
+                    return
+                status = await unclaim_hex(interaction.guild_id, interaction.user.id, kingdom, hex_terrain)
+                await interaction.followup.send(content=status)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error unclaiming hex: {e}")
+            await interaction.followup.send(content="An error occurred while unclaiming a hex.")
+
+    @hex_group.command(name="add_improvement", description="Add an improvement to a hex")
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    @app_commands.autocomplete(hex_terrain=hex_terrain_autocomplete)
+    @app_commands.autocomplete(improvement=hex_improvement_autocomplete)
+    """This command is used to add an improvement to a hex"""
+    async def add_improvement(self, interaction: discord.Interaction, kingdom: str, password: str, hex_terrain: str, improvement: str):
+        await interaction.response.defer(thinking=True)
+        try:
+            hex_information = await fetch_hex_improvement(interaction.guild_id, improvement)
+            if not hex_information:
+                await interaction.followup.send(content=f"The improvement of {improvement} does not exist.")
                 return
-            else:
-                embed = discord.Embed(title=f"{kingdom}'s {leader}", description=f"This is {kingdom}'s {leader}: {pull[0]}", colour=discord.Colour.blurple())
-                embed.add_field(name=f'Leader info', value=f'**Name**: {pull[0]}, **Title**: {pull[1]}, **Stat**: {pull[2]}, **Modifier**: {pull[3]}', inline=False)
-                embed.add_field(name=f'Kingdom Benefits', value=f'**Economy**: {pull[4]}, **Loyalty**: {pull[5]}, **Stability**: {pull[5]}, **Unrest**: {pull[6]}', inline=False)
-                await ctx.response.send_message(embed=embed)
-        else:
-            embed = discord.Embed(title=f"{kingdom}'s {leader}", description=f"This is {kingdom}'s {leader}: {pull[0]}", colour=discord.Colour.blurple())
-            embed.add_field(name=f'Leader info', value=f'**Name**: {pull[0]}, **Title**: {pull[1]}, **Stat**: {pull[2]}, **Modifier**: {pull[3]}', inline=False)
-            embed.add_field(name=f'Kingdom Benefits', value=f'**Economy**: {pull[4]}, **Loyalty**: {pull[5]}, **Stability**: {pull[5]}, **Unrest**: {pull[6]}', inline=False)
-            await ctx.response.send_message(embed=embed)
-    cursor.close()
-    db.close()
-"""we can make this do "All leaders" or "A" leader because this shouldn't require all info."""
-# I could potentially make this have a VACANT check and show all vacancies in a kingdom.
-
-# @bot.hybrid_group(fallback="help")
-# async def hex(ctx):
-#    await ctx.response.send_message(f"This is for hex management for the kingdom!")
-
-@hex.command()
-@app_commands.describe(hex_terrain='What kind of hex terrain are you claiming?')
-@app_commands.choices(hex_terrain=[discord.app_commands.Choice(name='Cavernous', value=1), discord.app_commands.Choice(name='Coastline', value=2), discord.app_commands.Choice(name='Desert', value=3), discord.app_commands.Choice(name='Forest', value=4), discord.app_commands.Choice(name='Hills', value=5), discord.app_commands.Choice(name='jungle', value=6), discord.app_commands.Choice(name='Marsh', value=7), discord.app_commands.Choice(name='Mountains', value=8), discord.app_commands.Choice(name='Plains', value=9), discord.app_commands.Choice(name='Water', value=10)])
-async def claim(ctx: commands.Context, kingdom: str, password: str, hex_terrain: discord.app_commands.Choice[int]):
-    """This command is used to claim a new hex for a kingdom."""
-    kingdom = str.replace(str.title(kingdom), ";", "")
-    hex_terrain = str.replace(str.title(hex_terrain), ";", "")
-    password = str.replace(password, ";", "")
-    guild_id = ctx.guild_id
-    if hex_terrain == 1:
-        hex_terrain = 1
-    else:
-        hex_terrain = hex_terrain.value
-    author = ctx.user.name
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(f"""SELECT Kingdom, Password FROM Kingdoms where Kingdom = '{kingdom}'""", {'kingdom': kingdom})
-    kingdom_results = cursor.fetchone()
-    cursor.execute(f"""SELECT Hex_Terrain FROM AA_Hex_Terrains WHERE Hex_Terrain = '{hex_terrain}'""", {'Hex_Terrain': hex_terrain})
-    hex_results = cursor.fetchone()
-    cursor.close()
-    db.close()
-    if kingdom_results is None:
-        status = f"You cannot claim hexes for {kingdom} when it is a kingdom which doesn't exist!"
-        await ctx.response.send_message(status)
-    if password != kingdom_results[1]:
-        await ctx.response.send_message(f"You have submitted the wrong password for the kingdom of {kingdom}!")
-    if hex_results is None:
-        await ctx.response.send_message(f"you cannot claim hexes of the {hex_terrain} hex terrain! it doesn't exist!")
-    if kingdom_results is not None and password == kingdom_results[1] and hex_results is not None:
-        status = f"You have claimed a hex for the kingdom of {kingdom}"
-        await Event.claim_hex(self, kingdom, hex_terrain, guild_id, author)
-        await ctx.response.send_message(status)
-
-
-@hex.command()
-@app_commands.describe(hex_terrain='What kind of hex terrain are you claiming?')
-@app_commands.choices(hex_terrain=[discord.app_commands.Choice(name='Cavernous', value=1), discord.app_commands.Choice(name='Coastline', value=2), discord.app_commands.Choice(name='Desert', value=3), discord.app_commands.Choice(name='Forest', value=4), discord.app_commands.Choice(name='Hills', value=5), discord.app_commands.Choice(name='jungle', value=6), discord.app_commands.Choice(name='Marsh', value=7), discord.app_commands.Choice(name='Mountains', value=8), discord.app_commands.Choice(name='Plains', value=9), discord.app_commands.Choice(name='Water', value=10)])
-async def remove(ctx: commands.Context, kingdom: str, password: str, hex_terrain: discord.app_commands.Choice[int]):
-    """This will remove an unimproved hex from play."""
-    kingdom = str.replace(str.title(kingdom), ";", "")
-    password = str.replace(password, ";", "")
-    guild_id = ctx.guild_id
-    author = ctx.user.name
-    if hex_terrain == 1:
-        hex_terrain = 1
-    else:
-        hex_terrain = hex_terrain.value
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(f"""SELECT Kingdom, Password FROM Kingdoms where Kingdom = '{kingdom}'""", {'kingdom': {kingdom}})
-    kingdom_results = cursor.fetchone()
-    cursor.execute(f"""SELECT Kingdom, Hex_Terrain FROM Hexes WHERE Kingdom = '{kingdom}' AND Hex_Terrain = '{hex_terrain}' AND Improvement = 'None'""", {'kingdom': kingdom, 'Hex_Terrain': hex_terrain})
-    hex_results = cursor.fetchone()
-    cursor.close()
-    db.close()
-    if kingdom_results is None:
-        status = f"You cannot claim hexes for {kingdom} when it is a kingdom which doesn't exist!"
-        await ctx.response.send_message(status)
-    if password != kingdom_results[1]:
-        await ctx.response.send_message(f"You have submitted the wrong password for the kingdom of {kingdom}!")
-    if hex_results is None:
-        await ctx.response.send_message(f"you do not have any unimproved hexes of the {hex_terrain} hex terrain to release!")
-    if kingdom_results is not None and password == kingdom_results[1] and hex_results is not None:
-        status = f"You have released a hex from the kingdom of {kingdom}"
-        await Event.relinquish_hex(self, kingdom, hex_terrain, guild_id, author)
-        await ctx.response.send_message(status)
-
-
-@hex.command()
-@app_commands.describe(hex_terrain='What kind of terrain are you applying this to? ')
-@app_commands.choices(hex_terrain=[discord.app_commands.Choice(name='Cavernous', value=1), discord.app_commands.Choice(name='Coastline', value=2), discord.app_commands.Choice(name='Desert', value=3), discord.app_commands.Choice(name='Forest', value=4), discord.app_commands.Choice(name='Hills', value=5), discord.app_commands.Choice(name='jungle', value=6), discord.app_commands.Choice(name='Marsh', value=7), discord.app_commands.Choice(name='Mountains', value=8), discord.app_commands.Choice(name='Plains', value=9), discord.app_commands.Choice(name='Water', value=10)])
-async def improve(ctx: commands.Context, kingdom: str, password: str, hex_terrain: discord.app_commands.Choice[int], improvement: str):
-    """This will improve an unused hex."""
-    kingdom = str.replace(str.title(kingdom), ";", "")
-    improvement = str.replace(str.title(improvement), ";", "")
-    password = str.replace(password, ";", "")
-    guild_id = ctx.guild_id
-    author = ctx.user.name
-    if hex_terrain == 1:
-        hex_terrain = 1
-    else:
-        hex_terrain = hex_terrain.value
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(f"SELECT Kingdom, Password FROM Kingdoms where Kingdom = '{kingdom}'")
-    kingdom_results = cursor.fetchone()
-    cursor.execute(f"""SELECT {hex_terrain} FROM Hexes_Improvements where Improvement = '{improvement}'""", {'Improvement': improvement})
-    improvement_result = cursor.fetchone()
-    cursor.execute(f"""SELECT Amount FROM Hexes where Improvement = 'None' AND Hex_Terrain = '{hex_terrain}' AND kingdom = '{kingdom}'""")
-    hex_results = cursor.fetchone()
-    cursor.close()
-    db.close()
-    if improvement_result is not None:
-        if kingdom_results is None:
-            status = f"You cannot update hexes from a kingdom which doesn't exist!"
-            await ctx.response.send_message(status)
-        if kingdom_results is not None and kingdom_results[1] == password:
-            if hex_results is not None:
-                status = f"You have built a improvement on a hex for the kingdom of {kingdom}"
-                await Event.improve_hex(self, kingdom, hex_terrain, improvement, guild_id, author)
-                await ctx.response.send_message(status)
-        if kingdom_results[1] != password:
-            await ctx.response.send_message(f"you have specified an incorrect password for the kingdom.")
-        if hex_results is None:
-            status = f"You have no available unimproved hexes of the {hex_terrain} hex terrain"
-            await ctx.response.send_message(status)
-    else:
-        await ctx.response.send_message("The improvement could not be built on the supplied hex hex terrain.")
-
-
-@hex.command()
-@app_commands.describe(hex_terrain='What kind of terrain are you applying this to?')
-@app_commands.choices(hex_terrain=[discord.app_commands.Choice(name='Cavernous', value=1), discord.app_commands.Choice(name='Coastline', value=2), discord.app_commands.Choice(name='Desert', value=3), discord.app_commands.Choice(name='Forest', value=4), discord.app_commands.Choice(name='Hills', value=5), discord.app_commands.Choice(name='jungle', value=6), discord.app_commands.Choice(name='Marsh', value=7), discord.app_commands.Choice(name='Mountains', value=8), discord.app_commands.Choice(name='Plains', value=9), discord.app_commands.Choice(name='Water', value=10)])
-async def diminish(ctx: commands.Context, kingdom: str, password: str, hex_terrain: discord.app_commands.Choice[int], improvement: str):
-    """This removes an improvement from a hex"""
-    kingdom = str.replace(str.title(kingdom), ";", "")
-    improvement = str.replace(str.title(improvement), ";", "")
-    password = str.replace(password, ";", "")
-    guild_id = ctx.guild_id
-    author = ctx.user.name
-    if hex_terrain == 1:
-        hex_terrain = 1
-    else:
-        hex_terrain = hex_terrain.value
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(f"""SELECT Kingdom, Password FROM Kingdoms where Kingdom = '{kingdom}'""", {'Kingdom': kingdom})
-    kingdom_results = cursor.fetchone()
-    cursor.execute(f"""SELECT Kingdom FROM Hexes where Kingdom = '{kingdom}' AND Hex_Terrain = '{hex_terrain}' AND Improvement = '{improvement}'""", {'Kingdom': kingdom, 'Hex_Terrain': hex_terrain, 'Improvement': improvement})
-    hexes_results = cursor.fetchone()
-    cursor.close()
-    db.close()
-    if kingdom_results is None:
-        status = f"You cannot update hexes from a kingdom which doesn't exist!"
-        await ctx.response.send_message(status)
-    elif hexes_results is None:
-        await ctx.response.send_message(f"You are lacking a hex that matches the {hex_terrain} hex_terrain or {improvement} improvement")
-    elif kingdom_results[1] != password:
-        await ctx.response.send_message(f"Your password was incorrect for the kingdom of {kingdom}")
-    elif kingdom_results is not None and hexes_results is not None and kingdom_results[1] == password:
-        status = f"You have removed a improvement on a hex for the kingdom of {kingdom}"
-        await Event.diminish_hex(self, kingdom, hex_terrain, improvement, guild_id, author)
-        await ctx.response.send_message(status)
-
-
-@hex.command()
-async def improvements(ctx: commands.Context, kingdom: str, current_page: int = 1):
-    """This command displays the constructed improvements made by a kingdom."""
-    kingdom = str.replace(str.title(kingdom), ";", "")
-    guild_id = ctx.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(f"""SELECT COUNT(Hex_terrain) FROM Hexes where Kingdom = '{kingdom}'""", {'Kingdom': kingdom})
-    leaders = cursor.fetchone()
-    max_page = math.ceil(leaders[0] / 5)
-    if current_page >= max_page:
-        current_page = max_page
-    buttons = ["⏪", "⬅", "➡", "⏩"]  # skip to start, left, right, skip to end
-    low = 0 + (5 * (current_page-1))
-    offset = 10
-    cursor.execute(f"""SELECT Hex_Terrain, Amount, Improvement, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation from Hexes WHERE Kingdom = '{kingdom}' LIMIT {low}, {offset}""", {'Kingdom': kingdom})
-    pull = cursor.fetchall()
-    embed = discord.Embed(title=f"{kingdom} Hex page {current_page}", description=f"This is list of the hexes owned by {kingdom}", colour=discord.Colour.blurple())
-    for result in pull:
-        embed.add_field(name=f'Hex Information', value=f'**Terrain**: {result[0]}, **Improvement*: {result[2]}, **Amount**: {result[1]}', inline=False)
-        embed.add_field(name=f'Hex Benefits', value=f'**Economy**: {result[3]}, **Loyalty**: {result[4]}, **Stability**: {result[5]}, **Unrest**: {result[6]} **Consumption**: {result[7]} **Defence**: {result[8]}, **Taxation**: {result[9]}', inline=False)
-    await ctx.response.send_message(embed=embed)
-    msg = await ctx.original_response()
-    for button in buttons:
-        await msg.add_reaction(button)
-    while True:
-        try:
-            reaction, user = await bot.wait_for('reaction_add', check=lambda reaction, user: user.id == ctx.user.id and reaction.emoji in buttons, timeout=60.0)
-        except asyncio.TimeoutError:
-            embed.set_footer(text="Request has timed out.")
-            await msg.edit(embed=embed)
-            await msg.clear_reactions()
-            cursor.close()
-            db.close()
-            return print("timed out")
-        else:
-            previous_page = current_page
-            if reaction.emoji == u"\u23EA":
-                current_page = 1
-                low = 0 + (10 * (current_page - 1))
-                offset = 10
-            elif reaction.emoji == u"\u2B05" and current_page > 1:
-                current_page -= 1
-                low = 0 + (10 * (current_page - 1))
-                offset = 10
-            elif reaction.emoji == u"\u27A1" and current_page < max_page:
-                current_page += 1
-                low = 0 + (10 * (current_page - 1))
-                offset = 10
-            elif reaction.emoji == u"\u23E9":
-                current_page = max_page
-                low = 0 + (10 * (current_page - 1))
-                offset = 10
-            for button in buttons:
-                await msg.remove_reaction(button, ctx.user)
-            if current_page != previous_page:
-                cursor.execute(f"""SELECT Hex_Terrain, Amount, Improvement, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation from Hexes WHERE Kingdom = '{kingdom}' LIMIT {low}, {offset}""", {'Kingdom': kingdom})
-                pull = cursor.fetchall()
-                embed = discord.Embed(title=f"{kingdom} Hex page {current_page}", description=f"This is list of the hexes owned by {kingdom}", colour=discord.Colour.blurple())
-                for result in pull:
-                    embed.add_field(name=f'Hex Information', value=f'**Terrain**: {result[0]}, **Improvement*: {result[2]}, **Amount**: {result[1]}', inline=False)
-                    embed.add_field(name=f'Hex Benefits', value=f'**Economy**: {result[3]}, **Loyalty**: {result[4]}, **Stability**: {result[5]}, **Unrest**: {result[6]} **Consumption**: {result[7]} **Defence**: {result[8]} **Taxation**:{result[9]}', inline=False)
-                await msg.edit(embed=embed)
-
-
-@hex.command()
-async def store(ctx: commands.Context, current_page: int = 1):
-    """This command displays all available hex improvements."""
-    guild_id = ctx.guild_id
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(f"""SELECT COUNT(Improvement) FROM Hexes_Improvements where Kingdom = '{kingdom}'""", {'Kingdom': kingdom})
-    leaders = cursor.fetchone()
-    max_page = math.ceil(leaders[0] / 5)
-    if current_page >= max_page:
-        current_page = max_page
-    buttons = ["⏪", "⬅", "➡", "⏩"]  # skip to start, left, right, skip to end
-    low = 0 + (5 * (current_page-1))
-    offset = 10
-    cursor.execute(f"""SELECT Improvement, Road_Multiplier, Build_Points, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation, Cavernous, Coastline, Desert, Forest, Hills, Jungle, Marsh, Mountains, Plains, Water from Hexes_Improvements LIMIT {low}, {offset}""", {'Kingdom': kingdom})
-    pull = cursor.fetchall()
-    embed = discord.Embed(title=f"Available Improvements Page {current_page}", description=f"This is list of the available hex improvements.", colour=discord.Colour.blurple())
-    for result in pull:
-        embed.add_field(name=f'Hex Information', value=f'**Improvement*: {result[2]}, **Cost**: {result[2]} BP', inline=False)
-        embed.add_field(name=f'Hex Benefits', value=f'**Economy**: {result[3]}, **Loyalty**: {result[4]}, **Stability**: {result[5]}, **Unrest**: {result[6]} **Consumption**: {result[7]} **Defence**: {result[8]}, **Taxation**: {result[9]}', inline=False)
-        embed.add_field(name=f"Buildable Terrains", value=f'**Cavernous**: {result[10]}, **Coastline**: {result[11]}, **Desert**: {result[12]}, **Forest**: {result[13]}, **Hills**: {result[14]}, **Jungle**: {result[15]}, **Marsh**: {result[16]}, **Mountains**: {result[17]}, **Plains**: {result[18]}, **Water**: {result[19]}')
-    await ctx.response.send_message(embed=embed)
-    msg = await ctx.original_response()
-    for button in buttons:
-        await msg.add_reaction(button)
-    while True:
-        try:
-            reaction, user = await bot.wait_for('reaction_add', check=lambda reaction, user: user.id == ctx.user.id and reaction.emoji in buttons, timeout=60.0)
-        except asyncio.TimeoutError:
-            embed.set_footer(text="Request has timed out.")
-            await msg.edit(embed=embed)
-            await msg.clear_reactions()
-            cursor.close()
-            db.close()
-            return print("timed out")
-        else:
-            previous_page = current_page
-            if reaction.emoji == u"\u23EA":
-                current_page = 1
-                low = 0 + (10 * (current_page - 1))
-                offset = 10
-            elif reaction.emoji == u"\u2B05" and current_page > 1:
-                current_page -= 1
-                low = 0 + (10 * (current_page - 1))
-                offset = 10
-            elif reaction.emoji == u"\u27A1" and current_page < max_page:
-                current_page += 1
-                low = 0 + (10 * (current_page - 1))
-                offset = 10
-            elif reaction.emoji == u"\u23E9":
-                current_page = max_page
-                low = 0 + (10 * (current_page - 1))
-                offset = 10
-            for button in buttons:
-                await msg.remove_reaction(button, ctx.user)
-            if current_page != previous_page:
-                cursor.execute(
-                    f"""SELECT Improvement, Road_Multiplier, Build_Points, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation, Cavernous, Coastline, Desert, Forest, Hills, Jungle, Marsh, Mountains, Plains, Water from Hexes_Improvements LIMIT {low}, {offset}""",
-                    {'Kingdom': kingdom})
-                pull = cursor.fetchall()
-                embed = discord.Embed(title=f"Available Improvements Page {current_page}", description=f"This is list of the available hex improvements.", colour=discord.Colour.blurple())
-                for result in pull:
-                    embed.add_field(name=f'Hex Information', value=f'**Improvement*: {result[2]}, **Cost**: {result[2]} BP', inline=False)
-                    embed.add_field(name=f'Hex Benefits', value=f'**Economy**: {result[3]}, **Loyalty**: {result[4]}, **Stability**: {result[5]}, **Unrest**: {result[6]} **Consumption**: {result[7]} **Defence**: {result[8]}, **Taxation**: {result[9]}', inline=False)
-                    embed.add_field(name=f"Buildable Terrains", value=f'**Cavernous**: {result[10]}, **Coastline**: {result[11]}, **Desert**: {result[12]}, **Forest**: {result[13]}, **Hills**: {result[14]}, **Jungle**: {result[15]}, **Marsh**: {result[16]}, **Mountains**: {result[17]}, **Plains**: {result[18]}, **Water**: {result[19]}')
-                await msg.edit(embed=embed)
-
-
-
-
-@buildings.command()
-async def build(ctx: commands.Context, kingdom: str, password: str, settlement: str, building: str, amount: int):
-    """Player command to build a building in a settlement."""
-    kingdom = str.replace(str.title(kingdom), ";", "")
-    settlement = str.replace(str.title(settlement), ";", "")
-    building = str.replace(str.title(building), ";", "")
-    password = str.replace(password, ";", "")
-    guild_id = ctx.guild_id
-    author = ctx.user.name
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(f"""SELECT Building FROM Buildings_Blueprints WHERE Building = '{building}'""", {'building': building})
-    blueprint_result = cursor.fetchone()
-    cursor.execute(f"""SELECT Password FROM Kingdoms WHERE Kingdom = '{kingdom}'""", {'kingdom': kingdom})
-    kingdom_result = cursor.fetchone()
-    cursor.execute(f"""SELECT Settlement FROM Settlements WHERE Kingdom = '{kingdom}' AND settlement = '{settlement}'""", {'kingdom': kingdom, 'settlement': settlement})
-    settlement_result = cursor.fetchone()
-    cursor.close()
-    db.close()
-    if blueprint_result is None:
-        status = f"You cannot build a building based off a blueprint which hasn't been allowed!"
-        await ctx.response.send_message(status)
-    if kingdom_result is None:
-        await ctx.response.send_message(f'{kingdom} was not a valid kingdom.')
-    if settlement_result is None:
-        await ctx.response.send_message(f'the kingdom of {kingdom} has no valid settlement named {settlement}')
-    if kingdom_result[0] != password:
-        await ctx.response.send_message(f'you attempted to use an invalid password for the kingdom of {kingdom}.')
-    if blueprint_result is not None and settlement_result is not None and kingdom_result[0] == password:
-        status = f"You have built {amount} of {building} within your settlement!"
-        await ctx.response.send_message(status)
-        await Event.construct_building(self, kingdom, settlement, building, amount, guild_id, author)
-
-
-@buildings.command()
-async def destroy(ctx: commands.Context, kingdom: str, password: str, settlement: str, building: str, amount: int):
-    """This is a command for a player to remove buildings from their settlement"""
-    kingdom = str.replace(str.title(kingdom), ";", "")
-    settlement = str.replace(str.title(settlement), ";", "")
-    building = str.replace(str.title(building), ";", "")
-    password = str.replace(password, ";", "")
-    amount = abs(amount)
-    guild_id = ctx.guild_id
-    author = ctx.user.name
-    db = sqlite3.connect(f"Pathparser_{guild_id}.sqlite")
-    cursor = db.cursor()
-    cursor.execute(f"""SELECT Building, Constructed FROM Buildings WHERE Building = '{building}'""", {'building': building})
-    building_result = cursor.fetchone()
-    cursor.execute(f"""SELECT Password FROM Kingdoms WHERE Kingdom = '{kingdom}'""", {'kingdom': kingdom})
-    kingdom_result = cursor.fetchone()
-    cursor.close()
-    db.close()
-    if kingdom_result[0] != password:
-        await ctx.response.send_message(f"How dare you try to put in the incorrect password for {kingdom}!")
-    elif building_result is None:
-        status = f"You cannot remove a building that you haven't built!!!"
-        await ctx.response.send_message(status)
-    elif building_result[1] - amount < 0:
-        await ctx.response.send_message(f"Brother! You cannot destroy this {amount} of {building}s! you only have {building_result[1]} built!")
-    else:
-        status = f"You have destroyed {amount} of {building} within your settlement of {settlement}!"
-        await ctx.response.send_message(status)
-        await Event.destroy_building(self, kingdom, settlement, building, amount, guild_id, author)
-
-
-
-class LeadershipView(discord.ui.View):
-    def __init__(self, user_id: int, guild_id: int, modifiers: dict):
-        super().__init__(timeout=180)
-        self.user_id = user_id
-        self.guild_id = guild_id
-        self.modifiers = modifiers  # Dictionary of attribute names and their modifiers
-
-        # Dynamically create buttons and add callbacks
-        for attribute in self.modifiers.keys():
-            button = discord.ui.Button(
-                label=attribute.capitalize(),
-                style=discord.ButtonStyle.primary
-            )
-            button.callback = self.create_roll_callback(leadership_role)  # Assign callback
-            self.add_item(button)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        """Ensure that only the user who initiated the view can interact with the buttons."""
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "You cannot interact with this button.",
-                ephemeral=False
-            )
-            return False
-        return True
-
-    def create_roll_callback(self, leadership_role: str):
-        """Generate a callback function for rolling the given attribute."""
-
-        async def callback(interaction: discord.Interaction):
-            roll = random.randint(1, 20)
-            content = f"**Rolling :game_die: {attribute.capitalize()}** base: {roll}: total: {roll + self.modifiers[attribute]}"
-            content += ":broken_heart: **Critical Failure**" if roll == 1 else ""
-            content += ":sparkles: **Critical Success**" if roll == 20 else ""
-            await interaction.response.send_message(content=content)
-
-        return callback
+            status = await add_improvement(interaction.guild_id, interaction.user.id, kingdom, hex_information, hex_terrain)
+            await interaction.followup.send(content=status)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error adding improvement: {e}")
+            await interaction.followup.send(content="An error occurred while adding an improvement.")
