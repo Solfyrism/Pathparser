@@ -207,7 +207,7 @@ async def fetch_timecard_data_from_db(guild_id, player_name, day, utc_offset):
         "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
     ]
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             # Fetch the player's timezone from the database
             if utc_offset == 0:
@@ -274,7 +274,7 @@ async def fetch_group_availability_from_db(guild_id, group_id, day, utc_offset):
         "20:00", "20:30", "21:00", "21:30", "22:00", "22:30", "23:00", "23:30"
     ]
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute("SELECT Player_Name from Sessions_Group_Presign where Group_id = ?", (group_id,))
             players = await cursor.fetchall()
@@ -1520,7 +1520,7 @@ class AvailabilityView(discord.ui.View):
                     "No availability entries to save.", ephemeral=False
                 )
                 return
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
                 cursor = await db.cursor()
                 for slot in self.time_slots:
                     user_name = interaction.user.name
@@ -1890,7 +1890,7 @@ class UnavailabilityView(discord.ui.View):
                 )
                 return
 
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
                 cursor = await db.cursor()
                 for slot in self.time_slots:
                     user_name = interaction.user.name
@@ -2019,7 +2019,7 @@ async def player_signup(
         character_name: str,
         warning_duration: typing.Optional[int]) -> bool:
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild.id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
                 """Select 
@@ -2088,7 +2088,7 @@ def signup_embed(character_name: str, title: str, level: int, tier: int, gold: i
 
 
 async def player_leave_session(guild: discord.Guild, session_id: int, player_name: str, player: bool = True) -> bool:
-    async with aiosqlite.connect(f"Pathparser_{guild.id}_test.sqlite") as db:
+    async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
         try:
             cursor = await db.cursor()
             await cursor.execute("SELECT Session_Thread FROM Sessions WHERE Session_ID = ?", (session_id,))
@@ -2154,7 +2154,7 @@ async def update_report(guild_id: int, overview: str, world_id: str, article_id:
 
 async def delete_group(guild: discord.Guild, group_id: int, role_id: int) -> bool:
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild.id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute("DELETE FROM Sessions_group WHERE Group_ID = ?", (group_id,))
             await db.commit()
@@ -2175,7 +2175,7 @@ async def create_new_group(
         host_character: str,
         description: str) -> typing.Optional[discord.Role]:
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild.id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
                 "INSERT INTO Sessions_Group(Player_Name, Group_Name, Host_Character, Description) VALUES (?, ?, ?, ?)",
@@ -2208,7 +2208,7 @@ async def join_group(
         group_id: int,
         group_role_id) -> bool:
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild.id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
                 "INSERT INTO Sessions_Group_Presign(Group_ID, Player_Name) VALUES (?, ?)",
@@ -2228,7 +2228,7 @@ async def leave_group(
         group_id: int,
         group_role_id: int) -> bool:
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild.id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute("DELETE FROM Sessions_Group_Presign WHERE Group_ID = ? AND Player_Name = ?",
                                  (group_id, player_name))
@@ -2248,7 +2248,7 @@ async def leave_group(
 
 async def build_timesheet(guild_id: int, player_name: str) -> bool:
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             day = 1
             while day < 8:
@@ -2263,7 +2263,7 @@ async def build_timesheet(guild_id: int, player_name: str) -> bool:
 
 async def clear_timesheet(guild_id: int, player_name: str) -> bool:
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute("DELETE FROM Player_Timecard WHERE Player_Name = ?", (player_name,))
             await db.commit()
@@ -2275,7 +2275,7 @@ async def clear_timesheet(guild_id: int, player_name: str) -> bool:
 
 async def update_player_timezone(guild_id: int, player_name: str, timezone: str) -> bool:
     try:
-        async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute("UPDATE Player_Timecard SET UTC_Offset = ? WHERE Player_Name = ?",
                                  (timezone, player_name))
@@ -2358,7 +2358,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         warning_duration = -1 if notification is None else notification.value
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
                     "SELECT Session_Name, Play_location, hammer_time, game_link, Session_Range_ID, Session_Range, Session_Thread, overflow FROM Sessions WHERE Session_ID = ? AND IsActive = 1",
@@ -2480,7 +2480,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         warning_duration = -1 if notification is None else notification.value
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
                 update_signups = await cursor.execute(
                     "UPDATE Sessions_Signups SET Notification_Warning = ? WHERE Session_ID = ? AND Player_ID = ?",
@@ -2502,7 +2502,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     async def leave_session(self, interaction: discord.Interaction, session_id: int):
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
                     "SELECT Session_Name, Play_location, hammer_time, Game_Link FROM Sessions WHERE Session_ID = ?",
@@ -2550,7 +2550,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         """ALL: THIS COMMAND DISPLAYS SESSION INFORMATION"""
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as conn:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as conn:
                 cursor = await conn.cursor()
                 view_type = 0 if group == 1 else group.value - 1
                 count = 0
@@ -2598,7 +2598,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         """Report on a session"""
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
                     "SELECT Session_ID, Session_Name, Article_Link, Article_ID, History_ID FROM Sessions WHERE Session_ID = ? AND IsActive = 0",
@@ -2638,7 +2638,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         """Open a session Request"""
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute("Select Group_ID, Role_ID from Sessions_Group where Player_Name = ?",
                                      (interaction.user.name,))
@@ -2661,7 +2661,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         """Delete a session Request"""
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute("Select Group_ID, Role_ID from Sessions_Group where Player_Name = ?",
                                      (interaction.user.name,))
@@ -2681,7 +2681,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         """Sync your Groups up for a GM to view whose in a session request group."""
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute("Select Group_ID, Role_ID from Sessions_Group where Group_ID = ?", (group_id,))
                 group = await cursor.fetchone()
@@ -2713,7 +2713,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         """leave a group because you hate everyone inside."""
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute("Select Group_ID, Role_ID from Sessions_Group where Group_ID = ?", (group_id,))
                 group = await cursor.fetchone()
@@ -2744,7 +2744,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         """Display all participants and signups for a group"""
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as conn:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as conn:
                 cursor = await conn.cursor()
                 if group_id is None:
                     await cursor.execute("SELECT COUNT(*) FROM sessions_group")
@@ -2823,7 +2823,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         await interaction.response.defer(thinking=True, ephemeral=False)
         change_value = 1 if change is None else change.value
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
                     "SELECT Distinct(UTC_Offset), COUNT(*) FROM Player_Timecard WHERE Player_Name = ? Group by UTC_Offset",
@@ -2878,7 +2878,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         """Set your timezone for availability"""
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
                     "SELECT Distinct(UTC_Offset), COUNT(*) FROM Player_Timecard WHERE Player_Name = ? Group by UTC_Offset",
@@ -2919,7 +2919,7 @@ class PlayerCommands(commands.Cog, name='Player'):
             await interaction.followup.send(embed=embed)
         else:
             player = interaction.user.name if player is None else player.name
-            async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute("Select UTC_Offset from Player_Timecard where Player_Name = ?",
                                      (interaction.user.name,))
@@ -2959,7 +2959,7 @@ class PlayerCommands(commands.Cog, name='Player'):
                                       colour=discord.Colour.red())
                 await interaction.followup.send(embed=embed)
             else:
-                async with aiosqlite.connect(f"Pathparser_{guild_id}_test.sqlite") as db:
+                async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
                     cursor = await db.cursor()
                     await cursor.execute(
                         "Select UTC_Offset from Player_Timecard where Player_Name = ?",
@@ -3002,7 +3002,7 @@ class GroupManyView(shared_functions.ShopView):
                         FROM Sessions_Group_Presign
                         WHERE Group_ID = ? ORDER BY Player_Name Limit ? Offset ? 
                     """
-        async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
             cursor = await db.execute(statement, (self.group_id, self.limit, self.offset))
             self.results = await cursor.fetchall()
 
@@ -3021,7 +3021,7 @@ class GroupManyView(shared_functions.ShopView):
     async def get_max_items(self):
         """Get the total number of titles."""
         if self.max_items is None:
-            async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
                 cursor = await db.execute("SELECT COUNT(*) FROM Sessions_Group_Presign WHERE Group_ID = ?",
                                           (self.group_id,))
                 count = await cursor.fetchone()
@@ -3045,7 +3045,7 @@ class GroupView(shared_functions.ShopView):
                         SELECT Group_ID, Group_Name, Role_ID, Player_Name, Host_Character, Description
                         FROM Sessions_Group Order by Group_ID Limit ? Offset ? 
                     """
-        async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
             cursor = await db.execute(statement, (self.group_id, self.limit, self.offset))
             self.results = await cursor.fetchall()
 
@@ -3065,7 +3065,7 @@ class GroupView(shared_functions.ShopView):
     async def get_max_items(self):
         """Get the total number of titles."""
         if self.max_items is None:
-            async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
                 cursor = await db.execute("SELECT COUNT(*) FROM Sessions_Group",
                                           (self.group_id,))
                 count = await cursor.fetchone()
@@ -3326,7 +3326,7 @@ class DisplayGroupTimesheet(discord.ui.View):
     async def update_results(self):
         """Fetch the results for the current page."""
         try:
-            async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
                 # Fetch all group data
                 await cursor.execute(
@@ -3393,7 +3393,7 @@ class DisplayGroupTimesheet(discord.ui.View):
     async def get_max_items(self):
         """Get the total number of items. To be implemented in subclasses."""
 
-        async with aiosqlite.connect(f"Pathparser_{self.guild_id}_test.sqlite") as db:
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute("SELECT COUNT(*) FROM Sessions_Group""")
             count = await cursor.fetchone()

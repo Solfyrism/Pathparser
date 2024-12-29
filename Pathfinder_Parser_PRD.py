@@ -41,7 +41,7 @@ async def reinstate_reminders(server_bot) -> None:
     now = datetime.datetime.now(datetime.timezone.utc)
     for guild in guilds:
         try:
-            async with aiosqlite.connect(f"pathparser_{guild.id}_test.sqlite") as db:
+            async with aiosqlite.connect(f"pathparser_{guild.id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
                     "SELECT Session_ID, Session_Thread, Hammer_Time FROM Sessions WHERE IsActive = 1 AND Hammer_Time > ?",
@@ -70,7 +70,7 @@ async def reinstate_session_buttons(server_bot) -> None:
     for guild in guilds:
         try:
 
-            async with aiosqlite.connect(f"pathparser_{guild.id}_Test.sqlite") as db:
+            async with aiosqlite.connect(f"pathparser_{guild.id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
                     "SELECT Session_ID, Session_Name, Message, Session_Thread, Hammer_Time FROM Sessions WHERE IsActive = 1 AND hammer_time > ?",
@@ -115,7 +115,9 @@ async def on_ready():
     await bot.add_cog(PlayerCommands(bot))
     await bot.add_cog(ReviewerCommands(bot))
     await bot.add_cog(RPCommands(bot))
+    print("cogs added")
     await bot.tree.sync()
+    print("tree synced.")
     await reinstate_reminders(bot)
     await reinstate_session_buttons(bot)
     await reinstate_cache(bot)
@@ -219,11 +221,11 @@ async def on_message(message):
 
 @bot.event
 async def on_join(guild):
-    shutil.copyfile(f"C:/pathparser/pathparser_test.sqlite",
-                    f"C:/pathparser/pathparser_{guild.id}_test.sqlite")
+    shutil.copyfile(f"C:/pathparser/pathparser.sqlite",
+                    f"C:/pathparser/pathparser_{guild.id}.sqlite")
 
 
-bot.run(os.getenv("DISCORD_TOKEN_V2"))
+bot.run(os.getenv("DISCORD_TOKEN"))
 bot.loop.create_task(shared_functions.clear_autocomplete_cache())
 
 logging.basicConfig(
