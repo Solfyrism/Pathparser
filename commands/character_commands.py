@@ -418,7 +418,7 @@ async def gold_calculation(
                 # Only half the gold change is applied
                 adjusted_gold_change = (gold_change * Decimal('0.5')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             elif oath in ('Poverty', 'Absolute') and not ignore_limitations:
-                print("i'm over here", level, oath, gold, gold_change, gold_value_calc)
+                print("i'm over here", level, oath, gold, gold_value, gold_change, gold_value_calc)
                 max_gold = (Decimal('80') * Decimal(level) ** 2) if oath == 'Poverty' else (
                         Decimal(level) * Decimal('5'))
                 print(max_gold)
