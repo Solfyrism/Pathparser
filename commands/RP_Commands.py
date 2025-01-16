@@ -219,7 +219,7 @@ async def handle_rp_message(message):
 
         # Extract settings with defaults
         min_content_length = settings.min_post_length or 50
-        similarity_threshold = settings.similarity_threshold or 0.8
+        similarity_threshold = settings.similarity_threshold / 100 or 0.8
         minimum_reward = settings.min_rewards or 1
         maximum_reward = settings.max_rewards or 100
         reward_multiplier = settings.reward_multiplier or 1
@@ -273,9 +273,7 @@ async def handle_rp_message(message):
                 logging.debug(
                     f"Message is too short ({len(content)} characters); minimum is {min_content_length}"
                 )
-                await message.channel.send(
-                    f"{message.author.mention}, your post is too short to earn rewards."
-                )
+
                 return
 
             # Content Similarity Check
@@ -314,11 +312,6 @@ async def handle_rp_message(message):
                     is_similar = True
                     break
 
-            if is_similar:
-                await message.channel.send(
-                    f"{message.author.mention}, your post is too similar to your recent posts and won't earn rewards."
-                )
-                return
 
             # Time since last post
             if last_post_time:
@@ -356,18 +349,13 @@ async def handle_rp_message(message):
             logging.debug(f"User {user_id}'s data updated in database")
 
         # Provide feedback to the user
-        await message.channel.send(
-            f"{message.author.mention}, you have earned {reward} {reward_name}! "
-            f"Your new balance is {balance} {reward_name} {reward_emoji}."
-        )
+
         logging.debug(f"Sent reward message to user {user_id}")
 
     except Exception as e:
         logging.exception(f"Error in handle_rp_message: {e}")
         # Optionally, send a message to the channel or notify an admin
-        await message.channel.send(
-            f"{message.author.mention}, an error occurred while processing your message."
-        )
+
 
 
 def truncate_text(text):
@@ -553,7 +541,7 @@ class RPCommands(commands.Cog, name='RP'):
     @roleplay_group.command(name="help", description="Get help with roleplay commands.")
     async def roleplay_help(self, interaction: discord.Interaction):
         """Help commands for the associated tree"""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         embed = discord.Embed(
             title=f"Roleplay Commands Help",
             description=f'This is a list of GM administrative commands',
@@ -574,7 +562,7 @@ class RPCommands(commands.Cog, name='RP'):
             **/roleplay use** - Use an item from your inventory! \n
             """, inline=False)
 
-        await interaction.followup.send(embed=embed, ephemeral=False)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @roleplay_group.command(name="balance", description="Check your roleplay balance")
     async def roleplay_balance(self, interaction: discord.Interaction):
@@ -602,10 +590,11 @@ class RPCommands(commands.Cog, name='RP'):
             user_rank = await cursor.fetchone()
             if user_data:
                 balance = user_data[0]
+                formatted_balance = "{:,}".format(balance)
                 ordinal_position = shared_functions.ordinal(user_rank[0])
                 embed = discord.Embed(title=interaction.user.name, description=f"Leaderboard Rank: {ordinal_position}")
                 embed.set_thumbnail(url=interaction.user.avatar.url)
-                embed.add_field(name="Balance", value=f"{balance} {reward_name} {reward_emoji}")
+                embed.add_field(name="Balance", value=f"{formatted_balance} {reward_name} {reward_emoji}")
                 await interaction.followup.send(embed=embed)
             else:
                 await interaction.followup.send("You don't have a balance yet.")
@@ -827,12 +816,13 @@ class RPCommands(commands.Cog, name='RP'):
             user_id = interaction.user.id
             guild_id = interaction.guild.id
             limit = 10
-            offset = (page_number - 1) * limit
+            offset = max((page_number - 1) * limit, 1)
+            print(offset)
             leaderboard_view = LeaderboardView(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit,
                                                interaction=interaction)
             await leaderboard_view.update_results()
             await leaderboard_view.create_embed()
-            await interaction.followup.send(embed=leaderboard_view.embed)
+            await interaction.followup.send(embed=leaderboard_view.embed, view=leaderboard_view)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"An error occurred while fetching leaderboard: {e}")
             await interaction.followup.send("An error occurred while fetching leaderboard.")
@@ -866,7 +856,7 @@ class RPCommands(commands.Cog, name='RP'):
                 item_count = await cursor.fetchone()
                 (item_count,) = item_count
                 page_number = min(max(page_number, 1), ceil(item_count / 10))
-                offset = (page_number - 1) * 5
+                offset = (page_number - 1) * 10
                 view = RPStoreView(user_id=interaction.user.id, guild_id=interaction.guild.id, offset=offset, limit=10,
                                    interaction=interaction)
                 await view.update_results()
@@ -890,6 +880,7 @@ class RPCommands(commands.Cog, name='RP'):
                 reward_emoji = settings.reward_emoji if settings.reward_emoji else "<:RPCash:884166313260503060>"
             async with aiosqlite.connect(f"pathparser_{interaction.guild.id}.sqlite") as db:
                 cursor = await db.cursor()
+                print(name)
                 statement = """
                     SELECT Item_ID, name, price, description, stock_remaining, inventory, usable, sellable, custom_message,
                     matching_requirements, Requirements_1_type, Requirements_1_pair, Requirements_2_type, Requirements_2_pair, Requirements_3_type, Requirements_3_pair,
@@ -900,6 +891,7 @@ class RPCommands(commands.Cog, name='RP'):
                 """
                 cursor = await cursor.execute(statement, (name,))
                 result = await cursor.fetchone()
+                print(result)
                 embed = discord.Embed(title=name,
                                       description=f"Information about the item {name}", )
                 (
@@ -912,13 +904,18 @@ class RPCommands(commands.Cog, name='RP'):
                     actions_2_type, actions_2_subtype, actions_2_behavior,
                     actions_3_type, actions_3_subtype, actions_3_behavior,
                     image_link) = result
-
+                stock_remaining = '∞' if stock_remaining == -1 else stock_remaining
+                inventory = "can be stored" if inventory == 1 else "consumed immediately"
+                usable = "Yes" if usable == 1 else "No"
+                sellable = "Yes" if sellable == 1 else "No"
                 embed.set_thumbnail(url=image_link)
-                content = f'**Price**: {price} {reward_name} {reward_emoji}, **Stock Remaining**: {stock_remaining}, **Inventory**: {inventory}\r\n' \
+                content = f'**Price**: {price} {reward_name} {reward_emoji}, **Stock Remaining**: {stock_remaining}, \r\n**Inventory**: {inventory}\r\n' \
                           f'**Usable**: {usable}, **Sellable**: {sellable}\r\n'
-                content += f'**Custom Message On Use**: {custom_message}\r\n'
+
                 embed.add_field(name=f'**Item Name**: {name}: **ID**: {item_ID}',
                                 value=content, inline=False)
+                embed.add_field(name="Use Message", value=custom_message, inline=False)
+                embed.add_field(name="Description", value=description, inline=False)
                 requirements_group = (
                     requirements_1_type, requirements_2_type, requirements_3_type, requirements_1_pair,
                     requirements_2_pair,
@@ -928,17 +925,24 @@ class RPCommands(commands.Cog, name='RP'):
                     actions_3_subtype,
                     actions_1_behavior, actions_2_behavior, actions_3_behavior)
                 additional_content = ""
+                requirement_dict = {'1': "Role", '2': "Balance", '3': "Item"}
+                matching_dict = {'1': "All", '2': "Any", '3': "None"}
                 if any(requirements_group):
-                    additional_content += "**Requirements**: {matching_requirements}\r\n"
-                    additional_content += f'**Requirement 1**: {requirements_1_type}, {requirements_1_pair}\r\n' if requirements_1_type else ""
-                    additional_content += f'**Requirement 2**: {requirements_2_type}, {requirements_2_pair}\r\n' if requirements_2_type else ""
-                    additional_content += f'**Requirement 3**: {requirements_3_type}, {requirements_3_pair}\r\n' if requirements_3_type else ""
+                    additional_content += f"**Requirements**: {matching_dict.get(matching_requirements, 'Unknown')}\r\n"
+                    additional_content += f'**Requirement 1**: {requirement_dict.get(requirements_1_type, "Unknown")}, {requirements_1_pair}\r\n' if requirements_1_type else ""
+                    additional_content += f'**Requirement 2**: {requirement_dict.get(requirements_2_type, "Unknown")}, {requirements_2_pair}\r\n' if requirements_2_type else ""
+                    additional_content += f'**Requirement 3**: {requirement_dict.get(requirements_3_type, "Unknown")}, {requirements_3_pair}\r\n' if requirements_3_type else ""
                 if any(actions_group):
-                    additional_content += f'**Action 1**: {actions_1_type}, {actions_1_subtype}, {actions_1_behavior}\r\n' if actions_1_type else ""
-                    additional_content += f'**Action 2**: {actions_2_type}, {actions_2_subtype}, {actions_2_behavior}\r\n' if actions_2_type else ""
-                    additional_content += f'**Action 3**: {actions_3_type}, {actions_3_subtype}, {actions_3_behavior}\r\n' if actions_3_type else ""
+                    actions_1_behavior = f"<@&{actions_1_behavior}>" if actions_1_behavior and actions_1_type == '1' else actions_1_behavior
+                    actions_2_behavior = f"<@&{actions_2_behavior}>" if actions_2_behavior and actions_2_type == '1' else actions_2_behavior
+                    actions_3_behavior = f"<@&{actions_3_behavior}>" if actions_3_behavior and actions_3_type == '1' else actions_3_behavior
+                    behavior_dict = {'1': "Add", '2': "Remove"}
+                    additional_content += f'**Action 1**: {requirement_dict.get(actions_1_type, "Unknown")}, {behavior_dict.get(actions_1_subtype, "unknown")}, {actions_1_behavior}\r\n' if actions_1_type else ""
+                    additional_content += f'**Action 2**: {requirement_dict.get(actions_2_type, "Unknown")}, {behavior_dict.get(actions_2_subtype, "unknown")}, {actions_2_behavior}\r\n' if actions_2_type else ""
+                    additional_content += f'**Action 3**: {requirement_dict.get(actions_3_type, "Unknown")}, {behavior_dict.get(actions_3_subtype, "unknown")}, {actions_3_behavior}\r\n' if actions_3_type else ""
                 embed.add_field(name=f'**Additional Info**',
                                 value=additional_content, inline=False)
+                await interaction.followup.send(embed=embed)
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(f"an issue occurred in the get_item_info command: {e}")
             await interaction.followup.send(
@@ -962,7 +966,7 @@ class LeaderboardView(shared_functions.ShopView):
                         ORDER BY Balance Desc  Limit ? Offset ?
                     """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
-            cursor = await db.execute(statement, (self.limit, self.offset))
+            cursor = await db.execute(statement, (self.limit, self.offset - 1))
             self.results = await cursor.fetchall()
 
     async def create_embed(self):
@@ -970,7 +974,7 @@ class LeaderboardView(shared_functions.ShopView):
         current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         embed_list = []
-        x = 0
+        x = 1
         async with roleplay_info_cache.lock:
             if self.guild_id not in roleplay_info_cache.cache:
                 await add_guild_to_rp_cache(self.guild_id)
@@ -978,9 +982,10 @@ class LeaderboardView(shared_functions.ShopView):
             reward_emoji = settings.reward_emoji if settings.reward_emoji else "<:RPCash:884166313260503060>"
 
         for item in self.results:
-            x += 1
             (user_name, balance) = item
-            embed_list.append(f'**{self.offset - 1 +1 + x}**. {user_name} • {reward_emoji}{balance}')
+            formatted_balance = "{:,}".format(balance)
+            embed_list.append(f'**{self.offset - 1 + x}**. {user_name} • {reward_emoji}{formatted_balance}')
+            x += 1
         embed_list = "\n".join(embed_list)
         self.embed = discord.Embed(
             title=f"Leaderboard",
@@ -1093,9 +1098,13 @@ class RPStoreView(shared_functions.ShopView):
              actions_2_behavior, actions_3_type, actions_3_subtype, actions_3_behavior,
              image_link) = item
             stock_remaining = '∞' if stock_remaining == -1 else stock_remaining
+            inventory = "can be stored" if inventory == "1" else "consumed immediately"
+            usable = "Yes" if usable == "1" else "No"
+            sellable = "Yes" if sellable == "1" else "No"
             content = f'**Price**: {price} {reward_name} {reward_emoji}, **Stock Remaining**: {stock_remaining}, **Inventory**: {inventory}\r\n' \
                       f'**Usable**: {usable}, **Sellable**: {sellable}\r\n'
-            content += f'**Custom Message On Use**: {custom_message}\r\n'
+            content += f'\r\n{description}'
+            print(description)
             self.embed.add_field(name=f'**Item Name**: {name}: **ID**: {item_id}',
                                  value=content, inline=False)
             requirements_group = (
@@ -1106,6 +1115,8 @@ class RPStoreView(shared_functions.ShopView):
                 actions_1_subtype, actions_2_subtype, actions_3_subtype,
                 actions_1_behavior, actions_2_behavior, actions_3_behavior)
             additional_content = ""
+            if custom_message:
+                additional_content += f"**Custom Message on use**: {custom_message}\r\n"
             if any(requirements_group):
                 additional_content += f"**Requirements**: {matching_dict.get(matching_requirements, 'Unknown')}\r\n"
                 additional_content += f'**Requirement 1**: {requirement_dict.get(requirements_1_type, "Unknown")}, {requirements_1_pair}\r\n' if requirements_1_type else ""
@@ -1116,7 +1127,8 @@ class RPStoreView(shared_functions.ShopView):
                 additional_content += f'**Action 1**: {requirement_dict.get(actions_1_type, "Unknown")}, {behavior_dict.get(actions_1_subtype, "Unknown")}, {actions_1_behavior}\r\n' if actions_1_type else ""
                 additional_content += f'**Action 2**: {requirement_dict.get(actions_2_type, "Unknown")}, {behavior_dict.get(actions_2_subtype, "Unknown")}, {actions_2_behavior}\r\n' if actions_2_type else ""
                 additional_content += f'**Action 3**: {requirement_dict.get(actions_3_type, "Unknown")}, {behavior_dict.get(actions_3_subtype, "Unknown")}, {actions_3_behavior}\r\n' if actions_3_type else ""
-            if any([requirements_group, actions_group]):
+
+            if any([requirements_group, actions_group, custom_message]):
                 self.embed.add_field(name=f'**Additional Info**',
                                      value=additional_content, inline=False)
 
@@ -1131,7 +1143,7 @@ class RPStoreView(shared_functions.ShopView):
 
 
 logging.basicConfig(
-    level=logging.INFO,  # Set the minimum logging level
+    level=logging.DEBUG,  # Set the minimum logging level
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     filename='application.log',  # Log to a file
     filemode='a'  # Append to the file

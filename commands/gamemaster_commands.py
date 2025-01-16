@@ -161,7 +161,7 @@ async def session_reward_reversal(
                             gold_value=Decimal(gold_value),
                             gold_value_max=Decimal(gold_value_max),
                             gold_change=-Decimal(info_received_gold),
-                            gold_value_change=Decimal(0),
+                            gold_value_change=None,
                             gold_value_max_change=-Decimal(session_gold),
                             reason='Session Back out',
                             source=source
@@ -342,8 +342,8 @@ async def session_reward_calculation(
                         gold_value=Decimal(gold_value),
                         gold_value_max=Decimal(gold_value_max),
                         gold_change=Decimal(session_base_info.rewarded_gold),
-                        gold_value_change=Decimal(0),
-                        gold_value_max_change=Decimal(0),
+                        gold_value_change=None,
+                        gold_value_max_change=None,
                         author_name=author_name,
                         author_id=interaction.user.id,
                         reason='Session Reward',
@@ -425,7 +425,7 @@ async def session_reward_calculation(
 
                 if isinstance(return_essence, tuple):
                     (essence_total, essence_change) = return_essence
-                    character_updates.essence_package = essence_total
+                    character_updates.essence = essence_total
                     character_changes.essence = essence_total
                     character_changes.essence_change = essence_change
 
@@ -500,6 +500,7 @@ class SessionBaseInfo:
     overview: str
     description: str
     plot: str
+    region: int
 
 
 async def create_session(
@@ -549,13 +550,13 @@ async def build_edit_info(
             cursor = await db.cursor()
 
             await cursor.execute(
-                "SELECT Session_Name, Session_Range, Session_Range_ID, Player_Limit, Play_Location, hammer_time, game_link, Overview, Description, Related_Plot, Overflow, Message, Session_Thread FROM Sessions WHERE Session_ID = ? AND GM_Name = ? AND IsActive = 1 Limit 1",
+                "SELECT Session_Name, Session_Range, Session_Range_ID, Player_Limit, Play_Location, hammer_time, game_link, Overview, Description, Related_Plot, Overflow, Message, Session_Thread, Region FROM Sessions WHERE Session_ID = ? AND GM_Name = ? AND IsActive = 1 Limit 1",
                 (session_id, gm_name))
             session_info = await cursor.fetchone()
 
             if session_info:
                 (session_name, session_range, session_range_id, player_limit, play_location, hammer_time, game_link,
-                 overview, description, plot, overflow, message, session_thread) = session_info
+                 overview, description, plot, overflow, message, session_thread, region) = session_info
 
                 built_session_info = SessionBaseInfo(
                     guild_id=guild_id,
@@ -570,7 +571,8 @@ async def build_edit_info(
                     overview=overview,
                     description=description,
                     plot=plot,
-                    overflow=overflow)
+                    overflow=overflow,
+                    region=region)
 
                 return built_session_info, message, session_thread
 
@@ -588,10 +590,10 @@ async def edit_session(
         async with aiosqlite.connect(f"Pathparser_{session_info.guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
-                "UPDATE Sessions SET Session_Name = ?, Session_Range = ?, Session_Range_ID = ?, Play_Location = ?, hammer_time = ?, game_link = ?, Overview = ?, Description = ?, Player_Limit = ?, Related_plot = ?, overflow = ? WHERE Session_ID = ?",
+                "UPDATE Sessions SET Session_Name = ?, Session_Range = ?, Session_Range_ID = ?, Play_Location = ?, hammer_time = ?, game_link = ?, Overview = ?, Description = ?, Player_Limit = ?, Related_plot = ?, overflow = ?, region = ? WHERE Session_ID = ?",
                 (session_info.session_name, session_info.session_range, session_info.session_range_id,
                  session_info.play_location, session_info.hammer_time, session_info.game_link, session_info.overview,
-                 session_info.description, session_info.player_limit, session_info.plot, session_info.overflow,
+                 session_info.description, session_info.player_limit, session_info.plot, session_info.overflow, session_info.region,
                  session_id))
             await db.commit()
 
@@ -724,6 +726,12 @@ async def create_session_embed(embed_info: SessionEmbedInfo) -> Union[tuple[Embe
             print(configs)
             if configs:
                 session_channel_info = configs.get('Sessions_Channel')
+            else:
+                await shared_functions.add_guild_to_cache(embed_info.guild.id)
+                configs = shared_functions.config_cache.cache.get(embed_info.guild.id)
+                print(configs)
+                if configs:
+                    session_channel_info = configs.get('Sessions_Channel')
 
         session_channel = embed_info.guild.get_channel(session_channel_info)
 
@@ -821,7 +829,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     @gamemaster_group.command(name='help', description='Help commands for the associated tree')
     async def help(self, interaction: discord.Interaction):
         """Help commands for the associated tree"""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         embed = discord.Embed(
             title=f"Gamemaster Help",
             description=f'This is a list of GM administrative commands',
@@ -875,7 +883,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
         guild_id = interaction.guild_id
         author = interaction.user.name
         guild = interaction.guild
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         acceptance = 1 if acceptance == 1 else acceptance.value
         try:
 
@@ -955,7 +963,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
         """Add or remove from a player's fame and prestige!"""
         guild_id = interaction.guild_id
         guild = interaction.guild
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
                 cursor = await db.cursor()
@@ -1012,10 +1020,11 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                      hammer_time: str,
                      overview: str,
                      description: str,
+                     region: typing.Optional[discord.Role],
                      plot: str = '9762aebb-43ae-47d5-8c7b-30c34a55b9e5',
                      overflow: discord.app_commands.Choice[int] = 1):
         """Create a new session."""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             session_name, _ = name_fix(session_name)
             overflow_value = overflow if overflow == 1 else overflow.value
@@ -1040,10 +1049,11 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                 author_name=interaction.user.name,
                 hammertime=hammer_time)
             print(complex_hammer_time_valid)
-            if not complex_hammer_time_valid[0]:
+            if complex_hammer_time_valid[0] is False:
+                print("validating potential regular validation")
                 hammer_time_data = shared_functions.validate_hammertime(hammer_time)
-
             else:
+                print("I am here")
                 hammer_time_data = complex_hammer_time_valid[1]
             if not hammer_time_data[0]:
                 await interaction.followup.send(f"Please provide a valid time: {hammer_time_data[1]}.")
@@ -1088,7 +1098,8 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                     game_link=game_link,
                     overview=overview,
                     description=description,
-                    plot=plot
+                    plot=plot,
+                    region=region.id if region else None
                 )
                 session_id = await create_session(base_session_info)
                 if session_id == 0:
@@ -1096,7 +1107,10 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                         "An error occurred whilst creating a session. Please try again later.")
                     return
                 else:
-                    message_content = level_range_text + group_range_text
+                    message_content = f"{level_range_text}"
+                    message_content += f", {group_range_text}" if group_range_text else ""
+                    message_content += f"\r\n{interaction.user.mention} is running a session"
+                    message_content += f" in <@&{region.id}>!" if region else "!"
                     embed_information = SessionEmbedInfo(
                         guild=interaction.guild,
                         gm_name=interaction.user.name,
@@ -1135,14 +1149,16 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                 session_name=session_name,
                                 content=message_content)
                             announcement_message = await session_channel.send(
-                                content=message_content,
+                                content=f"{region.mention}" if region else message_content,
                                 embed=embed,
                                 view=view,
                                 allowed_mentions=discord.AllowedMentions(roles=True))
+                            if region:
+                                await announcement_message.edit(content=message_content)
                             created_thread = await announcement_message.create_thread(
                                 name=f"{session_id}: {session_name}",
                                 auto_archive_duration=10080)
-                            mini_embed = discord.Embed(title="Sign up for this session!", description=f"you can sign up using the buttons on the [original message](<{announcement_message.jump_url}>)! \n you can also use the /player join command to sign up for this session! \n the /player leave command to leave. \n if there is blue text in the session it's probably a link!")
+                            mini_embed = discord.Embed(title="Sign up for this session!", description=f"you can sign up using the buttons on the [original message](<{announcement_message.jump_url}>)! \n you can also use the /player sessions join command to sign up for this session! \n the /player sessions leave command to leave. \n if there is blue text in the session it's probably a link!")
                             await created_thread.send(embed=mini_embed)
                             await cursor.execute(
                                 "UPDATE Sessions SET Message = ?, Session_Thread = ? WHERE Session_ID = ?",
@@ -1182,10 +1198,11 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                    hammer_time: typing.Optional[str],
                    overview: typing.Optional[str],
                    description: typing.Optional[str],
+                   region: typing.Optional[discord.Role],
                    plot: typing.Optional[str],
                    overflow: typing.Optional[discord.app_commands.Choice[int]]):
         """Create a new session."""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             build_info = await build_edit_info(
                 gm_name=interaction.user.name,
@@ -1196,7 +1213,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                 (build_info_base, message, session_thread) = build_info
                 build_info_base.session_name = session_name if session_name is not None else build_info_base.session_name
                 build_info_base.session_range_id = session_range.id if session_range is not None else build_info_base.session_range_id
-                build_info_base.session_range = f'<@{session_range.id}>' if session_range is not None else build_info_base.session_range
+                build_info_base.session_range = f'<@&{session_range.id}>' if session_range is not None else f"<@&{build_info_base.session_range_id}>"
                 build_info_base.player_limit = player_limit if player_limit is not None else build_info_base.player_limit
                 build_info_base.play_location = play_location if play_location is not None else build_info_base.play_location
                 build_info_base.game_link = game_link if game_link is not None else build_info_base.game_link
@@ -1205,6 +1222,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                 build_info_base.description = description if description is not None else build_info_base.description
                 build_info_base.plot = plot if plot is not None else build_info_base.plot
                 build_info_base.overflow = overflow.value if overflow is not None else build_info_base.overflow
+                build_info_base.region = region.id if region is not None else build_info_base.region
                 if overflow:
                     if build_info_base.overflow != 1:
                         evaluated_session_range = await validate_overflow(
@@ -1270,10 +1288,14 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                             timeout_time = 3600 * 12
                         view = JoinOrLeaveSessionView(timeout_seconds=int(timeout_time),
                                                       session_id=session_id, guild=interaction.guild,
-                                                      session_name=session_name, content=build_info_base.session_range)
+                                                      session_name=build_info_base.session_name, content=build_info_base.session_range)
 
                         announcement_message = await session_channel.fetch_message(message)
                         if announcement_message:
+                            content = f"{build_info_base.session_range}"
+                            content += f"\r\n {interaction.user.mention} is running a session"
+                            content += f" in <@&{build_info_base.region}>!" if build_info_base.region else "!"
+
                             await announcement_message.edit(content=build_info_base.session_range, embed=embed,
                                                             view=view)
                             clear_session_reminders(
@@ -1292,7 +1314,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                 scheduler=scheduler
                             )
                             await interaction.followup.send(
-                                f"Session {session_name} with {session_id} has been updated at {announcement_message.jump_url}!")
+                                f"Session {build_info_base.session_name} with {session_id} has been updated at {announcement_message.jump_url}!")
                         else:
                             await interaction.followup.send(
                                 f"Could not find the session announcement message for session {session_id}!")
@@ -1306,7 +1328,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     @session_group.command(name='delete', description='Delete a session!')
     async def delete(self, interaction: discord.Interaction, session_id: int):
         """Delete an ACTIVE Session."""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
@@ -1363,23 +1385,24 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
 
     @session_group.command(name='accept', description='accept the players into a session!')
     @app_commands.autocomplete(specific_character=shared_functions.character_select_autocompletion)
-    @app_commands.describe(randomizer="for the purposes of picking a number of randomized players")
+    @app_commands.describe(randomize="for the purposes of picking a number of randomized players")
     @app_commands.describe(
         specific_character="Picking a specific player's character. You will have to use their CHARACTER Name for this.")
     async def accept(self, interaction: discord.Interaction, session_id: int, player_1: typing.Optional[discord.Member],
                      player_2: typing.Optional[discord.Member], player_3: typing.Optional[discord.Member],
                      player_4: typing.Optional[discord.Member], player_5: typing.Optional[discord.Member],
                      player_6: typing.Optional[discord.Member], specific_character: typing.Optional[str],
-                     randomizer: int = 0):
+                     randomize: int = 0):
         """GM: Accept player Sign-ups into your session for participation"""
         await interaction.response.defer(thinking=True)
+        print(randomize)
         try:
             player_members = [player for player in [player_1, player_2, player_3, player_4, player_5, player_6] if
                               player]
             player_list = [member.id for member in player_members]
-            if not specific_character and randomizer == 0 and len(player_list) == 0:
+            if not specific_character and randomize == 0 and len(player_list) == 0:
                 await interaction.followup.send(
-                    "Please provide at least one method to accept players into the session (players, specific character, or randomizer).")
+                    "Please provide at least one method to accept players into the session (players, specific character, or randomize).")
             else:
                 async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
                     cursor = await db.cursor()
@@ -1472,33 +1495,35 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                                         value=f"Could not be accepted with player: <@{player_id}>")
                                 else:
                                     content += f" <@{player_id}> could not be accepted! Player not found in the signup list!"
-                            # handle randomizer
-                            if randomizer > 0:
-                                await cursor.execute(
-                                    "SELECT Player_ID, Character_Name FROM Sessions_Signups WHERE Session_ID = ?",
-                                    (session_id,)
-                                )
-                                signup_list = list(await cursor.fetchall())
-
-                                if signup_list:
-                                    random_players = random.sample(signup_list, min(len(signup_list), randomizer))
-                                    for player in random_players:
-                                        player_id, character_name = player
-                                        accepted = await player_accept(
-                                            guild_id=interaction.guild_id,
-                                            session_name=session_name,
-                                            session_id=session_id,
-                                            player_id=player_id
-                                        )
-                                        if accepted:
-                                            embed.add_field(name=character_name,
-                                                            value=f"Has been accepted with player: <@{player_id}>")
-                                            content += f" <@{player_id}> has been accepted!"
-                                        else:
-                                            embed.add_field(name=f"SIGNUP FAILED: {character_name}",
-                                                            value=f"Could not be accepted with player: <@{player_id}>")
-                                else:
-                                    logging.info("No players found in signup_list.")
+                        # handle randomize
+                        if randomize > 0:
+                            print(randomize)
+                            await cursor.execute(
+                                "SELECT Player_ID, Character_Name FROM Sessions_Signups WHERE Session_ID = ?",
+                                (session_id,)
+                            )
+                            signup_list = list(await cursor.fetchall())
+                            print(signup_list)
+                            if signup_list:
+                                random_players = random.sample(signup_list, min(len(signup_list), randomize))
+                                print(random_players)
+                                for player in random_players:
+                                    player_id, character_name = player
+                                    accepted = await player_accept(
+                                        guild_id=interaction.guild_id,
+                                        session_name=session_name,
+                                        session_id=session_id,
+                                        player_id=player_id
+                                    )
+                                    if accepted:
+                                        embed.add_field(name=character_name,
+                                                        value=f"Has been accepted with player: <@{player_id}>")
+                                        content += f" <@{player_id}> has been accepted!"
+                                    else:
+                                        embed.add_field(name=f"SIGNUP FAILED: {character_name}",
+                                                        value=f"Could not be accepted with player: <@{player_id}>")
+                            else:
+                                logging.info("No players found in signup_list.")
 
                     session_thread_channel = interaction.guild.get_channel(int(session_thread))
                     if not session_thread_channel:
@@ -1520,7 +1545,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
 
     @session_group.command(name='remove', description='Remove a player from a session!')
     async def remove(self, interaction: discord.Interaction, session_id: int, player: discord.Member):
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
@@ -1629,7 +1654,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     ):
         """GM: Reward Players for Participating in your session."""
         awarded_essence = 10
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         if gold < 0 or easy < 0 or medium < 0 or hard < 0 or deadly < 0 or awarded_essence < 0 or trials < 0:
             await interaction.followup.send(
                 f"Your players might not judge you out loud for trying to give them a negative award, but I do...")
@@ -1676,7 +1701,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                             if summary:
                                 significance = max(1,
                                                    5 - (easy * 1 + medium * 2 + hard * 3 + deadly * 4 + trials * 2))
-                                world_anvil = shared_functions.put_wa_report(
+                                world_anvil = await shared_functions.put_wa_report(
                                     guild_id=interaction.guild_id,
                                     session_id=session_id,
                                     author=gm_name,
@@ -1737,8 +1762,8 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                         essence_content += f"New Total: {session_reward_embed.essence} essence"
                                         player_reward_content.append(essence_content)
                                     if session_reward_embed.fame or session_reward_embed.prestige:
-                                        fame_content = f"has received {session_reward_embed.fame} fame and {session_reward_embed.prestige} prestige!\r\n"
-                                        fame_content += f"New Total: {session_reward_embed.prestige} Fame and {session_reward_embed.prestige} Prestige"
+                                        fame_content = f"has received {session_reward_embed.fame_change} fame and {session_reward_embed.prestige_change} prestige!\r\n"
+                                        fame_content += f"New Total: {session_reward_embed.fame} Fame and {session_reward_embed.prestige} Prestige"
                                         player_reward_content.append(fame_content)
                                     if session_reward_embed.alternate_reward:
                                         alt_reward_all_content = f"has received {session_reward_embed.alternate_reward}"
@@ -1780,6 +1805,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                     quest_thread = await quest_message.create_thread(
                                         name=f"{session_id}: {session_name} rewards", auto_archive_duration=10080)
                                     quest_thread_id = quest_thread.id
+                                    await quest_thread.send(content=party_reward)
                                 else:
                                     quest_thread_id = None
 
@@ -1790,7 +1816,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                 await db.commit()
                                 await interaction.followup.send(
                                     f"Rewards have been sent to the players! Check the Quest Rewards Channel with {quest_message.jump_url} for more information!",
-                                    ephemeral=False)
+                                    ephemeral=True)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"An error occurred whilst rewarding players for a session: {e}")
             await interaction.followup.send(
@@ -1809,7 +1835,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
             player_6: typing.Optional[discord.Member], player_6_reward: typing.Optional[str]
     ):
         """GM: Accept player Sign-ups into your session for participation"""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             # Create lists of players and their corresponding rewards
             players = [player_1, player_2, player_3, player_4, player_5, player_6]
@@ -1877,7 +1903,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     @session_group.command(name='claim', description='Claim rewards for a session!')
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def claim(self, interaction: discord.Interaction, session_id: int, character_name: str):
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -1978,7 +2004,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     @session_group.command(name='notify', description='Notify players of a session!')
     async def notify(self, interaction: discord.Interaction, session_id: int, message: str = "Session Notice!"):
         """Notify players about an ACTIVE Session."""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as conn:
             try:
                 cursor = await conn.cursor()
@@ -2013,7 +2039,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                             ping_list += f"your GM {interaction.user.name} has the following message for you! \r\n {message}"
                             await sessions_channel.send(content=ping_list,
                                                         allowed_mentions=discord.AllowedMentions(users=True))
-                await interaction.followup.send(content="message sent successfully", ephemeral=False)
+                await interaction.followup.send(content="message sent successfully", ephemeral=True)
             except (aiosqlite.Error, TypeError, ValueError) as e:
                 logging.exception(f"An error occurred whilst notifying players of a session: {e}")
                 await interaction.followup.send(
@@ -2028,7 +2054,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     async def display(self, interaction: discord.Interaction, session_id: int,
                       group: discord.app_commands.Choice[int] = 1, page_number: int = 1):
         """ALL: THIS COMMAND DISPLAYS SESSION INFORMATION"""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -2075,7 +2101,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
     @app_commands.autocomplete(group_id=shared_functions.group_id_autocompletion)
     async def delete(self, interaction: discord.Interaction, group_id: int):
         """GM: Delete a group from the database."""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -2100,7 +2126,8 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
         try:
             guild_id = interaction.guild_id
             author = interaction.user.name
-            await interaction.response.defer(thinking=True, ephemeral=False)
+            await interaction.response.defer(thinking=True, ephemeral=True)
+            print(plot)
             if summary is None:
                 await interaction.followup.send(f"No summary available.")
                 return
@@ -2157,7 +2184,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                 "]", "")
             if ' ' in plot or '-' not in plot:
                 plot = await shared_functions.get_plots_autocomplete(interaction, plot)
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as conn:
             cursor = await conn.cursor()
             await cursor.execute(
@@ -2211,7 +2238,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
             day: discord.app_commands.Choice[int]):
         """Display the overall availability of a range of groups"""
         guild_id = interaction.guild_id
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         day_value = day.value
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
@@ -2242,7 +2269,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
             )
             await interaction.followup.send(
                 f"An error occurred whilst fetching data. Please try again later.",
-                ephemeral=False
+                ephemeral=True
             )
 
 
@@ -2493,7 +2520,7 @@ class JoinOrLeaveSessionView(discord.ui.View):
             if len(character_names) == 0:
                 await interaction.response.send_message(
                     "You do not have a character suitable for this session.",
-                    ephemeral=False
+                    ephemeral=True
                 )
             else:
                 view = CharacterSelectionView(character_names=character_names, interaction=interaction,
@@ -2502,12 +2529,12 @@ class JoinOrLeaveSessionView(discord.ui.View):
                 await interaction.response.send_message(
                     "Please select a character to join the session:",
                     view=view,
-                    ephemeral=False
+                    ephemeral=True
                 )
         else:
             await interaction.response.send_message(
                 character_names,
-                ephemeral=False
+                ephemeral=True
             )
 
     async def get_suitable_characters(self, interaction: discord.Interaction) -> Union[List[str], str]:
@@ -2605,12 +2632,12 @@ class JoinOrLeaveSessionView(discord.ui.View):
                                                            player_name=interaction.user.name)
                 await interaction.response.send_message(
                     "You have left the session.",
-                    ephemeral=False
+                    ephemeral=True
                 )
             else:
                 await interaction.response.send_message(
                     "You have not signed up for this session.",
-                    ephemeral=False
+                    ephemeral=True
                 )
 
 
@@ -2648,7 +2675,7 @@ class CharacterSelectionView(discord.ui.View):
         await interaction.response.send_message(
             f"You have selected {character_name}. Would you like to receive a reminder before the session?",
             view=view,
-            ephemeral=False
+            ephemeral=True
         )
 
 
@@ -2662,25 +2689,25 @@ class ReminderPreferenceView(discord.ui.View):
     @discord.ui.button(label='60 minutes', style=discord.ButtonStyle.danger)
     async def sixty_minutes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("You will receive a reminder 60 minutes before the session.",
-                                                ephemeral=False)
+                                                ephemeral=True)
         await self.update_notification_warning(interaction, 60)
 
     @discord.ui.button(label='30 minutes', style=discord.ButtonStyle.danger)
     async def thirty_minutes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("You will receive a reminder 30 minutes before the session.",
-                                                ephemeral=False)
+                                                ephemeral=True)
         await self.update_notification_warning(interaction, 30)
 
     @discord.ui.button(label='at start', style=discord.ButtonStyle.danger)
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("You will receive a reminder at the start of the session.",
-                                                ephemeral=False)
+                                                ephemeral=True)
         await self.update_notification_warning(interaction, 0)
 
     @discord.ui.button(label='none', style=discord.ButtonStyle.danger)
     async def none_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message("You will not receive a reminder.",
-                                                ephemeral=False)
+                                                ephemeral=True)
         await self.update_notification_warning(interaction, -1)
 
     async def update_notification_warning(self, interaction: discord.Interaction, warning_duration: int):
@@ -2749,7 +2776,7 @@ class DisplayTimeGroupView(discord.ui.View):
             if interaction.user.id != self.user_id:
                 await interaction.response.send_message(
                     "You cannot interact with this button.",
-                    ephemeral=False
+                    ephemeral=True
                 )
                 return False
             return True
@@ -2763,13 +2790,13 @@ class DisplayTimeGroupView(discord.ui.View):
             await interaction.response.defer()
             if self.view_type == 0:
                 if self.day == 1:
-                    await interaction.followup.send("You are on the first page.", ephemeral=False)
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
                     return
                 else:
                     self.day = 1
             else:
                 if self.range_id == 0:
-                    await interaction.followup.send("You are on the first page.", ephemeral=False)
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
                     return
                 else:
                     self.range_id = 0
@@ -2782,7 +2809,7 @@ class DisplayTimeGroupView(discord.ui.View):
             )
             with open(f'C:\\Pathparser\\plots\\group_{interaction.user.name}_plot.png', 'rb') as f:
                 picture = discord.File(f)
-                await interaction.followup.send(file=picture, ephemeral=False)
+                await interaction.followup.send(file=picture, ephemeral=True)
         except Exception as e:
             logging.error(f"Failed to move to the first page: {e}")
             raise
@@ -2793,13 +2820,13 @@ class DisplayTimeGroupView(discord.ui.View):
             await interaction.response.defer()
             if self.view_type == 0:
                 if self.day == 1:
-                    await interaction.followup.send("You are on the first page.", ephemeral=False)
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
                     return
                 else:
                     self.day -= 1
             else:
                 if self.range_id == 0:
-                    await interaction.followup.send("You are on the first page.", ephemeral=False)
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
                     return
                 else:
                     self.range_id -= 5 if self.range_id > 5 else 0
@@ -2812,7 +2839,7 @@ class DisplayTimeGroupView(discord.ui.View):
             )
             with open(f'C:\\Pathparser\\plots\\group_{interaction.user.name}_plot.png', 'rb') as f:
                 picture = discord.File(f)
-                await interaction.followup.send(file=picture, ephemeral=False)
+                await interaction.followup.send(file=picture, ephemeral=True)
         except Exception as e:
             logging.error(f"Failed to move to the previous page: {e}")
             raise
@@ -2828,7 +2855,7 @@ class DisplayTimeGroupView(discord.ui.View):
                 picture = discord.File(f)
             self.message = await self.interaction.followup.send(
                 embed=self.embed,
-                view=self, file=picture, ephemeral=False
+                view=self, file=picture, ephemeral=True
             )
 
         except discord.HTTPException as e:
@@ -2871,13 +2898,13 @@ class DisplayTimeGroupView(discord.ui.View):
             await interaction.response.defer()
             if self.view_type == 0:
                 if self.day == 7:
-                    await interaction.followup.send("You are on the last page.", ephemeral=False)
+                    await interaction.followup.send("You are on the last page.", ephemeral=True)
                     return
                 else:
                     self.day += 1
             else:
                 if self.range_id == self.max_range_id:
-                    await interaction.followup.send("You are on the last page.", ephemeral=False)
+                    await interaction.followup.send("You are on the last page.", ephemeral=True)
                     return
                 else:
                     self.range_id += 5 if self.range_id + 5 <= self.max_range_id else self.max_range_id
@@ -2890,7 +2917,7 @@ class DisplayTimeGroupView(discord.ui.View):
             )
             with open(f'C:\\Pathparser\\plots\\group_{interaction.user.name}_plot.png', 'rb') as f:
                 picture = discord.File(f)
-                await interaction.followup.send(file=picture, ephemeral=False)
+                await interaction.followup.send(file=picture, ephemeral=True)
         except Exception as e:
             logging.error(f"Failed to move to the next page: {e}")
             raise
@@ -2901,14 +2928,14 @@ class DisplayTimeGroupView(discord.ui.View):
             await interaction.response.defer()
             if self.view_type == 0:
                 if self.day == 7:
-                    await interaction.followup.send("You are on the last page.", ephemeral=False)
+                    await interaction.followup.send("You are on the last page.", ephemeral=True)
                     return
                 else:
                     self.day = 7
             else:
                 if self.range_id >= self.max_range_id:
 
-                    await interaction.followup.send("You are on the last  page.", ephemeral=False)
+                    await interaction.followup.send("You are on the last  page.", ephemeral=True)
                     return
                 else:
                     self.range_id = self.max_range_id
@@ -2921,7 +2948,7 @@ class DisplayTimeGroupView(discord.ui.View):
             )
             with open(f'C:\\Pathparser\\plots\\group_{interaction.user.name}_plot.png', 'rb') as f:
                 picture = discord.File(f)
-                await interaction.followup.send(file=picture, ephemeral=False)
+                await interaction.followup.send(file=picture, ephemeral=True)
         except Exception as e:
             logging.error(f"Failed to move to the last page: {e}")
             raise

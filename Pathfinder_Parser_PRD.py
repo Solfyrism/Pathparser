@@ -43,11 +43,13 @@ async def reinstate_reminders(server_bot) -> None:
         try:
             async with aiosqlite.connect(f"pathparser_{guild.id}.sqlite") as db:
                 cursor = await db.cursor()
+
                 await cursor.execute(
                     "SELECT Session_ID, Session_Thread, Hammer_Time FROM Sessions WHERE IsActive = 1 AND Hammer_Time > ?",
                     (now.timestamp(),)
                 )
                 reminders = await cursor.fetchall()
+
                 for reminder in reminders:
                     (session_id, thread_id, hammer_time) = reminder
                     gamemaster_commands.session_reminders(
@@ -146,42 +148,33 @@ async def on_message(message):
     # Check if the guild is in the cache
     async with shared_functions.approved_channel_cache.lock:
         if guild_id in shared_functions.approved_channel_cache.cache:
+
             if channel_id in shared_functions.approved_channel_cache.cache[guild_id]:
                 logging.debug(f"Channel {channel_id} is approved for RP messages.")
                 await handle_rp_message(message)
             else:
                 logging.debug(f"Channel {channel_id} is not approved. Processing commands.")
-                await bot.process_commands(message)
-        else:
-            # Guild not in cache, add it
-            logging.debug(f"Guild {guild_id} not in cache. Adding.")
-            await shared_functions.add_guild_to_cache(guild_id)
-            if channel_id in shared_functions.approved_channel_cache.cache[guild_id]:
-                logging.debug(f"Channel {channel_id} is approved after cache update.")
-                await handle_rp_message(message)
-            else:
-                logging.debug(f"Channel {channel_id} is still not approved. Processing commands.")
                 random_number = random.randint(1, 50)
                 if 'einstein' in message.content.lower():
                     await message.channel.send(
                         "https://i.insider.com/641ca0f5d67fe70018a376ca?width=800&format=jpeg&auto=webp")
-                elif 'monkey' in message.content.lower() and random_number != 50:
+                elif 'monkey' in message.content.lower() and random_number != 1:
                     await message.channel.send("https://i.ytimg.com/vi/tLHqnn1ZkAM/maxresdefault.jpg")
-                elif 'monkey' in message.content.lower() and random_number == 50:
+                elif 'monkey' in message.content.lower() and random_number == 1:
                     await message.channel.send(
                         "https://tenor.com/view/mmmm-monkey-monkey-ug-master-oogway-oogway-gif-19727561")
                 if random_number == 1 and message.author.id == 217873501313433600:
                     await message.channel.send(
-                        "https://cdn.discordapp.com/attachments/479089930816192513/1309681106013917284/wdUWYUf3MwhkwAAAABJRU5ErkJggg.png?ex=67427714&is=67412594&hm=ef7e1e7bb5ff5a014ba0fb0036f92beaef4ebbe05178bfeaf1f6de278082c86e&")
+                        "https://cdn.discordapp.com/attachments/479089930816192513/1309682327860805733/7YjmdoZxhSgAAAAASUVORK5CYII.png?ex=67768b77&is=677539f7&hm=9ebebdcbf4c8f1266649c1d1d66dbcdad58b18f1a219da101094a96f910d396c&")
                 elif random_number == 2 and message.author.id == 217873501313433600:
                     await message.channel.send(
-                        "https://cdn.discordapp.com/attachments/479089930816192513/1309681542653546560/764rjEg82XSZ0fJzf8fVPtjhVRebgAAAAASUVORK5CYII.png?ex=6742777c&is=674125fc&hm=a5875743269822bbfc6a966710bf5f3e9a65795751ba71050b8dae0ba7e94c73&")
+                        "https://cdn.discordapp.com/attachments/479089930816192513/1309681542653546560/764rjEg82XSZ0fJzf8fVPtjhVRebgAAAAASUVORK5CYII.png?ex=67768abc&is=6775393c&hm=1728ae88544b6323a3d280dc552bb48eff922f3c0cf3983e341654cb4eb61022&")
                 elif random_number == 3 and message.author.id == 217873501313433600:
                     await message.channel.send(
-                        "https://cdn.discordapp.com/attachments/479089930816192513/1309682327860805733/7YjmdoZxhSgAAAAASUVORK5CYII.png?ex=67427837&is=674126b7&hm=6b916230203905c734500e091bf91b6f80ac4fd2cdfeb83ee3e437b44250a428&")
-                elif random_number == 4 and message.author.id == 473912723663749130:
+                        "https://cdn.discordapp.com/attachments/479089930816192513/1309681106013917284/wdUWYUf3MwhkwAAAABJRU5ErkJggg.png?ex=67768a54&is=677538d4&hm=bd846ce7d3f0ab3361170189bfc57520357ada3740ec61af1cfe7e9a5be3cf2d&")
+                elif random_number == 4 and message.author.id == 217873501313433600:
                     await message.channel.send(
-                        "https://cdn.discordapp.com/attachments/479089930816192513/1309684036637298759/lvcbpPEd8IYNoAAAAASUVORK5CYII.png?ex=674279cf&is=6741284f&hm=c4e73bcc27b276c09dfe1accaf28ee8361c0c686a631bd15cc1bbc7898c3d419&")
+                        "https://cdn.discordapp.com/attachments/479089930816192513/1322782239452430467/4OGDuJJjqwVJFdQkOvEm71fkWBFQVWFFhRYEWBFQWWBRYAfoXa71Wo11RYEWBFQVWFFhRYCkFPgUCd2wuGYpcgwAAAABJRU5ErkJggg.png?ex=6776bdb5&is=67756c35&hm=35c2b303e206d87b60edc261f3134c6a072af9255a5a721e1a0cfa377fcb20a6&")
                 guild_id = message.guild.id
                 swears = {
                     "fuck": 0,
@@ -211,8 +204,83 @@ async def on_message(message):
                         await message.channel.send(
                             f"Angry dog off the leash! he's feeling {hostility}% hostile! Someone better get his waifu before he wreck his laifu.")
                 if message.author.id == 243120409703088128 and 'I mean' in message.content:
+                    async with aiosqlite.connect(f"origin.sqlite") as db:
+                        cursor = await db.cursor()
+                        await cursor.execute("SELECT instances from Memes where name = 'IMean'")
+                        instances = await cursor.fetchone()
+                        number = instances[0] + 1
+                        await cursor.execute("UPDATE Memes SET instances = ? WHERE name = 'IMean'", (number,))
+                        await db.commit()
+                        await message.channel.send(content=f"You have [meant](https://us-tuna-sounds-images.voicemod.net/c75f5860-13bd-4808-a2ed-3a097f0a24b1.jpg) something {number} times.")
+                await bot.process_commands(message)
+        else:
+            # Guild not in cache, add it
+
+            logging.debug(f"Guild {guild_id} not in cache. Adding.")
+            await shared_functions.add_guild_to_cache(guild_id)
+            if channel_id in shared_functions.approved_channel_cache.cache[guild_id]:
+                logging.debug(f"Channel {channel_id} is approved after cache update.")
+                await handle_rp_message(message)
+            else:
+                logging.debug(f"Channel {channel_id} is still not approved. Processing commands.")
+                random_number = random.randint(1, 50)
+                if 'einstein' in message.content.lower():
                     await message.channel.send(
-                        "https://us-tuna-sounds-images.voicemod.net/c75f5860-13bd-4808-a2ed-3a097f0a24b1.jpg")
+                        "https://i.insider.com/641ca0f5d67fe70018a376ca?width=800&format=jpeg&auto=webp")
+                elif 'monkey' in message.content.lower() and random_number != 1:
+                    await message.channel.send("https://i.ytimg.com/vi/tLHqnn1ZkAM/maxresdefault.jpg")
+                elif 'monkey' in message.content.lower() and random_number == 1:
+                    await message.channel.send(
+                        "https://tenor.com/view/mmmm-monkey-monkey-ug-master-oogway-oogway-gif-19727561")
+                if random_number == 1 and message.author.id == 217873501313433600:
+                    await message.channel.send(
+                        "https://cdn.discordapp.com/attachments/479089930816192513/1309682327860805733/7YjmdoZxhSgAAAAASUVORK5CYII.png?ex=67768b77&is=677539f7&hm=9ebebdcbf4c8f1266649c1d1d66dbcdad58b18f1a219da101094a96f910d396c&")
+                elif random_number == 2 and message.author.id == 217873501313433600:
+                    await message.channel.send(
+                        "https://cdn.discordapp.com/attachments/479089930816192513/1309681542653546560/764rjEg82XSZ0fJzf8fVPtjhVRebgAAAAASUVORK5CYII.png?ex=67768abc&is=6775393c&hm=1728ae88544b6323a3d280dc552bb48eff922f3c0cf3983e341654cb4eb61022&")
+                elif random_number == 3 and message.author.id == 217873501313433600:
+                    await message.channel.send(
+                        "https://cdn.discordapp.com/attachments/479089930816192513/1309681106013917284/wdUWYUf3MwhkwAAAABJRU5ErkJggg.png?ex=67768a54&is=677538d4&hm=bd846ce7d3f0ab3361170189bfc57520357ada3740ec61af1cfe7e9a5be3cf2d&")
+                elif random_number == 4 and message.author.id == 217873501313433600:
+                    await message.channel.send(
+                        "https://cdn.discordapp.com/attachments/479089930816192513/1322782239452430467/4OGDuJJjqwVJFdQkOvEm71fkWBFQVWFFhRYEWBFQWWBRYAfoXa71Wo11RYEWBFQVWFFhRYCkFPgUCd2wuGYpcgwAAAABJRU5ErkJggg.png?ex=6776bdb5&is=67756c35&hm=35c2b303e206d87b60edc261f3134c6a072af9255a5a721e1a0cfa377fcb20a6&")
+                guild_id = message.guild.id
+                swears = {
+                    "fuck": 0,
+                    "shit": 0,
+                    "damn": 0,
+                    "bitch": 0,
+                    "ass": 0,
+                }
+
+                # Normalize the string (optional)
+                normalized_string = message.content.lower()
+
+                # Count occurrences of each fruit in the string
+                for swear in swears.keys():
+                    # Use regex to match whole words
+                    swears[swear] = len(re.findall(rf"\b{swear}\b", normalized_string))
+
+                # Calculate total occurrences
+                total_count = sum(swears.values())
+                if total_count > 1 and message.author.id == 243120409703088128:
+                    hostility = min(100, int((total_count / 5) * 100))
+                    if 0 <= random_number <= 17:
+                        await message.channel.send(f"Hostility Detected: {hostility}% Someone's a salty boy! :)")
+                    elif 18 <= random_number <= 34:
+                        await message.channel.send(f"Wow. Someone's feeling mean today! He's {hostility}% hostile!")
+                    elif 35 <= random_number <= 50:
+                        await message.channel.send(
+                            f"Angry dog off the leash! he's feeling {hostility}% hostile! Someone better get his waifu before he wreck his laifu.")
+                if message.author.id == 243120409703088128 and 'I mean' in message.content:
+                    async with aiosqlite.connect(f"origin.sqlite") as db:
+                        cursor = await db.cursor()
+                        await cursor.execute("SELECT instances from Memes where name = 'IMean'")
+                        instances = await cursor.fetchone()
+                        number = instances[0] + 1
+                        await cursor.execute("UPDATE Memes SET instances = ? WHERE name = 'IMean'", (number,))
+                        await db.commit()
+                        await message.channel.send(content=f"You have [meant](https://us-tuna-sounds-images.voicemod.net/c75f5860-13bd-4808-a2ed-3a097f0a24b1.jpg) something {number} times. ")
                 await bot.process_commands(message)
 
     # Make sure commands are processed for messages not handled
@@ -229,7 +297,7 @@ bot.run(os.getenv("DISCORD_TOKEN"))
 bot.loop.create_task(shared_functions.clear_autocomplete_cache())
 
 logging.basicConfig(
-    level=logging.ERROR,
+    level=logging.DEBUG,
     format='%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     filename='pathparser.log',  # Specify the log file name

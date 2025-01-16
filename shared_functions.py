@@ -115,10 +115,25 @@ class ApprovedChannelCache:
 approved_channel_cache = ApprovedChannelCache()
 
 
+def get_gold_breakdown(number: Union[float, Decimal]) -> str:
+    """Break down a number into its gold, silver, and copper components."""
+    gold_breakdown = ""
+    gold_breakdown += f"{'{:,}'.format(int(number))} GP " if number >= 1 else "0 GP "
+    gold_breakdown += f"{int((number - int(number)) * 10)} SP " if ((number - int(number)) * 10) >= 1 else ""
+    gold_breakdown += \
+        f"{int(((number - int(number)) * 10 - int((number - int(number)) * 10)) * 10)} CP" \
+            if (((number - int(number)) * 10 - int(
+            (number - int(number)) * 10)) * 10) >= 1 else ""
+    return gold_breakdown
+
+
 async def add_guild_to_cache(guild_id: int) -> None:
     try:
+
         async with approved_channel_cache.lock:
+
             async with aiosqlite.connect(f"pathparser_{guild_id}.sqlite") as db:
+                print(f"Adding guild {guild_id} to cache.")
                 cursor = await db.cursor()
                 await cursor.execute("SELECT Channel_ID FROM rp_approved_Channels")
                 approved_channels = await cursor.fetchall()
@@ -126,6 +141,7 @@ async def add_guild_to_cache(guild_id: int) -> None:
                 channel_ids = [int(channel_id[0]) for channel_id in approved_channels]
                 approved_channel_cache.cache[guild_id] = channel_ids
     except aiosqlite.Error as e:
+
         logging.exception(f"Failed to add guild {guild_id} to cache with error: {e}")
 
 
@@ -543,7 +559,7 @@ async def rp_inventory_autocomplete(
     data = []
     guild_id = interaction.guild.id
     current = unidecode(current.lower())
-    print(current)
+
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             # Correct parameterized query
@@ -599,7 +615,12 @@ async def character_embed(
         true_character_name = character_info['True_Character_Name']
         title = character_info['Title']
         titles = character_info['Titles']
-        description = character_info['Description']
+        if character_info['Description']:
+            description = character_info['Description']
+        elif character_info['Oath']:
+            description = character_info['Oath']
+        else:
+            description = " "
         oath = character_info['Oath']
         level = character_info['Level']
         tier = character_info['Tier']
@@ -658,9 +679,11 @@ async def character_embed(
             name="Mythic",
             value=f'**Trials**: {trials}, **Remaining**: {trials_required}'
         )
+        gold_string = get_gold_breakdown(gold)
+        effective_string = get_gold_breakdown(gold_value)
         embed.add_field(
             name="Current Wealth",
-            value=f'**GP**: {Decimal(gold)}, **Effective**: {Decimal(gold_value)} GP',
+            value=f'**Gold**: {gold_string}, **Effective**: {effective_string}',
             inline=False
         )
         embed.add_field(
@@ -686,6 +709,7 @@ async def character_embed(
             'Absolute': 'https://i.imgur.com/ibE5vSY.png'
         }
         icon_url = oath_icons.get(oath)
+        print(type(gold))
         embed.set_footer(text=description, icon_url=icon_url)
 
         message_content = f"<@{player_id}>"
@@ -921,12 +945,15 @@ async def log_embed(change: CharacterChange, guild: discord.Guild, thread: int, 
             gold = round(change.gold, 2) if change.gold is not None else "N/A"
             gold_change = round(change.gold_change, 2) if change.gold_change is not None else "N/A"
             gold_value = round(change.gold_value, 2) if change.gold_value is not None else "N/A"
+            gold_string = get_gold_breakdown(gold)
+            gold_value_string = get_gold_breakdown(gold_value)
+            gold_change_string = get_gold_breakdown(gold_change)
             embed.add_field(
                 name="Wealth Changes",
                 value=(
-                    f"**Gold**: {gold}\n"
-                    f"**Gold Change**: {gold_change}\n"
-                    f"**Effective Gold**: {gold_value} GP\n"
+                    f"**Gold**: {gold_string}\n"
+                    f"**Gold Change**: {gold_change_string}\n"
+                    f"**Effective Gold**: {gold_value_string}\n"
                     f"**Transaction ID**: {change.transaction_id}"
                 )
             )
@@ -1408,12 +1435,17 @@ def parse_hammer_time_to_timestamp(hammer_time_str: str) -> datetime:
 
 def validate_hammertime(timestamp_str):
     try:
-        timestamp = int(timestamp_str)
+
+
         now = int(datetime.now().timestamp())
+
+
+        if len(timestamp_str) == 16:
+            timestamp_str = timestamp_str[3:13]
 
         # Define acceptable time range (e.g., within the next 5 years)
         five_years_earlier = now - (5 * 365 * 24 * 60 * 60)
-
+        timestamp = int(timestamp_str)
         if five_years_earlier < timestamp < now:
             return False, "The time you provided is in the past."
         elif timestamp < five_years_earlier:
@@ -1457,7 +1489,8 @@ def convert_datetime_to_unix(time_str, timezone_str):
 async def complex_validate_hammertime(
         guild_id,
         author_name,
-        hammertime: Union[str, datetime]) -> Union[Tuple[bool, Tuple[bool, bool, Tuple[str, str, str, str]]], Tuple[bool, str]]:
+        hammertime: Union[str, datetime]) -> Union[
+    Tuple[bool, Tuple[bool, bool, Tuple[str, str, str, str]]], Tuple[bool, str]]:
     try:
         # Attempt to retrieve the user's timezone
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
@@ -2048,31 +2081,31 @@ class RecipientAcknowledgementView(discord.ui.View):
                 if configs:
                     channel_id = configs.get('Character_Transaction_Channel')
 
-            if channel_id is None:
-                await self.interaction.followup.send(
-                    "Character Transaction Channel not found in the database.",
-                    ephemeral=True
-                )
-                return
-            channel = self.interaction.guild.get_channel(int(channel_id))
-            if not channel:
-                channel = await self.interaction.guild.fetch_channel(int(channel_id))
-            if channel:
-                send_message = await channel.send(
-                    content=self.content,
-                    embed=self.embed,
-                    view=self
-                )
-                await self.interaction.followup.send(
-                    f"Message sent to the Character Transaction Channel. {send_message.jump_url}",
-                    ephemeral=True
-                )
-            else:
-                await self.interaction.followup.send(
-                    content=self.content,
-                    embed=self.embed,
-                    view=self
-                )
+                    if channel_id is None:
+                        await self.interaction.followup.send(
+                            "Character Transaction Channel not found in the database.",
+                            ephemeral=True
+                        )
+                        return
+                    channel = self.interaction.guild.get_channel(int(channel_id))
+                    if not channel:
+                        channel = await self.interaction.guild.fetch_channel(int(channel_id))
+                    if channel:
+                        send_message = await channel.send(
+                            content=self.content,
+                            embed=self.embed,
+                            view=self
+                        )
+                        await self.interaction.followup.send(
+                            f"Message sent to the Character Transaction Channel. {send_message.jump_url}",
+                            ephemeral=True
+                        )
+                    else:
+                        await self.interaction.followup.send(
+                            content=self.content,
+                            embed=self.embed,
+                            view=self
+                        )
         except (discord.HTTPException, AttributeError, aiosqlite.Error) as e:
             logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id}")
             await self.interaction.followup.send(

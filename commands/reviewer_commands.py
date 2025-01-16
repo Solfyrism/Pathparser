@@ -299,9 +299,34 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                             character_log_channel_id = configs.get('Char_Eventlog_Channel')
                             backstory_category = configs.get('WA_Backstory_Category')
                             starting_level = configs.get('Starting_Level')
+                            approved_character_role = configs.get('Approved_Character')
+                            approved_message_title = configs.get('Approved_Message_Title')
+                            if approved_message_title:
+                                approved_message_title = approved_message_title.replace("{user}", f"<@{info_player_id}>")
+                                approved_message_title = approved_message_title.replace("{User}", f"<@{info_player_id}>")
+                            approved_message_body = configs.get('Approved_Message_Body')
+                            if approved_message_body:
+                                approved_message_body = approved_message_body.replace("{user}", f"<@{info_player_id}>")
+                                approved_message_body = approved_message_body.replace("{User}", f"<@{info_player_id}>")
+                            first_approval_content = configs.get('First_Approval_Message')
+                            if first_approval_content:
+                                first_approval_content = first_approval_content.replace("{user}", f"<@{info_player_id}>")
+                                first_approval_content = first_approval_content.replace("{User}", f"<@{info_player_id}>")
+                            iterative_approval_content = configs.get('Iterative_Approval_Message')
+                            if iterative_approval_content:
+                                iterative_approval_content = iterative_approval_content.replace("{user}", f"<@{info_player_id}>")
+                                iterative_approval_content = iterative_approval_content.replace("{User}", f"<@{info_player_id}>")
+
+                            if not any([character_log_channel_id, starting_level, approved_character_role]):
+                                await interaction.followup.send(
+                                    f"""Server settings not found! Ask your Admin to check server settings! \r\n 
+                                    character log channel: {character_log_channel_id} \r\n
+                                    starting level: {starting_level} \r\n
+                                    approved character role: {approved_character_role}""",
+                                    ephemeral=True)
 
                     await cursor.execute(
-                        "SELECT Minimum_Milestones, Milestones_to_level, WPL FROM Milestone_System where level = ?",
+                        "SELECT Minimum_Milestones, Milestones_to_level, WPL, Level_Range_ID FROM Milestone_System where level = ?",
                         (starting_level,))
                     starting_level_info = await cursor.fetchone()
                     if not starting_level_info:
@@ -309,7 +334,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                             f"Starting Level not found! Ask your Admin to check server settings!",
                             ephemeral=True)
                     else:
-                        (info_minimum_milestones, info_milestones_to_level, info_wpl) = starting_level_info
+                        (info_minimum_milestones, info_milestones_to_level, info_wpl, info_level_range_id) = starting_level_info
                         gold_calculation = await character_commands.gold_calculation(
                             guild_id=guild_id,
                             level=starting_level,
@@ -321,8 +346,8 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                             gold_value=Decimal(0),
                             gold_value_max=Decimal(0),
                             gold_change=Decimal(3000),
-                            gold_value_change=Decimal(0),
-                            gold_value_max_change=Decimal(0),
+                            gold_value_change=None,
+                            gold_value_max_change=None,
                             reason="Character Registration",
                             source="Character Registration")
                     if isinstance(gold_calculation, tuple):
@@ -353,17 +378,31 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                     character_log_channel = interaction.guild.get_channel(character_log_channel_id)
                     if not character_log_channel:
                         character_log_channel = await self.bot.fetch_channel(character_log_channel_id)
-                    character_log_message = await character_log_channel.send(content=f'<@{info_player_id}>',
-                                                                             embed=embed,
-                                                                             allowed_mentions=discord.AllowedMentions(
-                                                                                 users=True))
-                    thread = await character_log_message.create_thread(name=f'{info_true_character_name}')
+                    character_log_message = await character_log_channel.send(
+                        content=f'<@{info_player_id}>',
+                        embed=embed,
+                        allowed_mentions=discord.AllowedMentions(
+                        users=True))
+                    thread = await character_log_message.create_thread(name=f'{info_true_character_name}', auto_archive_duration=10080)
+                    if first_approval_content or iterative_approval_content:
+                        first_approval_content = first_approval_content if first_approval_content else iterative_approval_content
+                        iterative_approval_content = iterative_approval_content if iterative_approval_content else first_approval_content
+                        await cursor.execute("select count(character_name) from Player_Characters where player_id = ?", (info_player_id,))
+                        characters = await cursor.fetchone()
+                        if approved_message_title and approved_message_body and characters[0] == 1:
+                            embed = discord.Embed(title=approved_message_title, description=approved_message_body,
+                                                  color=discord.Color.green())
+                            await thread.send(content=first_approval_content, embed=embed)
+                        elif characters[0] > 1:
+                            await thread.send(content=iterative_approval_content)
                     if info_tmp_bio:
-                        article = await shared_functions.put_wa_article(guild_id=interaction.guild.id, template='Person',
-                                                                        title=info_true_character_name,
-                                                                        category=backstory_category,
-                                                                        overview=info_tmp_bio,
-                                                                        author=info_player_name)
+                        print(f"Creating article with {info_tmp_bio}")
+                        article = await shared_functions.put_wa_article(
+                            guild_id=interaction.guild.id, template='Person',
+                            title=info_true_character_name,
+                            category=backstory_category,
+                            overview=info_tmp_bio,
+                            author=info_player_name)
                         try:
                             article_url = article['url']
                             article_id = article['id']
@@ -382,7 +421,15 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                     await db.commit()
                     async with shared_functions.autocomplete_cache.lock:
                         shared_functions.autocomplete_cache.cache.clear()
-                    await interaction.followup.send(f"{character_name} has been moved to the accepted bios.",
+                    approved_role = interaction.guild.get_role(approved_character_role)
+                    level_role = interaction.guild.get_role(info_level_range_id)
+                    try:
+                        await interaction.guild.get_member(info_player_id).add_roles(approved_role)
+                        await interaction.guild.get_member(info_player_id).add_roles(level_role)
+                        response = f"{info_character_name} has been moved to the accepted bios."
+                    except AttributeError:
+                        response = f"{info_character_name} has been moved to the accepted bios. However, I was unable to add either the approved or level role to the player."
+                    await interaction.followup.send(response,
                                                     ephemeral=True)
 
     customize_group = discord.app_commands.Group(

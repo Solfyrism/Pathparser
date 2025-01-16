@@ -21,6 +21,7 @@ scheduled_jobs = {}
 
 async def remind_users(session_id: int, guild_id: int, thread_id: int, time: int, bot: discord.Client) -> None:
     try:
+        print(f"remind_users {datetime.now()}", session_id, guild_id, thread_id, time)
         content = f"Reminder: The event is starting in {time} minutes."
         async with aiosqlite.connect("pathparser.db") as db:
             cursor = await db.execute(
@@ -53,7 +54,7 @@ def session_reminders(
     time_difference = session_start_time - now
     remaining_minutes = time_difference.total_seconds() / 60
     reminder_time_periods = [0, 30, 60]
-
+    print(session_id, remind_users)
     for time in reminder_time_periods:
         if remaining_minutes >= time:
             reminder_time = session_start_time - timedelta(minutes=time)

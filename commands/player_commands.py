@@ -1,9 +1,11 @@
 import math
+import random
 import typing
 import discord
 import numpy as np
 import pycountry
 import pycountry_convert
+import requests
 from discord.ext import commands
 from discord import app_commands
 from typing import List, Optional
@@ -29,7 +31,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s:%(name)s: %(message)s',
     handlers=[
-        logging.FileHandler("bot.log"),
+        logging.FileHandler("pathparser.log"),
         logging.StreamHandler()
     ]
 )
@@ -638,7 +640,7 @@ class ContinentSelect(discord.ui.Select):
             if self.view.continent == 'cancel':
                 self.view.clear_items()
                 self.view.stop()
-                await interaction.response.send_message("Selection cancelled.", ephemeral=False)
+                await interaction.response.send_message("Selection cancelled.", ephemeral=True)
             elif self.view.continent in continent_regions:
                 await self.view.update_region_select(interaction)
             else:
@@ -646,7 +648,7 @@ class ContinentSelect(discord.ui.Select):
         except Exception as e:
             logging.exception(f"Error in ContinentSelect callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while selecting your continent.", ephemeral=False
+                "An error occurred while selecting your continent.", ephemeral=True
             )
             self.view.stop()
 
@@ -676,13 +678,13 @@ class RegionSelect(discord.ui.Select):
                 self.view.clear_items()
                 self.view.stop()
 
-                await interaction.response.send_message("Selection cancelled.", ephemeral=False)
+                await interaction.response.send_message("Selection cancelled.", ephemeral=True)
             else:
                 await self.view.update_country_select(interaction)
         except Exception as e:
             logging.exception(f"Error in RegionSelect callback:{e}")
             await interaction.response.send_message(
-                "An error occurred while selecting your region.", ephemeral=False
+                "An error occurred while selecting your region.", ephemeral=True
             )
             self.view.stop()
 
@@ -704,7 +706,7 @@ class USRegionSelect(discord.ui.Select):
             if self.view.us_region == 'cancel':
                 self.view.clear_items()
                 self.view.stop()
-                await interaction.response.send_message("Selection cancelled.", ephemeral=False)
+                await interaction.response.send_message("Selection cancelled.", ephemeral=True)
             elif self.view.us_region == 'return':
                 self.view.state = None
                 await self.view.update_country_select(interaction)
@@ -713,7 +715,7 @@ class USRegionSelect(discord.ui.Select):
         except Exception as e:
             logging.exception(f"Error in USRegionSelect callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while selecting your US region.", ephemeral=False
+                "An error occurred while selecting your US region.", ephemeral=True
             )
             self.view.stop()
 
@@ -731,14 +733,14 @@ class CountrySelect(discord.ui.Select):
             if selected_country_name == 'other':
                 await interaction.response.send_message(
                     "Please enter your country manually using the `/timesheet` command with your country.",
-                    ephemeral=False
+                    ephemeral=True
                 )
                 self.view.stop()
                 return
             elif selected_country_name == 'cancel':
                 self.view.clear_items()
                 self.view.stop()
-                await interaction.response.send_message("Selection cancelled.", ephemeral=False)
+                await interaction.response.send_message("Selection cancelled.", ephemeral=True)
                 return
             elif selected_country_name == 'return':
                 self.view.region = None
@@ -757,7 +759,7 @@ class CountrySelect(discord.ui.Select):
         except Exception as e:
             logging.exception(f"Error in CountrySelect callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while selecting your country.", ephemeral=False
+                "An error occurred while selecting your country.", ephemeral=True
             )
             self.view.stop()
 
@@ -777,14 +779,14 @@ class TimezoneSelect(discord.ui.Select):
                 # Prompt user to enter their timezone manually
                 await interaction.response.send_message(
                     "Please enter your timezone manually using the `/timesheet` command with your timezone.",
-                    ephemeral=False
+                    ephemeral=True
                 )
                 self.view.stop()
                 return
             elif selected_timezone == 'cancel':
                 self.view.clear_items()
                 self.view.stop()
-                await interaction.response.send_message("Selection cancelled.", ephemeral=False)
+                await interaction.response.send_message("Selection cancelled.", ephemeral=True)
                 return
             elif selected_timezone == 'return':
                 self.view.country_code = None
@@ -801,7 +803,7 @@ class TimezoneSelect(discord.ui.Select):
         except Exception as e:
             logging.exception(f"Error in TimezoneSelect callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while selecting your time zone.", ephemeral=False
+                "An error occurred while selecting your time zone.", ephemeral=True
             )
             self.view.stop()
 
@@ -839,7 +841,7 @@ class DaySelect(discord.ui.Select):
         except Exception as e:
             logging.exception(f"Error in DaySelect callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while selecting the day.", ephemeral=False
+                "An error occurred while selecting the day.", ephemeral=True
             )
             self.view.stop()
 
@@ -863,7 +865,7 @@ class TimeStyleSelect(discord.ui.Select):
         except Exception as e:
             logging.exception(f"Error in TimeStyleSelect callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while selecting the time format.", ephemeral=False
+                "An error occurred while selecting the time format.", ephemeral=True
             )
             self.view.stop()
 
@@ -900,7 +902,7 @@ class HourSelect(discord.ui.Select):
         except Exception as e:
             logging.exception(f"Error in HourSelect callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while selecting the hour.", ephemeral=False
+                "An error occurred while selecting the hour.", ephemeral=True
             )
             self.view.stop()
 
@@ -929,7 +931,7 @@ class AMPMSelect(discord.ui.Select):
         except Exception as e:
             logging.exception(f"Error in AMPMSelect callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while selecting AM/PM.", ephemeral=False
+                "An error occurred while selecting AM/PM.", ephemeral=True
             )
             self.view.stop()
 
@@ -963,7 +965,7 @@ class MinuteSelect(discord.ui.Select):
         except Exception as e:
             logging.exception(f"Error in MinuteSelect callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while selecting the minutes.", ephemeral=False
+                "An error occurred while selecting the minutes.", ephemeral=True
             )
             self.view.stop()
 
@@ -994,7 +996,7 @@ class AddAnotherSlotButton(discord.ui.Button):
         except Exception as e:
             logging.exception(f"Error in AddAnotherSlotButton callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while adding another time slot.", ephemeral=False
+                "An error occurred while adding another time slot.", ephemeral=True
             )
             self.view.stop()
 
@@ -1015,13 +1017,13 @@ class StateSelect(discord.ui.Select):
             elif self.view.state == 'cancel':
                 self.view.clear_items()
                 self.view.stop()
-                await interaction.response.send_message("Selection cancelled.", ephemeral=False)
+                await interaction.response.send_message("Selection cancelled.", ephemeral=True)
             else:
                 await self.view.update_timezone_select_us(interaction)
         except Exception as e:
             logging.exception(f"Error in StateSelect callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while selecting your state.", ephemeral=False
+                "An error occurred while selecting your state.", ephemeral=True
             )
             self.view.stop()
 
@@ -1036,7 +1038,7 @@ class FinishButton(discord.ui.Button):
         except Exception as e:
             logging.exception(f"Error in FinishButton callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while finalizing your availability.", ephemeral=False
+                "An error occurred while finalizing your availability.", ephemeral=True
             )
             self.view.stop()
 
@@ -1069,7 +1071,7 @@ class ChangeTimeFormatButton(discord.ui.Button):
         except Exception as e:
             logging.exception(f"Error in ChangeTimeFormatButton callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while changing time format.", ephemeral=False
+                "An error occurred while changing time format.", ephemeral=True
             )
             self.view.stop()
 
@@ -1081,11 +1083,11 @@ class TimezoneCompleteButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         try:
             self.view.stop()
-            await interaction.response.send_message("Timezone has been set successfully.", ephemeral=False)
+            await interaction.response.send_message("Timezone has been set successfully.", ephemeral=True)
         except Exception as e:
             logging.exception(f"Error in FinishButton callback: {e}")
             await interaction.response.send_message(
-                "An error occurred while finalizing your availability.", ephemeral=False
+                "An error occurred while finalizing your availability.", ephemeral=True
             )
             self.view.stop()
 
@@ -1136,7 +1138,7 @@ class AvailabilityView(discord.ui.View):
                 regions = continent_regions[continent_name]
                 if self.region is None:
                     await interaction.response.send_message(
-                        "Please select a region first.", ephemeral=False
+                        "Please select a region first.", ephemeral=True
                     )
                     return
                 countries = regions.get(self.region, [])
@@ -1147,7 +1149,7 @@ class AvailabilityView(discord.ui.View):
 
             if not countries:
                 await interaction.response.send_message(
-                    "No countries found for the selected region or continent.", ephemeral=False
+                    "No countries found for the selected region or continent.", ephemeral=True
                 )
                 self.stop()
                 return
@@ -1166,7 +1168,7 @@ class AvailabilityView(discord.ui.View):
 
             if not options:
                 await interaction.response.send_message(
-                    "No country options available.", ephemeral=False
+                    "No country options available.", ephemeral=True
                 )
                 self.stop()
                 return
@@ -1179,7 +1181,7 @@ class AvailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_country_select: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating country selection.", ephemeral=False
+                "An error occurred while updating country selection.", ephemeral=True
             )
             self.stop()
 
@@ -1189,7 +1191,7 @@ class AvailabilityView(discord.ui.View):
             regions = continent_regions.get(self.continent)
             if not regions:
                 await interaction.response.send_message(
-                    "No regions found for the selected continent.", ephemeral=False
+                    "No regions found for the selected continent.", ephemeral=True
                 )
                 self.stop()
                 return
@@ -1199,7 +1201,7 @@ class AvailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_region_select{e}")
             await interaction.response.send_message(
-                "An error occurred while updating region selection.", ephemeral=False
+                "An error occurred while updating region selection.", ephemeral=True
             )
             self.stop()
 
@@ -1211,7 +1213,7 @@ class AvailabilityView(discord.ui.View):
                 states_in_region = us_regions.get(self.us_region, [])
                 if not states_in_region:
                     await interaction.response.send_message(
-                        "No states found for the selected region.", ephemeral=False
+                        "No states found for the selected region.", ephemeral=True
                     )
                     self.stop()
                     return
@@ -1229,7 +1231,7 @@ class AvailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_state_select: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating state selection.", ephemeral=False
+                "An error occurred while updating state selection.", ephemeral=True
             )
             self.stop()
 
@@ -1244,7 +1246,7 @@ class AvailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_region_select_us: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating US region selection.", ephemeral=False
+                "An error occurred while updating US region selection.", ephemeral=True
             )
             self.stop()
 
@@ -1254,7 +1256,7 @@ class AvailabilityView(discord.ui.View):
             state_timezones = us_state_timezones.get(self.state)
             if not state_timezones:
                 await interaction.response.send_message(
-                    "No time zones found for the selected state.", ephemeral=False
+                    "No time zones found for the selected state.", ephemeral=True
                 )
                 self.stop()
                 return
@@ -1269,7 +1271,7 @@ class AvailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_timezone_select_us: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating time zone selection.", ephemeral=False
+                "An error occurred while updating time zone selection.", ephemeral=True
             )
             self.stop()
 
@@ -1280,14 +1282,14 @@ class AvailabilityView(discord.ui.View):
             if self.country_code == 'other':
                 await interaction.response.send_message(
                     "Please enter your country manually using the `/timesheet` command with your country.",
-                    ephemeral=False
+                    ephemeral=True
                 )
                 self.stop()
                 return
             # Get time zones for the selected country
             timezones = pytz.country_timezones.get(self.country_code)
             if not timezones:
-                await interaction.response.send_message("No time zones found for the selected country.", ephemeral=False)
+                await interaction.response.send_message("No time zones found for the selected country.", ephemeral=True)
                 self.stop()
                 return
             # Create options for the select menu
@@ -1303,7 +1305,7 @@ class AvailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_timezone_select: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating time zone selection.", ephemeral=False
+                "An error occurred while updating time zone selection.", ephemeral=True
             )
             self.view.stop()
 
@@ -1317,7 +1319,7 @@ class AvailabilityView(discord.ui.View):
         """Ensure only the initiating user can interact with the view."""
         if self.user_id and interaction.user.id != self.user_id:
             await interaction.response.send_message(
-                "You cannot interact with this view.", ephemeral=False
+                "You cannot interact with this view.", ephemeral=True
             )
             return False
         return True
@@ -1332,7 +1334,7 @@ class AvailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_day_select: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating day selection.", ephemeral=False
+                "An error occurred while updating day selection.", ephemeral=True
             )
             self.stop()
 
@@ -1347,7 +1349,7 @@ class AvailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_day_select: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating day selection.", ephemeral=False
+                "An error occurred while updating day selection.", ephemeral=True
             )
             self.stop()
 
@@ -1365,7 +1367,7 @@ class AvailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_am_pm_select: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating AM/PM selection.", ephemeral=False
+                "An error occurred while updating AM/PM selection.", ephemeral=True
             )
             self.stop()
 
@@ -1383,7 +1385,7 @@ class AvailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_time_select: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating time selection.", ephemeral=False
+                "An error occurred while updating time selection.", ephemeral=True
             )
             self.stop()
 
@@ -1401,7 +1403,7 @@ class AvailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_minute_select: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating minute selection.", ephemeral=False
+                "An error occurred while updating minute selection.", ephemeral=True
             )
             self.stop()
 
@@ -1415,7 +1417,7 @@ class AvailabilityView(discord.ui.View):
             if not all(
                     required_fields) and self.start_hour is None and self.start_minute is None and self.end_hour is None and self.end_minute is None:
                 await interaction.response.send_message(
-                    "Incomplete availability information.", ephemeral=False
+                    "Incomplete availability information.", ephemeral=True
                 )
                 return
 
@@ -1432,7 +1434,7 @@ class AvailabilityView(discord.ui.View):
             day_value = days.get(self.day)
             if not day_value:
                 await interaction.response.send_message(
-                    f"Invalid day: {self.day}", ephemeral=False
+                    f"Invalid day: {self.day}", ephemeral=True
                 )
                 return
 
@@ -1444,7 +1446,7 @@ class AvailabilityView(discord.ui.View):
             end_time_parsed = parse_time_input(end_time_str)
             if not start_time_parsed or not end_time_parsed:
                 await interaction.response.send_message(
-                    "Invalid start or end time format.", ephemeral=False
+                    "Invalid start or end time format.", ephemeral=True
                 )
                 return
 
@@ -1456,7 +1458,7 @@ class AvailabilityView(discord.ui.View):
                 tzinfo = ZoneInfo(self.timezone)
             except Exception as e:
                 await interaction.response.send_message(
-                    "Invalid timezone selected.", ephemeral=False
+                    "Invalid timezone selected.", ephemeral=True
                 )
                 logging.info(f"Error in process_availability: {e}")
                 return
@@ -1509,7 +1511,7 @@ class AvailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in process_availability: {e}")
             await interaction.response.send_message(
-                "An unexpected error occurred while processing your availability.", ephemeral=False
+                "An unexpected error occurred while processing your availability.", ephemeral=True
             )
             self.stop()
 
@@ -1517,7 +1519,7 @@ class AvailabilityView(discord.ui.View):
         try:
             if not self.time_slots:
                 await interaction.response.send_message(
-                    "No availability entries to save.", ephemeral=False
+                    "No availability entries to save.", ephemeral=True
                 )
                 return
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
@@ -1536,7 +1538,7 @@ class AvailabilityView(discord.ui.View):
 
                     if not start_time_parsed or not end_time_parsed:
                         await interaction.response.send_message(
-                            f"Invalid time format for {slot['day']}. Skipping.", ephemeral=False
+                            f"Invalid time format for {slot['day']}. Skipping.", ephemeral=True
                         )
                         continue
 
@@ -1548,7 +1550,7 @@ class AvailabilityView(discord.ui.View):
                         tzinfo = ZoneInfo(slot['timezone'])
                     except Exception as e:
                         await interaction.response.send_message(
-                            f"Invalid timezone {slot['timezone']} for {slot['day']}. Skipping.", ephemeral=False
+                            f"Invalid timezone {slot['timezone']} for {slot['day']}. Skipping.", ephemeral=True
                         )
                         logging.info(f"Error in process_all_availability: {e}")
                         continue
@@ -1639,12 +1641,12 @@ class AvailabilityView(discord.ui.View):
                 description=f"Your availability has been successfully updated.",
                 color=discord.Color.green()
             )
-            await interaction.response.send_message(embed=embed, ephemeral=False)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             self.stop()
         except Exception as e:
             logging.exception(f"Error in process_all_availability: {e}")
             await interaction.response.send_message(
-                "An unexpected error occurred while finalizing your availability.", ephemeral=False
+                "An unexpected error occurred while finalizing your availability.", ephemeral=True
             )
             self.stop()
 
@@ -1657,7 +1659,7 @@ class AvailabilityView(discord.ui.View):
 
     async def cancel(self, interaction: discord.Interaction):
         try:
-            await interaction.response.send_message("Availability setup has been canceled.", ephemeral=False)
+            await interaction.response.send_message("Availability setup has been canceled.", ephemeral=True)
             self.stop()
         except Exception as e:
             logging.exception(f"Error in cancel: {e}")
@@ -1699,7 +1701,7 @@ class AvailabilityView(discord.ui.View):
                 if self.time_style:
                     # Already selected, cannot go back further
                     await interaction.response.send_message("You are at the first step and cannot go back further.",
-                                                            ephemeral=False)
+                                                            ephemeral=True)
                 else:
                     # Go back to time style selection
                     self.clear_items()
@@ -1710,14 +1712,14 @@ class AvailabilityView(discord.ui.View):
             elif self.current_step == "time_style_select":
                 # Cannot go back further
                 await interaction.response.send_message("You are at the first step and cannot go back further.",
-                                                        ephemeral=False)
+                                                        ephemeral=True)
             else:
                 # Default case
-                await interaction.response.send_message("Cannot go back from here.", ephemeral=False)
+                await interaction.response.send_message("Cannot go back from here.", ephemeral=True)
         except Exception as e:
             logging.exception(f"Error in go_back: {e}")
             await interaction.response.send_message(
-                "An error occurred while going back to the previous step.", ephemeral=False
+                "An error occurred while going back to the previous step.", ephemeral=True
             )
             self.stop()
 
@@ -1749,7 +1751,7 @@ class UnavailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_day_select: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating day selection.", ephemeral=False
+                "An error occurred while updating day selection.", ephemeral=True
             )
             self.stop()
 
@@ -1763,7 +1765,7 @@ class UnavailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_time_select: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating time selection.", ephemeral=False
+                "An error occurred while updating time selection.", ephemeral=True
             )
             self.stop()
 
@@ -1777,7 +1779,7 @@ class UnavailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in update_minute_select: {e}")
             await interaction.response.send_message(
-                "An error occurred while updating minute selection.", ephemeral=False
+                "An error occurred while updating minute selection.", ephemeral=True
             )
             self.stop()
 
@@ -1788,7 +1790,7 @@ class UnavailabilityView(discord.ui.View):
             if not all([self.timezone,
                         self.day]) and self.start_hour is None and self.start_minute is None and self.end_hour is None and self.end_minute is None:
                 await interaction.response.send_message(
-                    "Incomplete availability information.", ephemeral=False
+                    "Incomplete availability information.", ephemeral=True
                 )
                 return
 
@@ -1801,7 +1803,7 @@ class UnavailabilityView(discord.ui.View):
             day_value = days.get(self.day)
             if not day_value:
                 await interaction.response.send_message(
-                    f"Invalid day: {self.day}", ephemeral=False
+                    f"Invalid day: {self.day}", ephemeral=True
                 )
                 return
 
@@ -1813,7 +1815,7 @@ class UnavailabilityView(discord.ui.View):
             end_time_parsed = parse_time_input(end_time_str)
             if not start_time_parsed or not end_time_parsed:
                 await interaction.response.send_message(
-                    "Invalid start or end time format.", ephemeral=False
+                    "Invalid start or end time format.", ephemeral=True
                 )
                 return
 
@@ -1825,7 +1827,7 @@ class UnavailabilityView(discord.ui.View):
                 tzinfo = ZoneInfo(self.timezone)
             except Exception as e:
                 await interaction.response.send_message(
-                    "Invalid timezone selected.", ephemeral=False
+                    "Invalid timezone selected.", ephemeral=True
                 )
                 logging.info(f"Invalid timezone selected. {e}")
                 return
@@ -1878,7 +1880,7 @@ class UnavailabilityView(discord.ui.View):
         except Exception as e:
             logging.exception(f"Error in process_availability: {e}")
             await interaction.response.send_message(
-                "An unexpected error occurred while processing your availability.", ephemeral=False
+                "An unexpected error occurred while processing your availability.", ephemeral=True
             )
             self.stop()
 
@@ -1886,7 +1888,7 @@ class UnavailabilityView(discord.ui.View):
         try:
             if not self.time_slots:
                 await interaction.response.send_message(
-                    "No availability entries to save.", ephemeral=False
+                    "No availability entries to save.", ephemeral=True
                 )
                 return
 
@@ -1905,7 +1907,7 @@ class UnavailabilityView(discord.ui.View):
                     end_time_parsed = parse_time_input(slot['end_time'])
                     if not start_time_parsed or not end_time_parsed:
                         await interaction.response.send_message(
-                            f"Invalid time format for {slot['day']}. Skipping.", ephemeral=False
+                            f"Invalid time format for {slot['day']}. Skipping.", ephemeral=True
                         )
                         continue
 
@@ -1917,7 +1919,7 @@ class UnavailabilityView(discord.ui.View):
                         tzinfo = ZoneInfo(slot['timezone'])
                     except Exception as e:
                         await interaction.response.send_message(
-                            f"Invalid timezone {slot['timezone']} for {slot['day']}. Skipping.", ephemeral=False
+                            f"Invalid timezone {slot['timezone']} for {slot['day']}. Skipping.", ephemeral=True
                         )
                         logging.info(f"Error in process_all_availability {e}")
                         continue
@@ -2000,12 +2002,12 @@ class UnavailabilityView(discord.ui.View):
                 description=f"Your availability has been successfully updated.",
                 color=discord.Color.green()
             )
-            await interaction.response.send_message(embed=embed, ephemeral=False)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             self.stop()
         except Exception as e:
             logging.exception(f"Error in process_all_availability {e}")
             await interaction.response.send_message(
-                "An unexpected error occurred while finalizing your availability.", ephemeral=False
+                "An unexpected error occurred while finalizing your availability.", ephemeral=True
             )
             self.stop()
 
@@ -2074,8 +2076,9 @@ def signup_embed(character_name: str, title: str, level: int, tier: int, gold: i
         title_field = f"{character_name} would like to participate" if title is None else f"{title} {character_name} would like to participate"
         embed = discord.Embed(title=title_field, color=int(color[1:], 16), url=mythweavers)
         embed.set_thumbnail(url=image_link)
+        gold_string = shared_functions.get_gold_breakdown(gold_value - gold)
         embed.add_field(name="Information", value=f"**Level**: {level}, **Mythic Tier**: {tier}")
-        embed.add_field(name="illiquid Wealth", value=f"**GP**: {round(gold_value - gold, 2)}")
+        embed.add_field(name="illiquid Wealth", value=f"**Gold**: {gold_string}")
         additional_info = f"**Tradition**: [{tradition_name}]({tradition_link})" if tradition_name else ""
         additional_info += '\r\n' if tradition_name and template_name else ""
         additional_info += f"**Template**: [{template_name}]({template_link})" if template_name else ""
@@ -2185,8 +2188,7 @@ async def create_new_group(
                 "SELECT Max(Group_ID) FROM Sessions_Group WHERE Player_Name = ? AND Group_Name = ? AND Host_Character = ?",
                 (player_name, group_name, host_character))
             group_id = await cursor.fetchone()
-            group_name_with_id = f"{group_id[0]}: {group_name}"
-            role = await guild.create_role(name=group_name_with_id)
+            role = await guild.create_role(name=group_name, mentionable=True)
 
             await cursor.execute("INSERT INTO Sessions_Group_Presign(Group_ID, Player_Name) VALUES (?, ?)",
                                  (group_id[0], player_name))
@@ -2219,6 +2221,21 @@ async def join_group(
     except aiosqlite.Error as e:
         logging.exception(f"Failed to delete group {group_id} in guild {guild.id}: {e}.")
         return False
+
+
+def random_name():
+    name = ''
+    url = 'https://www.mit.edu/~ecprice/wordlist.10000'
+    response = requests.get(url)
+    words = response.content.splitlines()
+    max_length = 32
+    while len(name) + 4 < max_length:
+        word = random.choice(words)
+        if len(name) + len(word) < max_length:
+            name += word.decode('utf-8').capitalize()
+        else:
+            break
+    return name
 
 
 async def leave_group(
@@ -2315,7 +2332,7 @@ class PlayerCommands(commands.Cog, name='Player'):
 
     @player_group.command(name='help', description="Get help with player commands")
     async def help(self, interaction: discord.Interaction):
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         embed = discord.Embed(title="Player Commands Help", color=discord.Color.green())
         embed.add_field(
             name="__**Group**__",
@@ -2343,7 +2360,7 @@ class PlayerCommands(commands.Cog, name='Player'):
             **/player sessions Notify** - Update your notification window! \n
             **/player sessions report** - report on a session and add your notes to a WA article! \n    
             """, inline=False)
-        await interaction.followup.send(embed=embed, ephemeral=False)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @sessions_group.command(name='join', description='join a session')
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
@@ -2356,7 +2373,7 @@ class PlayerCommands(commands.Cog, name='Player'):
                    notification: typing.Optional[discord.app_commands.Choice[int]]):
         """Offer your Participation in a session."""
         warning_duration = -1 if notification is None else notification.value
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
@@ -2408,11 +2425,11 @@ class PlayerCommands(commands.Cog, name='Player'):
                             if join_session:
                                 await interaction.followup.send(
                                     content="You have submitted your request! Please wait for the GM to accept or deny your request!",
-                                    ephemeral=False)
+                                    ephemeral=True)
                             else:
                                 await interaction.followup.send(
                                     f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})",
-                                    ephemeral=False)
+                                    ephemeral=True)
                         elif not level_range_info[0]:
                             role = interaction.guild.get_role(session_range_id)
                             if not role:
@@ -2431,14 +2448,14 @@ class PlayerCommands(commands.Cog, name='Player'):
                                 if join_session:
                                     await interaction.followup.send(
                                         content=f"You have submitted your request! Please wait for the GM to accept or deny your request!",
-                                        ephemeral=False)
+                                        ephemeral=True)
                                 else:
                                     await interaction.followup.send(
                                         f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})",
-                                        ephemeral=False)
+                                        ephemeral=True)
                             else:
                                 await interaction.followup.send(
-                                    f"You do not have the required role to join this session.", ephemeral=False)
+                                    f"You do not have the required role to join this session.", ephemeral=True)
                         elif level_range_info[0]:
                             print(level_range_info[0], level_range_info[1])
                             if level_range_info[0] <= level <= level_range_info[1]:
@@ -2453,15 +2470,15 @@ class PlayerCommands(commands.Cog, name='Player'):
                                 if join_session:
                                     await interaction.followup.send(
                                         content=f"You have submitted your request! Please wait for the GM to accept or deny your request!",
-                                        ephemeral=False)
+                                        ephemeral=True)
                                 else:
                                     await interaction.followup.send(
                                         f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})",
-                                        ephemeral=False)
+                                        ephemeral=True)
                             else:
                                 await interaction.followup.send(
                                     f"Character {character_name} is not within the level range of the session.",
-                                    ephemeral=False)
+                                    ephemeral=True)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
                 f"Failed to sign up player {interaction.user.name} for session with id: ({session_id}:{e}")
@@ -2478,7 +2495,7 @@ class PlayerCommands(commands.Cog, name='Player'):
             session_id: int,
             notification: typing.Optional[discord.app_commands.Choice[int]]):
         warning_duration = -1 if notification is None else notification.value
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
@@ -2492,15 +2509,15 @@ class PlayerCommands(commands.Cog, name='Player'):
                 await db.commit()
                 if update_signups.rowcount > 0 or update_participants.rowcount > 0:
                     await interaction.followup.send(content=f"Notification time updated for {session_id}!",
-                                                    ephemeral=False)
+                                                    ephemeral=True)
         except (aiosqlite.Error, TypeError) as e:
             logging.exception(f"Failed to sign up player {interaction.user.name} for session ({session_id}): {e}")
             await interaction.followup.send(
-                f"Failed to sign up player {interaction.user.name} for session ({session_id})", ephemeral=False)
+                f"Failed to sign up player {interaction.user.name} for session ({session_id})", ephemeral=True)
 
     @sessions_group.command(name='leave', description='Rescind your Participation in a session')
     async def leave_session(self, interaction: discord.Interaction, session_id: int):
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
@@ -2548,7 +2565,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     async def display(self, interaction: discord.Interaction, session_id: int,
                       group: discord.app_commands.Choice[int] = 1, page_number: int = 1):
         """ALL: THIS COMMAND DISPLAYS SESSION INFORMATION"""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -2596,7 +2613,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     async def report(self, interaction: discord.Interaction, session_id: int, summary: str, character_name: str):
         """Report on a session"""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
@@ -2643,12 +2660,20 @@ class PlayerCommands(commands.Cog, name='Player'):
                 await cursor.execute("Select Group_ID, Role_ID from Sessions_Group where Player_Name = ?",
                                      (interaction.user.name,))
                 group = await cursor.fetchone()
-                if not group:
+                await cursor.execute("Select Group_ID, Role_ID from Sessions_Group where Group_Name = ?",
+                                     (group_name,))
+                taken = await cursor.fetchone()
+                if not group and not taken:
                     new_role = await create_new_group(interaction.guild, interaction.user.name, interaction.user.id,
                                                       group_name,
                                                       character_name, description)
                     await interaction.followup.send(
                         f"Group {group_name} has been created with the role <@&{new_role.id}>!")
+                elif taken:
+                    generated_name = random_name()
+                    random_number = random.randint(0, 1000)
+                    await interaction.followup.send(
+                        f"Group name is taken :( Why don't you try {generated_name}{random_number}.")
                 else:
                     await interaction.followup.send(
                         f"You already have a group request open! Please close it before opening another.")
@@ -2659,7 +2684,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @group_group.command(name='delete', description='delete your group')
     async def delete_group(self, interaction: discord.Interaction):
         """Delete a session Request"""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
@@ -2679,7 +2704,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @app_commands.autocomplete(group_id=shared_functions.group_id_autocompletion)
     async def group_join(self, interaction: discord.Interaction, group_id: int):
         """Sync your Groups up for a GM to view whose in a session request group."""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
@@ -2711,7 +2736,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @app_commands.autocomplete(group_id=shared_functions.group_id_autocompletion)
     async def group_leave(self, interaction: discord.Interaction, group_id: int):
         """leave a group because you hate everyone inside."""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
@@ -2742,7 +2767,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     async def display_groups(self, interaction: discord.Interaction, group_id: typing.Optional[int],
                              page_number: int = 1):
         """Display all participants and signups for a group"""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as conn:
                 cursor = await conn.cursor()
@@ -2820,7 +2845,7 @@ class PlayerCommands(commands.Cog, name='Player'):
                                   discord.app_commands.Choice(name='Clear All Availability', value=4)])
     async def timesheet_creation(self, interaction: discord.Interaction,
                                  change: typing.Optional[discord.app_commands.Choice[int]]):
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         change_value = 1 if change is None else change.value
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
@@ -2876,7 +2901,7 @@ class PlayerCommands(commands.Cog, name='Player'):
     @app_commands.autocomplete(timezone=search_timezones)
     async def set_timezone(self, interaction: discord.Interaction, timezone: str):
         """Set your timezone for availability"""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
                 cursor = await db.cursor()
@@ -2912,7 +2937,7 @@ class PlayerCommands(commands.Cog, name='Player'):
 
         guild_id = interaction.guild.id
         day_value = day.value
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         if day_value < 1 or day_value > 7:
             embed = discord.Embed(title=f"Day Error", description=f'{day} is not a valid day of the week!',
                                   colour=discord.Colour.red())
@@ -2940,7 +2965,8 @@ class PlayerCommands(commands.Cog, name='Player'):
                                           colour=discord.Colour.red())
                     await interaction.followup.send(embed=embed)
 
-    @timesheet_group.command(name="group", description="Display availability for a group or groups on a day of the week")
+    @timesheet_group.command(name="group",
+                             description="Display availability for a group or groups on a day of the week")
     @app_commands.choices(
         day=[discord.app_commands.Choice(name='Monday', value=1), discord.app_commands.Choice(name='Tuesday', value=2),
              discord.app_commands.Choice(name='Wednesday', value=3),
@@ -2953,7 +2979,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         guild_id = interaction.guild.id
         day_value = day.value
         try:
-            await interaction.response.defer(thinking=True, ephemeral=False)
+            await interaction.response.defer(thinking=True, ephemeral=True)
             if day_value < 1 or day_value > 7:
                 embed = discord.Embed(title=f"Day Error", description=f'{day} is not a valid day of the week!',
                                       colour=discord.Colour.red())
@@ -3033,7 +3059,7 @@ class GroupView(shared_functions.ShopView):
     def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, group_id: typing.Optional[int],
                  interaction: discord.Interaction):
         super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction,
-                         content=self.content)
+                         content=None)
         self.max_items = None  # Cache total number of items
         self.content = None
         self.group_id = group_id
@@ -3126,7 +3152,7 @@ class DisplayGroupTimesheet(discord.ui.View):
             if interaction.user.id != self.user_id:
                 await interaction.response.send_message(
                     "You cannot interact with this button.",
-                    ephemeral=False
+                    ephemeral=True
                 )
                 return False
             return True
@@ -3140,13 +3166,13 @@ class DisplayGroupTimesheet(discord.ui.View):
             await interaction.response.defer()
             if self.view_type == 0:
                 if self.day == 1:
-                    await interaction.followup.send("You are on the first page.", ephemeral=False)
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
                     return
                 else:
                     self.day = 1
             else:
                 if self.range_id == 0:
-                    await interaction.followup.send("You are on the first page.", ephemeral=False)
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
                     return
                 else:
                     self.range_id = 0
@@ -3159,7 +3185,7 @@ class DisplayGroupTimesheet(discord.ui.View):
             )
             with open(f'C:\\Pathparser\\Pathparser\\plots\\timecard_{self.user_id}_plot.png', 'rb') as f:
                 picture = discord.File(f)
-                await interaction.followup.send(file=picture, ephemeral=False)
+                await interaction.followup.send(file=picture, ephemeral=True)
         except Exception as e:
             logging.error(f"Failed to move to the first page: {e}")
             raise
@@ -3170,13 +3196,13 @@ class DisplayGroupTimesheet(discord.ui.View):
             await interaction.response.defer()
             if self.view_type == 0:
                 if self.day == 1:
-                    await interaction.followup.send("You are on the first page.", ephemeral=False)
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
                     return
                 else:
                     self.day -= 1
             else:
                 if self.range_id == 0:
-                    await interaction.followup.send("You are on the first page.", ephemeral=False)
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
                     return
                 else:
                     self.range_id -= 1
@@ -3189,7 +3215,7 @@ class DisplayGroupTimesheet(discord.ui.View):
             )
             with open(f'C:\\Pathparser\\Pathparser\\plots\\timecard_{self.user_id}_plot.png', 'rb') as f:
                 picture = discord.File(f)
-                await interaction.followup.send(file=picture, ephemeral=False)
+                await interaction.followup.send(file=picture, ephemeral=True)
         except Exception as e:
             logging.error(f"Failed to move to the previous page: {e}")
             raise
@@ -3205,7 +3231,7 @@ class DisplayGroupTimesheet(discord.ui.View):
                 picture = discord.File(f)
             self.message = await self.interaction.followup.send(
                 embed=self.embed,
-                view=self, file=picture, ephemeral=False
+                view=self, file=picture, ephemeral=True
             )
 
         except discord.HTTPException as e:
@@ -3248,13 +3274,13 @@ class DisplayGroupTimesheet(discord.ui.View):
             await interaction.response.defer()
             if self.view_type == 0:
                 if self.day == 7:
-                    await interaction.followup.send("You are on the last page.", ephemeral=False)
+                    await interaction.followup.send("You are on the last page.", ephemeral=True)
                     return
                 else:
                     self.day += 1
             else:
                 if self.range_id == self.max_range_id:
-                    await interaction.followup.send("You are on the first page.", ephemeral=False)
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
                     return
                 else:
                     self.range_id += 1
@@ -3267,7 +3293,7 @@ class DisplayGroupTimesheet(discord.ui.View):
             )
             with open(f'C:\\Pathparser\\plots\\timecard_{self.user_id}_plot.png', 'rb') as f:
                 picture = discord.File(f)
-                await interaction.followup.send(file=picture, ephemeral=False)
+                await interaction.followup.send(file=picture, ephemeral=True)
         except Exception as e:
             logging.error(f"Failed to move to the next page: {e}")
             raise
@@ -3278,13 +3304,13 @@ class DisplayGroupTimesheet(discord.ui.View):
             await interaction.response.defer()
             if self.view_type == 0:
                 if self.day == 7:
-                    await interaction.followup.send("You are on the last page.", ephemeral=False)
+                    await interaction.followup.send("You are on the last page.", ephemeral=True)
                     return
                 else:
                     self.day = 7
             else:
                 if self.range_id == self.max_range_id:
-                    await interaction.followup.send("You are on the first page.", ephemeral=False)
+                    await interaction.followup.send("You are on the first page.", ephemeral=True)
                     return
                 else:
                     self.range_id = self.max_range_id
@@ -3297,7 +3323,7 @@ class DisplayGroupTimesheet(discord.ui.View):
             )
             with open(f'C:\\Pathparser\\Pathparser\\plots\\timecard_{self.user_id}_plot.png', 'rb') as f:
                 picture = discord.File(f)
-                await interaction.followup.send(file=picture, ephemeral=False)
+                await interaction.followup.send(file=picture, ephemeral=True)
         except Exception as e:
             logging.error(f"Failed to move to the last page: {e}")
             raise
