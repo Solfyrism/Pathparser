@@ -411,26 +411,12 @@ async def gold_calculation(
 ) -> Tuple[Decimal, Decimal, Decimal, Decimal, int]:
     time = datetime.datetime.now()
     try:
+        gold_value_calc = gold_value + gold_value_change if isinstance(gold_value_change, Decimal) else gold_value + gold_change
 
         if gold_change > 0:
-            gold_value_calc = gold_value + gold_value_change if isinstance(gold_value_change, Decimal) else gold_value + gold_change
             if oath == 'Offerings' and not ignore_limitations:
                 # Only half the gold change is applied
                 adjusted_gold_change = (gold_change * Decimal('0.5')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            elif oath in ('Poverty', 'Absolute') and not ignore_limitations:
-                print("i'm over here", level, oath, gold, gold_value, gold_change, gold_value_calc)
-                max_gold = (Decimal('80') * Decimal(level) ** 2) if oath == 'Poverty' else (
-                        Decimal(level) * Decimal('5'))
-                print(max_gold)
-                if gold_value >= max_gold:
-                    # Cannot gain more gold
-                    adjusted_gold_change = Decimal('0')
-                elif gold_value_calc > max_gold:
-                    # Cap the gold gain to reach max_gold
-                    adjusted_gold_change = max_gold - gold_value
-                else:
-                    adjusted_gold_change = gold_change
-                print("adjusted_gold_change", adjusted_gold_change)
             else:
                 # Other oaths gain gold normally. When receiving gold sent by another player, ignore limitations 
                 adjusted_gold_change = gold_change
@@ -440,11 +426,10 @@ async def gold_calculation(
             evaluate_gold_value_change = False if gold_value_change is None else gold_value_change > 0
             if evaluate_gold_value_change:
                 if oath in ('Poverty', 'Absolute'):
-                    max_gold = (Decimal('80') * Decimal(level) ** 2) if oath == 'Poverty' else (
-                            Decimal(level) * Decimal('5'))
-                    if gold_value + gold_change >= max_gold:
+                    max_gold = (Decimal('80') * Decimal(level) ** 2)
+                    if gold_value + gold_value_change >= gold + max_gold:
                         # Cannot gain more gold
-                        raise ValueError("Gold_Value cannot exceed max.")
+                        raise ValueError(f"Gold_Value cannot exceed max. {max_gold}, this gives you {gold_value + gold_value_change - gold}")
 
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
             cursor = await conn.cursor()
