@@ -411,9 +411,9 @@ async def gold_calculation(
 ) -> Tuple[Decimal, Decimal, Decimal, Decimal, int]:
     time = datetime.datetime.now()
     try:
-        gold_value_calc = gold_value + gold_value_change if isinstance(gold_value_change, Decimal) else gold_value + gold_change
+        gold_value_calc = gold_value + gold_value_change if isinstance(gold_value_change, Decimal) else Decimal(gold_value) + Decimal(gold_change)
 
-        if gold_change > 0:
+        if gold_change > Decimal(0):
             if oath == 'Offerings' and not ignore_limitations:
                 # Only half the gold change is applied
                 adjusted_gold_change = (gold_change * Decimal('0.5')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -427,9 +427,10 @@ async def gold_calculation(
             if evaluate_gold_value_change:
                 if oath in ('Poverty', 'Absolute'):
                     max_gold = (Decimal('80') * Decimal(level) ** 2)
+                    print(oath, gold_value, gold_value_change, gold, max_gold)
                     if gold_value + gold_value_change >= gold + max_gold:
                         # Cannot gain more gold
-                        raise ValueError(f"Gold_Value cannot exceed max. {max_gold}, this gives you {gold_value + gold_value_change - gold}")
+                        raise ValueError(f"Gold Value cannot exceed max of {max_gold}, you have {gold_value - gold}, this gives you {gold_value + gold_value_change - gold}")
 
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
             cursor = await conn.cursor()
@@ -2318,7 +2319,8 @@ class CharacterCommands(commands.Cog, name='character'):
                         if len(characters) == 1:
                             offset = 0
                         else:
-                            offset = characters.index(character[0])
+                            offset = characters.index(character[0]) + 1
+                            print(offset)
                 else:
                     view_type = 1
 
@@ -2540,7 +2542,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                 gold_value=Decimal(gold_value),
                                 gold_value_max=Decimal(gold_value_max),
                                 gold_value_change=change_gold_value,
-                                gold_value_max_change=None,
+                                gold_value_max_change=change_gold_value-abs(Decimal(expenditure)),
                                 reason=reason,
                                 source='Character Gold Buy Command',
                                 author_name=interaction.user.name,
@@ -2589,7 +2591,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                     await channel.send(embed=embed)
 
                                 await interaction.followup.send(embed=character_log)
-        except (aiosqlite.Error, TypeError, ValueError) as e:
+        except (aiosqlite.Error, TypeError, ValueError, CalculationAidFunctionError) as e:
             await interaction.followup.send(f"An error occurred in the buy command: {e}")
             logging.exception(f"An error occurred in the buy command: {e}")
 
@@ -2695,7 +2697,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                     embed = discord.Embed(title="Gold Send Failed!", description=gold_results)
                                     await interaction.followup.send(embed=embed)
 
-        except (aiosqlite.Error, TypeError, ValueError) as e:
+        except (aiosqlite.Error, TypeError, ValueError, CalculationAidFunctionError) as e:
             await interaction.followup.send(f"An error occurred in the gold send command: {e}")
             logging.exception(f"An error occurred in the send command: {e}")
 
@@ -3520,7 +3522,7 @@ class CharacterDisplayView(shared_functions.DualView):
         """Create the embed for the titles."""
         if self.view_type == 1:
             if not self.player_name:
-                current_page = (self.offset // self.limit) + 1
+                current_page = (self.offset // self.limit)
                 total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
                 self.embed = discord.Embed(title=f"Character Summary",
                                            description=f"Page {current_page} of {total_pages}")
@@ -3550,7 +3552,7 @@ class CharacterDisplayView(shared_functions.DualView):
                 if tradition_name or template_name:
                     self.embed.add_field(name=f'Additional Info', value=linkage, inline=False)
         else:
-            current_page = (self.offset // self.limit) + 1
+            current_page = (self.offset // self.limit)
             total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
             for result in self.results:
                 (player_name, true_character_name, title, titles, description, oath, level, tier, milestones,

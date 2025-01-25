@@ -2389,6 +2389,20 @@ class PlayerCommands(commands.Cog, name='Player'):
                      session_thread,
                      overflow) = session_info
                     await cursor.execute(
+                        "SELECT Player_Name from Sessions_Signups WHERE Session_ID = ? AND Player_Name = ?",
+                    )
+                    signup_present = await cursor.fetchone()
+                    await cursor.execute(
+                        "SELECT Player_Name from Sessions_Participants WHERE Session_ID = ? AND Player_Name = ?",
+                    )
+                    participant_present = await cursor.fetchone()
+                    if signup_present or participant_present:
+                        await interaction.followup.send(
+                            f"Player {interaction.user.name} has already signed up for session {session_name} ({session_id})",
+                            ephemeral=True)
+                        return
+
+                    await cursor.execute(
                         "SELECT Level from Player_Characters WHERE Player_ID = ? AND Character_Name = ?",
                         (interaction.user.id, character_name))
                     character_info = await cursor.fetchone()

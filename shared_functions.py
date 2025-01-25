@@ -1360,7 +1360,8 @@ def validate_worldanvil(url: str) -> Tuple[bool, str, int]:
 
         # Extract the character ID from the path
         path_parts = parsed_url.path.strip('/').split('/')
-        if len(path_parts) < 2 or path_parts[0] != 'hero' or not path_parts[1].isdigit():
+
+        if len(path_parts) < 2 or path_parts[0] != 'hero':
             return False, "URL must contain a valid character ID after '/hero/'.", 3
 
         return True, "", -1  # Success case includes step indicator -1

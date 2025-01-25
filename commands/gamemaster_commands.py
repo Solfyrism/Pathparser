@@ -436,10 +436,10 @@ async def session_reward_calculation(
                     (fame, fame_change, prestige, prestige_change) = return_fame
                     character_updates.fame_package = (fame, prestige)
 
-                    character_changes.total_fame = fame
-                    character_changes.fame = fame_change
-                    character_changes.total_prestige = prestige
-                    character_changes.prestige = prestige_change
+                    character_changes.fame = fame
+                    character_changes.fame_change = fame_change
+                    character_changes.prestige = prestige
+                    character_changes.prestige_change = prestige_change
 
                 else:
                     fame_change = None
@@ -1738,46 +1738,29 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                     embed.add_field(name=character_name, value=session_reward)
                                 else:
                                     (session_reward_embed, player_thread) = session_reward
-                                    player_reward_content = []
-                                    final_content = []
-                                    if session_reward_embed.milestone_change:
-                                        level_content = f"has received {session_reward_embed.milestone_change} Milestones\r\n"
-                                        level_content += f"and has leveled up to {session_reward_embed.level}! " if session_reward_embed.level != level else ""
-                                        level_content += f"New Total: {session_reward_embed.milestones_total} Milestones with {session_reward_embed.milestones_remaining} remaining"
-                                        player_reward_content.append(level_content)
-                                    if session_reward_embed.trial_change:
-                                        trial_content = f"has received {session_reward_embed.trial_change} Trials\r\n"
-                                        trial_content += f"and has tiered up to {session_reward_embed.tier}! " if session_reward_embed.tier != tier else ""
-                                        trial_content += f"New Total: {session_reward_embed.trials} Trials with {session_reward_embed.trials_remaining} remaining"
-                                        player_reward_content.append(trial_content)
-                                    elif session_reward_embed.tier != tier:
-                                        tier_content = f"has tiered up to {session_reward_embed.tier}!"
-                                        player_reward_content.append(tier_content)
-                                    if session_reward_embed.gold_change:
-                                        gold_content = f"has received {session_reward_embed.gold_change} gold\r\n"
-                                        gold_content += f"New Total: {session_reward_embed.gold} gold"
-                                        player_reward_content.append(gold_content)
-                                    if session_reward_embed.essence_change:
-                                        essence_content = f"has received {session_reward_embed.essence_change} essence\r\n"
-                                        essence_content += f"New Total: {session_reward_embed.essence} essence"
-                                        player_reward_content.append(essence_content)
-                                    if session_reward_embed.fame or session_reward_embed.prestige:
-                                        fame_content = f"has received {session_reward_embed.fame_change} fame and {session_reward_embed.prestige_change} prestige!\r\n"
-                                        fame_content += f"New Total: {session_reward_embed.fame} Fame and {session_reward_embed.prestige} Prestige"
-                                        player_reward_content.append(fame_content)
-                                    if session_reward_embed.alternate_reward:
-                                        alt_reward_all_content = f"has received {session_reward_embed.alternate_reward}"
-                                        player_reward_content.append(alt_reward_all_content)
-                                    if player_reward_content:
-                                        final_content.append(f"Player: <@{player_id}>'s character Rewards:")
-                                        final_content.extend(player_reward_content)
-                                        final_content = "\r\n".join(final_content)
-                                        embed.add_field(name=character_name, value=final_content)
-                                    await shared_functions.log_embed(change=session_reward_embed,
-                                                                     guild=interaction.guild, thread=player_thread,
-                                                                     bot=self.bot)
-                                    await shared_functions.character_embed(character_name=character_name,
-                                                                           guild=interaction.guild)
+                                    changes = f"**<@{player_id}>'s Rewards:**"
+                                    changes += f"\r\n+{session_reward_embed.milestone_change} Milestones" if session_reward_embed.milestone_change else ""
+                                    changes += f"\r\n**Leveled up!** Now Level {session_reward_embed.level}!" if session_reward_embed.level != level else ""
+                                    changes += f"\r\n+{session_reward_embed.trial_change} Trials" if session_reward_embed.trial_change else ""
+                                    changes += f"\r\n**Tiered up!** Now Tier {session_reward_embed.tier}!" if session_reward_embed.tier != tier and session_reward_embed.tier else ""
+                                    changes += f"\r\n+{session_reward_embed.gold_change} gold" if session_reward_embed.gold_change else ""
+                                    changes += f"\r\n+{session_reward_embed.essence_change} essence" if session_reward_embed.essence_change else ""
+                                    changes += f"\r\n+{session_reward_embed.fame_change} fame and +{session_reward_embed.prestige_change} prestige!" if session_reward_embed.fame_change or session_reward_embed.prestige_change else ""
+                                    changes += "\r\n**New Totals:**"
+                                    changes += f"\r\n{session_reward_embed.gold} gold" if session_reward_embed.gold else ""
+                                    changes += f", {session_reward_embed.essence} essence" if session_reward_embed.essence else ""
+                                    changes += f"\r\n{session_reward_embed.fame} fame, {session_reward_embed.prestige} prestige" if session_reward_embed.fame or session_reward_embed.prestige else ""
+                                    changes += f"\r\n{session_reward_embed.milestones_total} Milestones" if session_reward_embed.milestones_total else ""
+                                    changes += f", {session_reward_embed.trials} Trials" if session_reward_embed.trial_change else ""
+                                    embed.add_field(name=character_name, value=changes)
+                                    await shared_functions.log_embed(
+                                        change=session_reward_embed,
+                                        guild=interaction.guild,
+                                        thread=player_thread,
+                                        bot=self.bot)
+                                    await shared_functions.character_embed(
+                                        character_name=character_name,
+                                        guild=interaction.guild)
                                     await cursor.execute(
                                         "Delete from Sessions_Participants where Session_ID = ? and Player_Name = ?",
                                         (session_id, player_name))

@@ -131,6 +131,7 @@ async def on_ready():
 @bot.event
 async def on_disconnect():
     print("Bot is disconnecting.")
+last_trigger_time = {}
 
 
 @bot.event
@@ -158,8 +159,20 @@ async def on_message(message):
                 if 'einstein' in message.content.lower():
                     await message.channel.send(
                         "https://i.insider.com/641ca0f5d67fe70018a376ca?width=800&format=jpeg&auto=webp")
-                elif 'monkey' in message.content.lower() and random_number != 1:
-                    await message.channel.send("https://i.ytimg.com/vi/tLHqnn1ZkAM/maxresdefault.jpg")
+                elif 'monkey' in message.content.lower():
+
+                    current_time = datetime.datetime.utcnow()
+                    last_time = last_trigger_time.get(channel_id, datetime.datetime.min)
+                    if (current_time - last_time).total_seconds() > 300:  # 300 seconds = 5 minutes
+                        last_trigger_time[channel_id] = current_time
+                        if random_number != 1:
+                            await message.channel.send("https://i.ytimg.com/vi/tLHqnn1ZkAM/maxresdefault.jpg")
+                        else:
+                            await message.channel.send(
+                                "https://tenor.com/view/mmmm-monkey-monkey-ug-master-oogway-oogway-gif-19727561")
+                    else:
+                        logging.debug("Cooldown active. Skipping message.")
+
                 elif 'monkey' in message.content.lower() and random_number == 1:
                     await message.channel.send(
                         "https://tenor.com/view/mmmm-monkey-monkey-ug-master-oogway-oogway-gif-19727561")
@@ -175,7 +188,21 @@ async def on_message(message):
                 elif random_number == 4 and message.author.id == 217873501313433600:
                     await message.channel.send(
                         "https://cdn.discordapp.com/attachments/479089930816192513/1322782239452430467/4OGDuJJjqwVJFdQkOvEm71fkWBFQVWFFhRYEWBFQWWBRYAfoXa71Wo11RYEWBFQVWFFhRYCkFPgUCd2wuGYpcgwAAAABJRU5ErkJggg.png?ex=6776bdb5&is=67756c35&hm=35c2b303e206d87b60edc261f3134c6a072af9255a5a721e1a0cfa377fcb20a6&")
-                guild_id = message.guild.id
+
+                if message.author.id == 318796580662542347 and 'stabbed' in message.content.lower():
+                    await message.channel.send("https://media.tenor.com/-BpjJcwntaYAAAAM/you-fucking-what-epic-npc-dnd.gif")
+                elif message.author.id == 318796580662542347 and 'hit by a car' in message.content.lower():
+                    await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
+                elif message.author.id == 318796580662542347 and 'car wreck' in message.content.lower():
+                    await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
+                elif message.author.id == 318796580662542347 and 'car crash' in message.content.lower():
+                    await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
+                elif message.author.id == 318796580662542347 and 'hit by a truck' in message.content.lower():
+                    await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
+                elif message.author.id == 318796580662542347 and 'got shot' in message.content.lower():
+                    await message.channel.send("https://cdn.discordapp.com/attachments/479089930816192513/1330383824315613275/hq720.png?ex=678dc7fd&is=678c767d&hm=a4ae84c616d84827555e18cee3a61337d2f65f36eae0caf89dc9d06bd42377bd&")
+                elif message.author.id == 318796580662542347 and 'tried to set me on fire' in message.content.lower():
+                    await message.channel.send("https://i.imgflip.com/pwruu.jpg")
                 swears = {
                     "fuck": 0,
                     "shit": 0,
@@ -191,10 +218,11 @@ async def on_message(message):
                 for swear in swears.keys():
                     # Use regex to match whole words
                     swears[swear] = len(re.findall(rf"\b{swear}\b", normalized_string))
-
                 # Calculate total occurrences
                 total_count = sum(swears.values())
+
                 if total_count > 1 and message.author.id == 243120409703088128:
+
                     hostility = min(100, int((total_count / 5) * 100))
                     if 0 <= random_number <= 17:
                         await message.channel.send(f"Hostility Detected: {hostility}% Someone's a salty boy! :)")
@@ -227,11 +255,17 @@ async def on_message(message):
                 if 'einstein' in message.content.lower():
                     await message.channel.send(
                         "https://i.insider.com/641ca0f5d67fe70018a376ca?width=800&format=jpeg&auto=webp")
-                elif 'monkey' in message.content.lower() and random_number != 1:
-                    await message.channel.send("https://i.ytimg.com/vi/tLHqnn1ZkAM/maxresdefault.jpg")
-                elif 'monkey' in message.content.lower() and random_number == 1:
-                    await message.channel.send(
-                        "https://tenor.com/view/mmmm-monkey-monkey-ug-master-oogway-oogway-gif-19727561")
+                elif 'monkey' in message.content.lower():
+                    current_time = datetime.datetime.utcnow()
+                    last_time = last_trigger_time.get(channel_id, datetime.datetime.min)
+                    if (current_time - last_time).total_seconds() > 300:  # 300 seconds = 5 minutes
+                        last_trigger_time[channel_id] = current_time
+                        if random_number != 1:
+                            await message.channel.send("https://i.ytimg.com/vi/tLHqnn1ZkAM/maxresdefault.jpg")
+                        else:
+                            await message.channel.send("https://tenor.com/view/mmmm-monkey-monkey-ug-master-oogway-oogway-gif-19727561")
+                    else:
+                        logging.debug("Cooldown active. Skipping message.")
                 if random_number == 1 and message.author.id == 217873501313433600:
                     await message.channel.send(
                         "https://cdn.discordapp.com/attachments/479089930816192513/1309682327860805733/7YjmdoZxhSgAAAAASUVORK5CYII.png?ex=67768b77&is=677539f7&hm=9ebebdcbf4c8f1266649c1d1d66dbcdad58b18f1a219da101094a96f910d396c&")
@@ -245,6 +279,17 @@ async def on_message(message):
                     await message.channel.send(
                         "https://cdn.discordapp.com/attachments/479089930816192513/1322782239452430467/4OGDuJJjqwVJFdQkOvEm71fkWBFQVWFFhRYEWBFQWWBRYAfoXa71Wo11RYEWBFQVWFFhRYCkFPgUCd2wuGYpcgwAAAABJRU5ErkJggg.png?ex=6776bdb5&is=67756c35&hm=35c2b303e206d87b60edc261f3134c6a072af9255a5a721e1a0cfa377fcb20a6&")
                 guild_id = message.guild.id
+
+                if message.author.id == 318796580662542347 and 'stabbed' in message.content.lower():
+                    await message.channel.send("https://media.tenor.com/-BpjJcwntaYAAAAM/you-fucking-what-epic-npc-dnd.gif")
+                elif message.author.id == 318796580662542347 and 'hit by a car' in message.content.lower():
+                    await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
+                elif message.author.id == 318796580662542347 and 'hit by a truck' in message.content.lower():
+                    await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
+                elif message.author.id == 318796580662542347 and 'shot' in message.content.lower():
+                    await message.channel.send("https://cdn.discordapp.com/attachments/479089930816192513/1330383824315613275/hq720.png?ex=678dc7fd&is=678c767d&hm=a4ae84c616d84827555e18cee3a61337d2f65f36eae0caf89dc9d06bd42377bd&")
+                elif message.author.id == 318796580662542347 and 'tried to set me on fire' in message.content.lower():
+                    await message.channel.send("https://i.imgflip.com/pwruu.jpg")
                 swears = {
                     "fuck": 0,
                     "shit": 0,
