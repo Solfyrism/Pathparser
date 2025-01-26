@@ -25,7 +25,7 @@ class KingdomInfo:
     alignment: Optional[str] = None
     control_dc: Optional[int] = None
     build_points: Optional[int] = None
-    stabilization_points: Optional[int] = None
+
     size: Optional[int] = None
     population: Optional[int] = None
     economy: Optional[int] = None
@@ -135,7 +135,7 @@ async def blueprint_autocomplete(interaction: discord.Interaction, current: str
         cursor = await db.cursor()
         current = unidecode(str.title(current))
         await cursor.execute(
-            "SELECT Building FROM Buildings_Blueprints WHERE Building LIKE ? Limit 20",
+            "SELECT Building FROM kb_Buildings_Blueprints WHERE Building LIKE ? Limit 20",
             (f"%{current}%",))
         blueprint_list = await cursor.fetchall()
         for blueprint in blueprint_list:
@@ -173,8 +173,8 @@ async def hex_terrain_autocomplete(
             "SELECT Hex_Terrain from AA_Hex_Terrains WHERE Hex_Terrain LIKE ? Limit 20",
             (f"%{current}%",))
         hex_list = await cursor.fetchall()
-        for hexes in hex_list:
-            if current in hexes[0]:
+        for kb_hexes in hex_list:
+            if current in kb_hexes[0]:
                 data.append(app_commands.Choice(name=hexes[0], value=hexes[0]))
 
     return data
@@ -188,7 +188,7 @@ async def hex_improvement_autocomplete(
         cursor = await db.cursor()
         current = unidecode(str.title(current))
         await cursor.execute(
-            "SELECT Improvement FROM Hexes_Improvements WHERE Improvement LIKE ? Limit 20",
+            "SELECT Improvement FROM kb_Hexes_Improvements WHERE Improvement LIKE ? Limit 20",
             (f"%{current}%",))
         improvement_list = await cursor.fetchall()
         for improvement in improvement_list:
@@ -204,10 +204,12 @@ async def leadership_autocomplete(
     async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
         cursor = await db.cursor()
         current = unidecode(str.title(current))
+
         await cursor.execute(
-            "SELECT Title from AA_Leadership_Roles WHERE Effect LIKE ? Limit 20",
+            "SELECT Title from AA_Leadership_Roles WHERE Title LIKE ? Limit 20",
             (f"%{current}%",))
         title_list = await cursor.fetchall()
+
         for title in title_list:
             if current in title[0]:
                 data.append(app_commands.Choice(name=title[0], value=title[0]))
@@ -221,7 +223,7 @@ async def kingdom_autocomplete(interaction: discord.Interaction, current: str) -
         cursor = await db.cursor()
         current = unidecode(str.title(current))
         await cursor.execute(
-            "SELECT kingdom from Kingdoms WHERE Kingdom LIKE ? Limit 20",
+            "SELECT kingdom from kb_Kingdoms WHERE Kingdom LIKE ? Limit 20",
             (f"%{current}%",))
         kingdom_list = await cursor.fetchall()
         for kingdom in kingdom_list:
@@ -239,7 +241,7 @@ async def settlement_autocomplete(interaction: discord.Interaction, current: str
         cursor = await db.cursor()
         current = unidecode(str.title(current))
         await cursor.execute(
-            "SELECT Settlement FROM settlements WHERE Settlement LIKE ? Limit 20",
+            "SELECT Settlement FROM kb_settlements WHERE Settlement LIKE ? Limit 20",
             (f"%{current}%",))
         settlement_list = await cursor.fetchall()
         for settlement in settlement_list:
@@ -303,7 +305,7 @@ class LeadershipModifier(discord.ui.Select):
             # Proceed to the next modifier selection
             await self.view.proceed_to_modifier_selection()
         except Exception as e:
-            logging.exception(f"Error in LeadershipModifier callback: {e}")
+            logging.exception(f"Error in  LeadershipModifier callback: {e}")
             await interaction.followup.send(
                 "An error occurred while selecting the modifier.", ephemeral=True
             )
@@ -402,10 +404,10 @@ class LeadershipView(discord.ui.View):
                 title=self.role,
                 character_name=self.character_name,
                 stat=self.attribute,
-                modifier=self.economy_modified + self.loyalty_modified + self.stability_modified,
-                economy=self.economy_modified,
-                loyalty=self.loyalty_modified,
-                stability=self.stability_modified
+                modifier=self.modifier,
+                economy=self.modifier if self.economy_modified else 0,
+                loyalty=self.modifier if self.loyalty_modified else 0,
+                stability=self.modifier if self.stability_modified else 0
             )
             # Edit the original message to show confirmation
             await self.message.edit(content=confirmation_message, view=None)
@@ -428,14 +430,14 @@ async def create_a_kingdom(
         alignment: str) -> str:
     try:
         hashed_password = encrypt_password(password)
-        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        async with aiosqlite.connect(f"pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("""select Kingdom FROM Kingdoms where Kingdom = ?""", (kingdom,))
+            await cursor.execute("""select Kingdom FROM KB_Kingdoms where Kingdom = ?""", (kingdom,))
             kingdom_presence = await cursor.fetchone()
             if kingdom_presence is not None:
                 return "The kingdom already exists."
             await cursor.execute(
-                """select Alignment, Economy, Loyalty, Stability FROM AA_Alignment WHERE Alignment = ?""", (alignment,))
+                """select Economy, Loyalty, Stability FROM AA_Alignment WHERE Alignment = ?""", (alignment,))
             alignment_type = await cursor.fetchone()
             if alignment_type is None:
                 return "Invalid alignment."
@@ -446,21 +448,40 @@ async def create_a_kingdom(
             if alignment_type is not None and kingdom_presence is None and government_type is not None:
                 (economy, loyalty, stability) = alignment_type
                 await cursor.execute("""
-                INSERT INTO Kingdoms (Kingdom, Password, Government, Alignment, Economy, Loyalty, Stability, 
-                Fame, Unrest, Consumption, Size, Population, Control_DC, Build_Points, Stabilization_Points) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, 0)
+                INSERT INTO kb_Kingdoms (Kingdom, Password, Government, Alignment, Economy, Loyalty, Stability, 
+                Fame, Unrest, Consumption, Size, Population, Control_DC, Build_Points) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0)
                 """, (kingdom, hashed_password, government, alignment, economy, loyalty, stability))
                 await cursor.execute(
                     """Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)""",
-                    (author, datetime.datetime.now(), "Kingdoms", "Create", f"Created the kingdom of {kingdom}"))
+                    (author, datetime.datetime.now(), "kb_Kingdoms", "Create", f"Created the kingdom of {kingdom}"))
                 await cursor.execute(
-                    "INSERT Into Kingdoms_Custom(Kingdom, Control_DC, Economy, Loyalty, Stability, Fame, Unrest, Consumption) VALUES (?, 0, 0, 0, 0, 0, 0, 0)",
+                    "INSERT Into kb_Kingdoms_Custom(Kingdom, Control_DC, Economy, Loyalty, Stability, Fame, Unrest, Consumption) VALUES (?, 0, 0, 0, 0, 0, 0, 0)",
                     (kingdom,))
+                await generate_leadership(kingdom, db)
                 await db.commit()
                 return f"Congratulations, you have created the kingdom of {kingdom}."
 
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error creating a kingdom: {e}")
         return "An error occurred while creating a kingdom."
+
+
+async def generate_leadership(
+        kingdom: str,
+        db: aiosqlite.Connection):
+    try:
+        cursor = await db.cursor()
+        await cursor.execute("""
+        INSERT INTO kb_Leadership (Kingdom, Title, Character_Name, Stat, Modifier, Economy,  Loyalty, Stability, Unrest)
+        SELECT ?, Title, 'Vacant', 0, Null, VPEconomy, VPLoyalty, VPStability, VPUnrest FROM AA_Leadership_Roles
+        """, (kingdom,))
+        await cursor.execute("""SELECT SUM(VPEconomy), SUM(VPLoyalty), SUM(VPStability), SUM(VPUnrest) FROM AA_Leadership_Roles""")
+        vp_info = await cursor.fetchone()
+        await cursor.execute("""UPDATE kb_Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ? WHERE Kingdom = ?""",
+                             (vp_info[0], vp_info[1], vp_info[2], vp_info[3], kingdom))
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error generating leadership: {e}")
+        return f"An error occurred while generating leadership. {e}"
 
 
 async def edit_a_kingdom(
@@ -508,30 +529,37 @@ async def edit_a_kingdom(
                 sum_productivity = new_productivity - old_productivity
                 sum_society = new_society - old_society
                 await cursor.execute(
-                    "UPDATE Settlements SET Corruption = Corruption + ?, Crime = Crime + ?, Law = Law + ?, Lore = Lore + ?, Productivity = Productivity + ?, Society = Society + ? WHERE Kingdom = ?",
+                    "UPDATE kb_settlements SET Corruption = Corruption + ?, Crime = Crime + ?, Law = Law + ?, Lore = Lore + ?, Productivity = Productivity + ?, Society = Society + ? WHERE Kingdom = ?",
                     (sum_corruption, sum_crime, sum_law, sum_lore, sum_productivity, sum_society,
                      old_kingdom_info.kingdom))
             await cursor.execute(
-                "UPDATE Kingdoms SET Kingdom = ?, Password = ?, Government = ?, Alignment = ?, Economy = ?, Loyalty = ?, Stability = ? WHERE Kingdom = ?",
-                (new_kingdom, government, alignment, old_kingdom_info.economy, old_kingdom_info.loyalty,
-                 old_kingdom_info.stability, old_kingdom_info.kingdom))
-            await cursor.execute("UPDATE Kingdoms_Custom SET Kingdom = ? WHERE Kingdom = ?",
+                "UPDATE kb_Kingdoms SET Kingdom = ?, Password = ?, Government = ?, Alignment = ?, Economy = ?, Loyalty = ?, Stability = ? WHERE Kingdom = ?",
+                (
+                    new_kingdom,
+                    old_kingdom_info.password,
+                    government,
+                    alignment,
+                    old_kingdom_info.economy,
+                    old_kingdom_info.loyalty,
+                    old_kingdom_info.stability,
+                    old_kingdom_info.kingdom))
+            await cursor.execute("UPDATE kb_Kingdoms_Custom SET Kingdom = ? WHERE Kingdom = ?",
                                  (new_kingdom, old_kingdom_info.kingdom))
-            await cursor.execute("UPDATE settlements SET Kingdom = ? WHERE Kingdom = ?",
+            await cursor.execute("UPDATE kb_settlements SET Kingdom = ? WHERE Kingdom = ?",
                                  (new_kingdom, old_kingdom_info.kingdom))
-            await cursor.execute("UPDATE settlements_Custom SET Kingdom = ? WHERE Kingdom = ?",
+            await cursor.execute("UPDATE kb_settlements_Custom SET Kingdom = ? WHERE Kingdom = ?",
                                  (new_kingdom, old_kingdom_info.kingdom))
-            await cursor.execute("UPDATE Hexes SET Kingdom = ? WHERE Kingdom = ?",
+            await cursor.execute("UPDATE kb_hexes SET Kingdom = ? WHERE Kingdom = ?",
                                  (new_kingdom, old_kingdom_info.kingdom))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                (author, datetime.datetime.now(), "Kingdoms", "Edit",
+                (author, datetime.datetime.now(), "kb_Kingdoms", "Edit",
                  f"Edited the kingdom of {old_kingdom_info.kingdom} to {new_kingdom}"))
             await db.commit()
             return f"The kingdom of {old_kingdom_info.kingdom} has been edited to {new_kingdom}."
     except (aiosqlite.Error, TypeError, ValueError) as e:
-        logging.exception(f"Error creating a kingdom: {e}")
-        return "An error occurred while creating a kingdom."
+        logging.exception(f"Error editing a kingdom: {e}")
+        return "An error occurred while editing a kingdom."
 
 
 async def delete_a_kingdom(
@@ -539,16 +567,16 @@ async def delete_a_kingdom(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("DELETE FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
-            await cursor.execute("DELETE FROM Kingdoms_Custom WHERE Kingdom = ?", (kingdom,))
-            await cursor.execute("DELETE FROM settlements WHERE Kingdom = ?", (kingdom,))
-            await cursor.execute("DELETE FROM settlements_Custom WHERE Kingdom = ?", (kingdom,))
-            await cursor.execute("DELETE FROM Hexes WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("DELETE FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("DELETE FROM kb_Kingdoms_Custom WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("DELETE FROM kb_settlements WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("DELETE FROM kb_settlements_Custom WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("DELETE FROM kb_hexes WHERE Kingdom = ?", (kingdom,))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                (author, datetime.datetime.now(), "Kingdoms", "Delete", f"Deleted the kingdom of {kingdom}"))
+                (author, datetime.datetime.now(), "kb_Kingdoms", "Delete", f"Deleted the kingdom of {kingdom}"))
             await db.commit()
-            return f"The kingdom of {kingdom} has been deleted, it's holdings cleared, and it's hexes freed."
+            return f"The kingdom of {kingdom} has been deleted, its holdings cleared, and its hexes freed."
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error deleting a kingdom: {e}")
         return "An error occurred while deleting a kingdom."
@@ -562,17 +590,17 @@ async def adjust_bp(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("SELECT Build_Points FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("SELECT Build_Points FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
             kingdom_info = await cursor.fetchone()
             if kingdom_info is None:
                 return "The kingdom does not exist."
             if amount < 0:
                 amount = max(amount, -kingdom_info[0])
-            await cursor.execute("UPDATE Kingdoms SET Build_Points = Build_Points + ? WHERE Kingdom = ?",
+            await cursor.execute("UPDATE kb_Kingdoms SET Build_Points = Build_Points + ? WHERE Kingdom = ?",
                                  (amount, kingdom))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                (author, datetime.datetime.now(), "Kingdoms", "Increase BP",
+                (author, datetime.datetime.now(), "kb_Kingdoms", "Increase BP",
                  f"Increased the build points of {kingdom} by {amount}"))
             await db.commit()
             return f"The build points of {kingdom} have been increased by {amount}."
@@ -580,7 +608,7 @@ async def adjust_bp(
         logging.exception(f"Error increasing build points: {e}")
         return "An error occurred while increasing build points."
 
-
+"""
 async def adjust_sp(
         guild_id: int,
         author: int,
@@ -595,25 +623,25 @@ async def adjust_sp(
             return "Decay is disabled on this server."
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("SELECT Stabilization_Points FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("SELECT Stabilization_Points FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
             kingdom_info = await cursor.fetchone()
             if kingdom_info is None:
                 return "The kingdom does not exist."
             if amount < 0:
                 amount = min(amount, -kingdom_info[0])
             await cursor.execute(
-                "UPDATE Kingdoms SET Stabilization_Points = Stabilization_Points + ? WHERE Kingdom = ?",
+                "UPDATE kb_Kingdoms SET Stabilization_Points = Stabilization_Points + ? WHERE Kingdom = ?",
                 (amount, kingdom))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                (author, datetime.datetime.now(), "Kingdoms", "Increase SP",
+                (author, datetime.datetime.now(), "kb_Kingdoms", "Increase SP",
                  f"Increased the stabilization points of {kingdom} by {amount}"))
             await db.commit()
             return f"The stabilization points of {kingdom} have been increased by {amount}."
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error increasing stabilization points: {e}")
         return "An error occurred while increasing stabilization points."
-
+"""
 
 async def fetch_kingdom(
         guild_id: int,
@@ -621,7 +649,7 @@ async def fetch_kingdom(
     async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
         cursor = await db.cursor()
         await cursor.execute(
-            """SELECT Kingdom, Password, Government, Alignment, Control_DC, Build_Points, Stabilization_Points, Size, Population, Economy, Loyalty, Stability, Fame, Unrest, Consumption FROM Kingdoms WHERE Kingdom = ?""",
+            """SELECT Kingdom, Password, Government, Alignment, Control_DC, Build_Points, Size, Population, Economy, Loyalty, Stability, Fame, Unrest, Consumption FROM kb_Kingdoms WHERE Kingdom = ?""",
             (kingdom,))
         kingdom_info = await cursor.fetchone()
         if kingdom_info is not None:
@@ -635,7 +663,7 @@ async def fetch_settlement(
     async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
         cursor = await db.cursor()
         await cursor.execute(
-            """SELECT Kingdom, Settlement, Size, Population, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Decay FROM settlements WHERE Settlement = ?""",
+            """SELECT Kingdom, Settlement, Size, Population, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Decay FROM kb_settlements WHERE Settlement = ?""",
             (settlement,))
         settlement_info = await cursor.fetchone()
         if settlement_info is not None:
@@ -649,7 +677,7 @@ async def fetch_building(
     async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
         cursor = await db.cursor()
         await cursor.execute(
-            """SELECT Building, Build_Points, Lots, Economy, Loyalty, Stability, Fame, Unrest, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Settlement_Limit, District_Limit, Description FROM Buildings_Blueprints WHERE Building = ?""",
+            """SELECT Building, Build_Points, Lots, Economy, Loyalty, Stability, Fame, Unrest, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Settlement_Limit, District_Limit, Description FROM kb_Buildings_Blueprints WHERE Building = ?""",
             (building,))
         building_info = await cursor.fetchone()
         if building_info is not None:
@@ -663,7 +691,7 @@ async def fetch_hex_improvement(
     async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
         cursor = await db.cursor()
         await cursor.execute(
-            """SELECT Improvement, Road_Multiplier, Build_Points, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation, Cavernous, Coastline, Desert, Forest, Hills, Jungle, Marsh, Mountains, Plains, Water FROM Hexes_Improvements WHERE Improvement = ?""",
+            """SELECT Improvement, Road_Multiplier, Build_Points, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation, Cavernous, Coastline, Desert, Forest, Hills, Jungle, Marsh, Mountains, Plains, Water FROM kb_Hexes_Improvements WHERE Improvement = ?""",
             (improvement,))
         improvement_info = await cursor.fetchone()
         if improvement_info is not None:
@@ -684,10 +712,11 @@ async def update_leader(
         stability: int
 ) -> str:
     try:
+
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
-                "SELECT Economy, Loyalty, Stability, Unrest FROM Leadership WHERE Kingdom = ? AND Title = ?",
+                "SELECT Economy, Loyalty, Stability, Unrest FROM kb_Leadership WHERE Kingdom = ? AND Title = ?",
                 (kingdom, title))
             leader_info = await cursor.fetchone()
             if leader_info is None:
@@ -697,14 +726,14 @@ async def update_leader(
             sum_loyalty = loyalty - old_loyalty
             sum_stability = stability - old_stability
             await cursor.execute(
-                "UPDATE Leadership Set Character_Name = ?, Stat = ?, Modifier = ?, Economy = ?, Loyalty = ?, Stability = ? WHERE Kingdom = ? AND Title = ?",
-                (character_name, stat, modifier, economy, loyalty, stability, kingdom, title))
+                "UPDATE kb_Leadership Set Character_Name = ?, Stat = ?, Modifier = ?, Economy = ?, Loyalty = ?, Stability = ?, unrest = ? WHERE Kingdom = ? AND Title = ?",
+                (character_name, stat, modifier, economy, loyalty, stability, 0, kingdom, title))
             await cursor.execute(
-                "UPDATE Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ? WHERE Kingdom = ?",
+                "UPDATE kb_Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ? WHERE Kingdom = ?",
                 (sum_economy, sum_loyalty, sum_stability, -old_unrest, kingdom))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                (author, datetime.datetime.now(), "Leadership", "Update",
+                (author, datetime.datetime.now(), "kb_Leadership", "Update",
                  f"Updated the leader of {kingdom} to {character_name}"))
             await db.commit()
 
@@ -722,11 +751,11 @@ async def remove_leader(
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
-                "SELECT Economy, Loyalty, Stability, Unrest FROM Leadership WHERE Kingdom = ? AND Title = ?",
+                "SELECT Economy, Loyalty, Stability, Unrest FROM kb_Leadership WHERE Kingdom = ? AND Title = ?",
                 (kingdom, title))
             leader_info = await cursor.fetchone()
             await cursor.execute(
-                "SELECT VPEconomy, VPLoyalty, VPStability, VPUnrest FROM AA_Leadership WHERE Title = ?", (title,))
+                "SELECT VPEconomy, VPLoyalty, VPStability, VPUnrest FROM AA_Leadership_Roles WHERE Title = ?", (title,))
             base_info = await cursor.fetchone()
             (base_economy, base_loyalty, base_stability, base_unrest) = base_info
             if leader_info is None:
@@ -737,14 +766,14 @@ async def remove_leader(
             sum_stability = -old_stability + base_stability
             sum_unrest = -old_unrest + base_unrest
             await cursor.execute(
-                "UPDATE Leadership SET Character_Name = 'Vacant', Economy = ?, Loyalty = ? , Stability = ?, Unrest = ? WHERE Kingdom = ? AND Title = ?",
+                "UPDATE kb_Leadership SET Character_Name = 'Vacant', Stat = Null, Modifier = Null, Economy = ?, Loyalty = ? , Stability = ?, Unrest = ? WHERE Kingdom = ? AND Title = ?",
                 (base_economy, base_loyalty, base_stability, base_unrest, kingdom, title))
             await cursor.execute(
-                "UPDATE Kingdoms SET Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Kingdom = ?",
+                "UPDATE kb_Kingdoms SET Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Kingdom = ?",
                 (sum_economy, sum_loyalty, sum_stability, sum_unrest, kingdom))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                (author, datetime.datetime.now(), "Leadership", "Remove", f"Removed the leader of {kingdom}"))
+                (author, datetime.datetime.now(), "kb_Leadership", "Remove", f"Removed the leader of {kingdom}"))
             await db.commit()
             return f"The leader of {kingdom} has been removed."
     except (aiosqlite.Error, TypeError, ValueError) as e:
@@ -760,17 +789,17 @@ async def claim_hex(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("SELECT Kingdom FROM Hexes WHERE Hex_Terrain = ? and Improvement is Null",
+            await cursor.execute("SELECT Kingdom FROM kb_hexes WHERE Hex_Terrain = ? and Improvement is Null",
                                  (hex_terrain,))
             hex_info = await cursor.fetchone()
             if hex_info is not None:
                 await cursor.execute(
-                    "Update Hexes set Amount = Amount + 1 WHERE Hex_Terrain = ? and improvement is Null",
+                    "Update kb_hexes set Amount = Amount + 1 WHERE Hex_Terrain = ? and improvement is Null",
                     (hex_terrain,))
             else:
-                await cursor.execute("INSERT INTO Hexes (Kingdom, Hex_Terrain, Amount) VALUES (?, ?, 1)",
+                await cursor.execute("INSERT INTO kb_hexes (Kingdom, Hex_Terrain, Amount) VALUES (?, ?, 1)",
                                      (kingdom, hex_terrain))
-            await cursor.execute("UPDATE Kingdoms SET Size = Size + 1, Control_DC = Control_DC + 1 WHERE Kingdom = ?",
+            await cursor.execute("UPDATE kb_Kingdoms SET Size = Size + 1, Control_DC = Control_DC + 1 WHERE Kingdom = ?",
                                  (kingdom,))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
@@ -790,14 +819,14 @@ async def relinquish_hex(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("SELECT Kingdom FROM Hexes WHERE Hex_Terrain = ? and Improvement is Null",
+            await cursor.execute("SELECT Kingdom FROM kb_hexes WHERE Hex_Terrain = ? and Improvement is Null",
                                  (hex_terrain,))
             hex_info = await cursor.fetchone()
             if hex_info is None:
                 return "The hex does not exist."
-            await cursor.execute("Update Hexes set Amount = Amount - 1 WHERE Hex_Terrain = ? and improvement is Null",
+            await cursor.execute("Update kb_hexes set Amount = Amount - 1 WHERE Hex_Terrain = ? and improvement is Null",
                                  (hex_terrain,))
-            await cursor.execute("UPDATE Kingdoms SET Size = Size - 1, Control_DC = Control_DC - 1 WHERE Kingdom = ?",
+            await cursor.execute("UPDATE kb_Kingdoms SET Size = Size - 1, Control_DC = Control_DC - 1 WHERE Kingdom = ?",
                                  (kingdom,))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
@@ -820,25 +849,25 @@ async def add_improvement(
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
-                "SELECT Amount FROM Hexes WHERE Hex_Terrain = ? and Improvement = Null",
+                "SELECT Amount FROM kb_hexes WHERE Hex_Terrain = ? and Improvement = Null",
                 (hex_terrain,))
             availability = await cursor.fetchone()
             if not availability:
-                return f"No hexes of {hex_terrain} are available for improvement."
+                return f"No kb_hexes of {hex_terrain} are available for improvement."
             elif availability[0] == 1:
                 await cursor.execute(
-                    "DELETE FROM Hexes WHERE Hex_Terrain = ? and Improvement = Null",
+                    "DELETE FROM kb_hexes WHERE Hex_Terrain = ? and Improvement = Null",
                     (hex_terrain,))
             else:
                 await cursor.execute(
-                    "UPDATE Hexes SET Amount = Amount - 1 WHERE Hex_Terrain = ? and Improvement = Null",
+                    "UPDATE kb_hexes SET Amount = Amount - 1 WHERE Hex_Terrain = ? and Improvement = Null",
                     (hex_terrain,))
-            await cursor.execute("SELECT Amount FROM Hexes WHERE Hex_Terrain = ? and Improvement = ?",
+            await cursor.execute("SELECT Amount FROM kb_hexes WHERE Hex_Terrain = ? and Improvement = ?",
                                  (hex_terrain, hex_information.improvement))
             hex_info = await cursor.fetchone()
             if not hex_info:
                 await cursor.execute(
-                    "INSERT INTO Hexes (Kingdom, Hex_Terrain, Amount, Improvement, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO kb_hexes (Kingdom, Hex_Terrain, Amount, Improvement, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         kingdom, hex_terrain, hex_information.improvement, hex_information.economy,
                         hex_information.loyalty,
@@ -846,10 +875,10 @@ async def add_improvement(
                         hex_information.defence, hex_information.taxation))
             else:
                 await cursor.execute(
-                    "UPDATE Hexes SET Amount = Amount + 1 WHERE Hex_Terrain = ? and Improvement = ?",
+                    "UPDATE kb_hexes SET Amount = Amount + 1 WHERE Hex_Terrain = ? and Improvement = ?",
                     (hex_terrain, hex_information.improvement))
             await cursor.execute(
-                "Update Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ?, Consumption = Consumption + ? WHERE Kingdom = ?",
+                "Update kb_Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ?, Consumption = Consumption + ? WHERE Kingdom = ?",
                 (hex_information.economy, hex_information.loyalty, hex_information.stability, hex_information.unrest,
                  hex_information.consumption, hex_information.defence, hex_information.taxation, kingdom))
             await cursor.execute(
@@ -874,21 +903,21 @@ async def remove_improvement(
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
-                "SELECT Amount FROM Hexes WHERE Hex_Terrain = ? and Improvement = ?",
+                "SELECT Amount FROM kb_hexes WHERE Hex_Terrain = ? and Improvement = ?",
                 (hex_terrain, hex_information.improvement))
             availability = await cursor.fetchone()
             if not availability:
-                return f"No hexes of {hex_terrain} have the improvement of {hex_information.improvement}."
+                return f"No kb_hexes of {hex_terrain} have the improvement of {hex_information.improvement}."
             elif availability[0] == 1:
                 await cursor.execute(
-                    "DELETE FROM Hexes WHERE Hex_Terrain = ? and Improvement = ?",
+                    "DELETE FROM kb_hexes WHERE Hex_Terrain = ? and Improvement = ?",
                     (hex_terrain, hex_information.improvement))
             else:
                 await cursor.execute(
-                    "UPDATE Hexes SET Amount = Amount - 1 WHERE Hex_Terrain = ? and Improvement = ?",
+                    "UPDATE kb_hexes SET Amount = Amount - 1 WHERE Hex_Terrain = ? and Improvement = ?",
                     (hex_terrain, hex_information.improvement))
             await cursor.execute(
-                "Update Kingdoms SET Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ?, Consumption = Consumption - ? WHERE Kingdom = ?",
+                "Update kb_Kingdoms SET Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ?, Consumption = Consumption - ? WHERE Kingdom = ?",
                 (hex_information.economy, hex_information.loyalty, hex_information.stability, hex_information.unrest,
                  hex_information.consumption, kingdom))
             await cursor.execute(
@@ -945,11 +974,11 @@ async def add_building(
             new_lots_adjustment = amount * building_info.lots
             new_dc_adjustment = math.floor((size + new_lots_adjustment) / 36) - math.floor(size / 36)
             await cursor.execute(
-                "Update Kingdoms Set Control_DC = Control_DC + ?, population = population + ?, Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ? WHERE Kingdom = ?",
+                "Update kb_Kingdoms Set Control_DC = Control_DC + ?, population = population + ?, Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ? WHERE Kingdom = ?",
                 (new_dc_adjustment, new_population_adjustment, building_info.economy, building_info.loyalty,
                  building_info.stability, building_info.unrest, kingdom))
             await cursor.execute(
-                "Update Settlements set size = size + ?, population = population + ?, Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ? WHERE Settlement = ?",
+                "Update kb_settlements set size = size + ?, population = population + ?, Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ? WHERE Settlement = ?",
                 (new_lots_adjustment, new_population_adjustment, building_info.economy, building_info.loyalty,
                  building_info.stability, building_info.unrest, settlement))
             await cursor.execute(
@@ -992,11 +1021,11 @@ async def remove_building(
             new_lots_adjustment = amount * building_info.lots
             new_dc_adjustment = math.floor((size - new_lots_adjustment) / 36) - math.floor(size / 36)
             await cursor.execute(
-                "Update Kingdoms Set Control_DC = Control_DC - ?, population = population - ?, Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Kingdom = ?",
+                "Update kb_Kingdoms Set Control_DC = Control_DC - ?, population = population - ?, Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Kingdom = ?",
                 (new_dc_adjustment, new_population_adjustment, building_info.economy, building_info.loyalty,
                  building_info.stability, building_info.unrest, kingdom))
             await cursor.execute(
-                "Update Settlements set size = size - ?, population = population - ?, Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Settlement = ?",
+                "Update kb_settlements set size = size - ?, population = population - ?, Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Settlement = ?",
                 (new_lots_adjustment, new_population_adjustment, building_info.economy, building_info.loyalty,
                  building_info.stability, building_info.unrest, settlement))
             await cursor.execute(
@@ -1018,20 +1047,20 @@ async def claim_settlement(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("SELECT Kingdom FROM Settlements WHERE Settlement = ?", (settlement,))
+            await cursor.execute("SELECT Kingdom FROM kb_settlements WHERE Settlement = ?", (settlement,))
             settlement_info = await cursor.fetchone()
             if settlement_info is not None:
                 return "The settlement is already claimed."
             await cursor.execute(
-                "INSERT INTO Settlements (Kingdom, Settlement, Size, Population, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Decay) VALUES (?, ?, 1, 250, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)",
+                "INSERT INTO kb_settlements (Kingdom, Settlement, Size, Population, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Decay) VALUES (?, ?, 1, 250, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)",
                 (kingdom, settlement))
             await cursor.execute(
-                "INSERT INTO Settlements_Custom (Kingdom, Settlement, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply) VALUES (?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)",
+                "INSERT INTO kb_settlements_Custom (Kingdom, Settlement, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply) VALUES (?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)",
                 (kingdom, settlement))
-            await cursor.execute("UPDATE Kingdoms SET Control_DC = Control_DC + 1 WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("UPDATE kb_Kingdoms SET Control_DC = Control_DC + 1 WHERE Kingdom = ?", (kingdom,))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                (author, datetime.datetime.now(), "Settlements", "Claim", f"Claimed the settlement of {settlement}"))
+                (author, datetime.datetime.now(), "kb_settlements", "Claim", f"Claimed the settlement of {settlement}"))
             await db.commit()
             return f"The settlement of {settlement} has been claimed by {kingdom}."
     except (aiosqlite.Error, TypeError, ValueError) as e:
@@ -1047,7 +1076,7 @@ async def relinquish_settlement(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("SELECT Kingdom FROM Settlements WHERE Settlement = ?", (settlement,))
+            await cursor.execute("SELECT Kingdom FROM kb_settlements WHERE Settlement = ?", (settlement,))
             settlement_info = await cursor.fetchone()
             if settlement_info is None:
                 return "The settlement is not claimed."
@@ -1061,18 +1090,18 @@ async def relinquish_settlement(
                 population_adjustment = lots * 250 * constructed
                 control_dc_lots += lots * constructed
                 await cursor.execute(
-                    "UPDATE Kingdoms SET Population = population - ?, Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Kingdom = ?",
+                    "UPDATE kb_Kingdoms SET Population = population - ?, Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Kingdom = ?",
                     (population_adjustment, economy * constructed, loyalty * constructed, stability * constructed,
                      unrest * constructed, kingdom))
             control_dc = math.floor(control_dc_lots / 36)
             await cursor.execute("DELETE FROM Buildings WHERE Kingdom = ? and Settlement = ?", (kingdom, settlement))
-            await cursor.execute("DELETE FROM Settlements WHERE Settlement = ?", (settlement,))
-            await cursor.execute("DELETE FROM Settlements_Custom WHERE Settlement = ?", (settlement,))
-            await cursor.execute("UPDATE Kingdoms SET Control_DC = Control_DC - 1 - ? WHERE Kingdom = ?",
+            await cursor.execute("DELETE FROM kb_settlements WHERE Settlement = ?", (settlement,))
+            await cursor.execute("DELETE FROM kb_settlements_Custom WHERE Settlement = ?", (settlement,))
+            await cursor.execute("UPDATE kb_Kingdoms SET Control_DC = Control_DC - 1 - ? WHERE Kingdom = ?",
                                  (control_dc, kingdom))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                (author, datetime.datetime.now(), "Settlements", "relinquish",
+                (author, datetime.datetime.now(), "kb_settlements", "relinquish",
                  f"Unclaimed the settlement of {settlement}"))
             await db.commit()
             return f"The settlement of {settlement} has been unclaimed by {kingdom}."
@@ -1092,7 +1121,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
 
     leadership_group = discord.app_commands.Group(
         name='leadership',
-        description='Commands related to leadership management',
+        description='Commands related to Leadership management',
         parent=kingdom_group
     )
 
@@ -1111,8 +1140,13 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
     @kingdom_group.command(name="create", description="Create a kingdom")
     @app_commands.autocomplete(government=government_autocompletion)
     @app_commands.autocomplete(alignment=alignment_autocomplete)
-    async def create(self, interaction: discord.Interaction, kingdom: str, password: str, government: str,
-                     alignment: str):
+    async def create(
+            self,
+            interaction: discord.Interaction,
+            kingdom: str,
+            password: str,
+            government: str,
+            alignment: str):
         """This creates allows a player to create a new kingdom"""
         await interaction.response.defer(thinking=True)
         try:
@@ -1137,8 +1171,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("""select Kingdom, Password FROM Kingdoms where Kingdom = '{kingdom}'""",
-                                     {'kingdom': kingdom})
+                await cursor.execute("""select Kingdom, Password FROM kb_Kingdoms where Kingdom = ?""",(kingdom,))
                 result = await cursor.fetchone()
                 if result is None:
                     status = f"the kingdom which you have elected to make a war crime out of couldn't be found."
@@ -1156,14 +1189,19 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
             logging.exception(f"Error deleting a kingdom: {e}")
             await interaction.followup.send(content="An error occurred while deleting a kingdom.")
 
-    @kingdom_group.command(name="modify", description="Modify a kingdom")
+    @kingdom_group.command(name="edit", description="Modify a kingdom")
     @app_commands.autocomplete(old_kingdom=kingdom_autocomplete)
     @app_commands.autocomplete(new_government=government_autocompletion)
     @app_commands.autocomplete(new_alignment=alignment_autocomplete)
-    async def modify(self, interaction: discord.Interaction, old_kingdom: str, new_kingdom: typing.Optional[str],
-                     old_password: typing.Optional[str],
-                     new_password: typing.Optional[str], new_government: typing.Optional[str],
-                     new_alignment: typing.Optional[str]):
+    async def edit(
+            self,
+            interaction: discord.Interaction,
+            old_kingdom: str,
+            new_kingdom: typing.Optional[str],
+            old_password: typing.Optional[str],
+            new_password: typing.Optional[str],
+            new_government: typing.Optional[str],
+            new_alignment: typing.Optional[str]):
         """This is a player command to modify a kingdom THEY OWN."""
         await interaction.response.defer(thinking=True)
         try:
@@ -1179,9 +1217,10 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 new_password = encrypt_password(new_password)
                 async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                     cursor = await db.cursor()
-                    await cursor.execute("UPDATE Kingdoms SET Password = ? WHERE Kingdom = ?",
+                    await cursor.execute("UPDATE kb_Kingdoms SET Password = ? WHERE Kingdom = ?",
                                          (new_password, old_kingdom))
                     await db.commit()
+            kingdom_info.password = new_password if new_password else kingdom_info.password
             status = await edit_a_kingdom(
                 guild_id=interaction.guild_id,
                 author=interaction.user.name,
@@ -1198,13 +1237,19 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
     @kingdom_group.command(name="build_points", description="Adjust the build points of a kingdom")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
-    async def bp(self, interaction: discord.Interaction, kingdom: str, password: str, character_name: str, amount: int):
+    async def bp(
+            self,
+            interaction: discord.Interaction,
+            kingdom: str,
+            password: str,
+            character_name: str,
+            amount: int):
         """This modifies the number of build points in a kingdom"""
         await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password, Build_Points FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password, Build_Points FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1236,58 +1281,45 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                         gold_change=Decimal(cost),
                         reason="selling build points",
                         source="Adjust BP Commands",
-                        gold_value_change=Decimal(0),
-                        gold_value_max_change=Decimal(0),
+                        gold_value_change=Decimal(cost),
+                        gold_value_max_change=Decimal(cost),
                         is_transaction=False
                     )
-                    if gold_reward[0] < cost / 2:
-                        await interaction.followup.send(
-                            content=f"The character of {character_name} has the oath of {character_info[4]}, this would make selling build points of negligible valuable.")
-                        return
-                    else:
-                        await adjust_bp(interaction.guild_id, interaction.user.id, kingdom, bought_points)
-                        gold_reward = await character_commands.gold_calculation(
-                            guild_id=interaction.guild_id,
-                            author_name=interaction.user.name,
-                            author_id=interaction.user.id,
-                            character_name=character_name,
-                            level=character_info[3],
-                            oath=character_info[4],
-                            gold=character_info[0],
-                            gold_value=character_info[1],
-                            gold_value_max=character_info[2],
-                            gold_change=Decimal(cost),
-                            reason="selling build points",
-                            source="Adjust BP Commands",
-                            gold_value_change=Decimal(0),
-                            gold_value_max_change=Decimal(0),
-                        )
-                        update_character_info = shared_functions.UpdateCharacterData(
-                            character_name=character_name,
-                            gold_package=(gold_reward[0], gold_reward[1], gold_reward[2])
-                        )
-                        update_character_log = shared_functions.CharacterChange(
-                            author=interaction.user.name,
-                            character_name=character_name,
-                            transaction_id=gold_reward[4],
-                            gold_change=gold_reward[0],
-                            gold=gold_reward[1],
-                            gold_value=gold_reward[2],
-                            gold_value_max=gold_reward[3],
-                            source=f"Adjust BP Command selling {bought_points} build points",
-                        )
-                        await shared_functions.update_character(interaction.guild_id, update_character_info)
-                        await shared_functions.log_embed(bot=self.bot, thread=character_info[5],
-                                                         guild=interaction.guild, change=update_character_log)
-                        await shared_functions.character_embed(guild=interaction.guild, character_name=character_name)
-                        await interaction.followup.send(
-                            content=f"The character of {character_name} has sold {bought_points} build points for {gold_reward[0]} GP.")
+                    await adjust_bp(interaction.guild_id, interaction.user.id, kingdom, bought_points)
+
+                    update_character_info = shared_functions.UpdateCharacterData(
+                        character_name=character_name,
+                        gold_package=(gold_reward[0], gold_reward[1], gold_reward[2])
+                    )
+
+                    update_character_log = shared_functions.CharacterChange(
+                        author=interaction.user.name,
+                        character_name=character_name,
+                        transaction_id=gold_reward[4],
+                        gold_change=gold_reward[0],
+                        gold=gold_reward[1],
+                        gold_value=gold_reward[2],
+                        gold_value_max=gold_reward[3],
+                        source=f"Adjust BP Command selling {bought_points} build points",
+                    )
+                    await shared_functions.update_character(interaction.guild_id, update_character_info)
+                    await shared_functions.log_embed(
+                        bot=self.bot,
+                        thread=character_info[5],
+                        guild=interaction.guild,
+                        change=update_character_log)
+                    await shared_functions.character_embed(guild=interaction.guild, character_name=character_name)
+                    await interaction.followup.send(
+                        content=f"The character of {character_name} has sold {bought_points} build points for {gold_reward[0]} GP.")
                 else:
                     maximum_points = math.floor(character_info[0] / 4000)
                     bought_points = min(amount, maximum_points)
                     cost = bought_points * 4000
-                    adjusted_bp_result = await adjust_bp(interaction.guild_id, interaction.user.id, kingdom,
-                                                         bought_points)
+                    adjusted_bp_result = await adjust_bp(
+                        interaction.guild_id,
+                        interaction.user.id,
+                        kingdom,
+                        bought_points)
                     gold_used = await character_commands.gold_calculation(
                         guild_id=interaction.guild_id,
                         author_name=interaction.user.name,
@@ -1301,7 +1333,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                         gold_change=-Decimal(cost),
                         reason="selling build points",
                         source="Adjust BP Commands",
-                        gold_value_change=Decimal(0),
+                        gold_value_change=-Decimal(cost),
                         gold_value_max_change=Decimal(0),
                     )
                     update_character_info = shared_functions.UpdateCharacterData(
@@ -1319,148 +1351,14 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                         source=f"Adjust BP Command buying {bought_points} build points",
                     )
                     await shared_functions.update_character(interaction.guild_id, update_character_info)
-                    await shared_functions.log_embed(bot=self.bot, thread=character_info[5], guild=interaction.guild,
-                                                     change=update_character_log)
-                    await shared_functions.character_embed(guild=interaction.guild, character_name=character_name)
-                    await interaction.followup.send(adjusted_bp_result)
-        except (aiosqlite, TypeError, ValueError) as e:
-            logging.exception(f"Error increasing build points: {e}")
-            await interaction.followup.send(content="An error occurred while increasing build points.")
-
-    @kingdom_group.command(name='stabilization_points', description='Adjust the stabilization points of a kingdom')
-    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
-    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
-    async def sp(self, interaction: discord.Interaction, kingdom: str, password: str, character_name: str, amount: int):
-        """This modifies the Stability Points for a kingdom"""
-        await interaction.response.defer(thinking=True)
-        try:
-            async with shared_functions.config_cache.lock:
-                configs = shared_functions.config_cache.cache.get(interaction.guild_id)
-                if configs:
-                    decay_bool = configs.get('Decay')
-            if decay_bool == 'False':
-                return "Decay is disabled on this server."
-            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
-                cursor = await db.cursor()
-                await cursor.execute("SELECT Password, Stabilization_Points FROM Kingdoms WHERE Kingdom = ?",
-                                     (kingdom,))
-                kingdom_results = await cursor.fetchone()
-                if not kingdom_results:
-                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
-                    return
-                valid_password = validate_password(password, kingdom_results[0])
-                if not valid_password:
-                    await interaction.followup.send(content="The password provided is incorrect.")
-                    return
-                await cursor.execute(
-                    "SELECT Gold, Gold_Value, Gold_Value_Max, Level, Oath, Thread_ID FROM Player_Characters WHERE Player_ID = ? AND (Character_Name = ? OR Nickname = ?)",
-                    (interaction.user.id, character_name, character_name))
-                character_info = await cursor.fetchone()
-                if not character_info:
-                    await interaction.followup.send(content=f"The character of {character_name} does not exist.")
-                    return
-                if amount < 0:
-                    bought_points = max(amount, -kingdom_results[1])
-                    cost = bought_points * 4000
-                    gold_reward = await character_commands.gold_calculation(
-                        guild_id=interaction.guild_id,
-                        author_name=interaction.user.name,
-                        author_id=interaction.user.id,
-                        character_name=character_name,
-                        level=character_info[3],
-                        oath=character_info[4],
-                        gold=character_info[0],
-                        gold_value=character_info[1],
-                        gold_value_max=character_info[2],
-                        gold_change=Decimal(cost),
-                        reason="selling build points",
-                        source="Adjust BP Commands",
-                        gold_value_change=Decimal(0),
-                        gold_value_max_change=Decimal(0),
-                        is_transaction=False
-                    )
-                    if gold_reward[0] < cost / 2:
-                        await interaction.followup.send(
-                            content=f"The character of {character_name} has the oath of {character_info[4]}, this would make selling stabilization points negligibly valuable.")
-                        return
-                    else:
-                        await adjust_sp(interaction.guild_id, interaction.user.id, kingdom, bought_points)
-                        gold_reward = await character_commands.gold_calculation(
-                            guild_id=interaction.guild_id,
-                            author_name=interaction.user.name,
-                            author_id=interaction.user.id,
-                            character_name=character_name,
-                            level=character_info[3],
-                            oath=character_info[4],
-                            gold=character_info[0],
-                            gold_value=character_info[1],
-                            gold_value_max=character_info[2],
-                            gold_change=Decimal(cost),
-                            reason="selling Stabilization points",
-                            source="Adjust SP Commands",
-                            gold_value_change=Decimal(0),
-                            gold_value_max_change=Decimal(0),
-                        )
-                        update_character_info = shared_functions.UpdateCharacterData(
-                            character_name=character_name,
-                            gold_package=(gold_reward[0], gold_reward[1], gold_reward[2])
-                        )
-                        update_character_log = shared_functions.CharacterChange(
-                            author=interaction.user.name,
-                            character_name=character_name,
-                            transaction_id=gold_reward[4],
-                            gold_change=gold_reward[0],
-                            gold=gold_reward[1],
-                            gold_value=gold_reward[2],
-                            gold_value_max=gold_reward[3],
-                            source=f"Adjust SP Command selling {bought_points} build points",
-                        )
-                        await shared_functions.update_character(interaction.guild_id, update_character_info)
-                        await shared_functions.log_embed(bot=self.bot, thread=character_info[5],
-                                                         guild=interaction.guild, change=update_character_log)
-                        await shared_functions.character_embed(guild=interaction.guild, character_name=character_name)
-                        await interaction.followup.send(
-                            content=f"The character of {character_name} has sold {bought_points} build points for {gold_reward[0]} GP.")
-                else:
-                    maximum_points = math.floor(character_info[0] / 4000)
-                    bought_points = min(amount, maximum_points)
-                    cost = bought_points * 4000
-                    adjusted_bp_result = await adjust_sp(interaction.guild_id, interaction.user.id, kingdom,
-                                                         bought_points)
-                    gold_used = await character_commands.gold_calculation(
-                        guild_id=interaction.guild_id,
-                        author_name=interaction.user.name,
-                        author_id=interaction.user.id,
-                        character_name=character_name,
-                        level=character_info[3],
-                        oath=character_info[4],
-                        gold=Decimal(character_info[0]),
-                        gold_value=Decimal(character_info[1]),
-                        gold_value_max=Decimal(character_info[2]),
-                        gold_change=-Decimal(cost),
-                        reason="selling build points",
-                        source="Adjust BP Commands",
-                        gold_value_change=Decimal(0),
-                        gold_value_max_change=Decimal(0),
-                    )
-                    update_character_info = shared_functions.UpdateCharacterData(
-                        character_name=character_name,
-                        gold_package=(gold_used[0], gold_used[1], gold_used[2])
-                    )
-                    update_character_log = shared_functions.CharacterChange(
-                        author=interaction.user.name,
-                        character_name=character_name,
-                        transaction_id=gold_used[4],
-                        gold_change=gold_used[0],
-                        gold=gold_used[1],
-                        gold_value=gold_used[2],
-                        gold_value_max=gold_used[3],
-                        source=f"Adjust BP Command buying {bought_points} stabilization points",
-                    )
-                    await shared_functions.update_character(interaction.guild_id, update_character_info)
-                    await shared_functions.log_embed(bot=self.bot, thread=character_info[5], guild=interaction.guild,
-                                                     change=update_character_log)
-                    await shared_functions.character_embed(guild=interaction.guild, character_name=character_name)
+                    await shared_functions.log_embed(
+                        bot=self.bot,
+                        thread=character_info[5],
+                        guild=interaction.guild,
+                        change=update_character_log)
+                    await shared_functions.character_embed(
+                        guild=interaction.guild,
+                        character_name=character_name)
                     await interaction.followup.send(adjusted_bp_result)
         except (aiosqlite, TypeError, ValueError) as e:
             logging.exception(f"Error increasing build points: {e}")
@@ -1470,15 +1368,15 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                               description="Modify a leader, by changing their ability score or who is in charge")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
     @app_commands.autocomplete(title=leadership_autocomplete)
-    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
-    async def modify_leadership(self, interaction: discord.Interaction, kingdom, password, character_name, title,
-                                modifier):
+    @app_commands.autocomplete(character_name=shared_functions.character_select_autocompletion)
+    async def modify_leadership(self, interaction: discord.Interaction, kingdom: str, password: str, character_name: str, title: str,
+                                modifier: int):
         """This command is used to modify a leader's ability score or who is in charge of a kingdom"""
         await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password, Hexes FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password, Size FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1488,8 +1386,8 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                     await interaction.followup.send(content="The password provided is incorrect.")
                     return
                 await cursor.execute(
-                    "SELECT Ability, Economy, Loyalty, Stability FROM Leadership WHERE Kingdom = ? AND Title = ?",
-                    (kingdom, title))
+                    "SELECT Ability, Economy, Loyalty, Stability FROM AA_Leadership_Roles WHERE Title = ?",
+                    (title, ))
                 leadership_info = await cursor.fetchone()
                 (ability, economy, loyalty, stability) = leadership_info
                 abilities = ability.split(" / ")
@@ -1502,12 +1400,12 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                     options, interaction.guild_id, interaction.user.id, kingdom, title, character_name,
                     additional, economy, loyalty, stability, kingdom_results[1], modifier=modifier
                 )
-                await interaction.response.send_message("Please select an attribute:", view=view)
+                await interaction.followup.send("Please select an attribute:", view=view)
             # Store the message object
             view.message = await interaction.original_response()
         except (aiosqlite.Error, TypeError, ValueError) as e:
-            logging.exception(f"Error modifying leadership: {e}")
-            await interaction.followup.send(content="An error occurred while modifying leadership.")
+            logging.exception(f"Error modifying  Leadership: {e}")
+            await interaction.followup.send(content="An error occurred while modifying  Leadership.")
 
     @leadership_group.command(name="remove", description="Remove a leader from a kingdom")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
@@ -1518,7 +1416,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1542,7 +1440,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1572,7 +1470,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1603,7 +1501,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1634,7 +1532,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         try:
             async with (aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite")) as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1662,7 +1560,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1687,7 +1585,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1713,7 +1611,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password, bp FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password, bp FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1722,7 +1620,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 if not valid_password:
                     await interaction.followup.send(content="The password provided is incorrect.")
                     return
-                await cursor.execute("Select Size from Settlements where Settlement = ?", (settlement,))
+                await cursor.execute("Select Size from kb_settlements where Settlement = ?", (settlement,))
                 settlement_info = await cursor.fetchone()
                 if settlement_info is None:
                     await interaction.followup.send(content="The settlement is not claimed.")
@@ -1733,7 +1631,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                     await interaction.followup.send(
                         fcontent="The kingdom does not have enough build points. it has {kingdom_results[1]} and needs {cost}.")
                     return
-                await cursor.execute("UPDATE Kingdoms SET bp = bp - ? WHERE Kingdom = ?", (cost, kingdom))
+                await cursor.execute("UPDATE kb_Kingdoms SET bp = bp - ? WHERE Kingdom = ?", (cost, kingdom))
                 await db.commit()
                 status = await add_building(guild_id=interaction.guild_id, author=interaction.user.id, kingdom=kingdom,
                                             settlement=settlement, building_info=building_info, amount=amount,
@@ -1754,7 +1652,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password, BP FROM Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password, BP FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1763,7 +1661,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 if not valid_password:
                     await interaction.followup.send(content="The password provided is incorrect.")
                     return
-                await cursor.execute("Select Size from Settlements where Settlement = ?", (settlement,))
+                await cursor.execute("Select Size from kb_settlements where Settlement = ?", (settlement,))
                 settlement_info = await cursor.fetchone()
                 if not settlement_info:
                     await interaction.followup.send(content="The settlement is not claimed.")
@@ -1773,7 +1671,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                                                kingdom=kingdom, settlement=settlement, building_info=building_info,
                                                amount=amount, size=settlement_info[0])
                 bp_return = (building_info.build_points * status[1]) * .5
-                await cursor.execute("UPDATE Kingdoms SET BP = BP + ? WHERE Kingdom = ?", (bp_return, kingdom))
+                await cursor.execute("UPDATE kb_Kingdoms SET BP = BP + ? WHERE Kingdom = ?", (bp_return, kingdom))
                 await interaction.followup.send(content=status[0])
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"Error destroying building: {e}")
@@ -1791,11 +1689,11 @@ class KingdomView(shared_functions.ShopView):
         """Fetch the history of prestige request  for the current page."""
 
         statement = """
-                        SELECT KB.Kingdom, KB.Government, KB.Alignment, KB.Control_DC, KB.Build_Points, 
-                        KB.Stabilization_Points, KB.Size, KB.Population, KB.Economy, KB.Loyalty, KB.Stability,
-                        KB.Unrest, KB.Consumption, 
+                        SELECT kb_Kingdom, kb_Government, kb_Alignment, kb_Control_DC, kb_Build_Points, 
+                        kb_Size, kb_Population, kb_Economy, kb_Loyalty, kb_Stability,
+                        kb_Unrest, kb_Consumption, 
                         Custom.Control_DC, Custom.Economy, Custom.Loyalty, Custom.Stability, Custom.Unrest, Custom.Consumption
-                        FROM Kingdoms as KB left join Kingdoms_Custom as Custom on KB.Kingdom = Custom.Kingdom 
+                        FROM kb_Kingdoms as KB left join kb_Kingdoms_Custom as Custom on kb_Kingdom = Custom.Kingdom 
                         Limit ? Offset ?
                     """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
@@ -1807,15 +1705,15 @@ class KingdomView(shared_functions.ShopView):
         current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(
-            title=f"Kingdoms",
+            title=f"kb_Kingdoms",
             description=f"Page {current_page} of {total_pages}")
         for item in self.results:
-            (kingdom, government, alignment, control_dc, build_points, stabilization_points, size, population, economy,
+            (kingdom, government, alignment, control_dc, build_points, size, population, economy,
              loyalty, stability, unrest, consumption, custom_control_dc, custom_economy, custom_loyalty,
              custom_stability, custom_unrest, custom_consumption) = item
             self.embed.add_field(name=f'**__Kingdom__**: {kingdom}, Control DC: {control_dc}', value=f"""
             **Government**: {government}, **Alignment**: {alignment}\n
-            **Resources**: {build_points} BP, {stabilization_points} SP\n
+            **Resources**: {build_points} BP, \n
             **Size**: {size}, **Population**: {population}\n
             **Economy**: {economy}, **Loyalty**: {loyalty}, **Stability**: {stability}\n
             **Unrest**: {unrest}, **Consumption**: {consumption}\n
@@ -1831,7 +1729,7 @@ class KingdomView(shared_functions.ShopView):
         """Get the total number of titles."""
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
-                cursor = await db.execute("SELECT COUNT(*) FROM Kingdoms")
+                cursor = await db.execute("SELECT COUNT(*) FROM kb_Kingdoms")
                 count = await cursor.fetchone()
                 self.max_items = count[0]
         return self.max_items
@@ -1851,18 +1749,18 @@ class SettlementView(shared_functions.ShopView):
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
             if self.kingdom:
                 statement = """ 
-                SELECT KB.Kingdom, KB.Settlement, KB.Size, KB.Population, KB.Corruption, KB.Crime, KB.Productivity, KB.Law, KB.Lore, KB.Society, KB.Danger, KB.Defence,
-                KB.Base_Value, KB.Spellcasting, KB.Supply, KB.Decay, Custom.Corruption, Custom.Crime, Custom.Productivity, Custom.Law, Custom.Lore, Custom.Society, Custom.Danger, Custom.Defence,
+                SELECT kb_Kingdom, kb_Settlement, kb_Size, kb_Population, kb_Corruption, kb_Crime, kb_Productivity, kb_Law, kb_Lore, kb_Society, kb_Danger, kb_Defence,
+                kb_Base_Value, kb_Spellcasting, kb_Supply, kb_Decay, Custom.Corruption, Custom.Crime, Custom.Productivity, Custom.Law, Custom.Lore, Custom.Society, Custom.Danger, Custom.Defence,
                 Custom.Base_Value, Custom.Spellcasting, Custom.Supply
-                FROM Settlements as KB left join Settlements_Custom as Custom on kb.settlement = custom.settlement WHERE Kingdom = ? Limit ? Offset ?
+                FROM kb_settlements as KB left join kb_settlements_Custom as Custom on kb_settlement = custom.settlement WHERE Kingdom = ? Limit ? Offset ?
                 """
                 cursor = await db.execute(statement, (self.kingdom, self.limit, self.offset))
             else:
                 statement = """
-                SELECT KB.Kingdom, KB.Settlement, KB.Size, KB.Population, KB.Corruption, KB.Crime, KB.Productivity, KB.Law, KB.Lore, KB.Society, KB.Danger, KB.Defence,
-                KB.Base_Value, KB.Spellcasting, KB.Supply, KB.Decay, Custom.Corruption, Custom.Crime, Custom.Productivity, Custom.Law, Custom.Lore, Custom.Society, Custom.Danger, Custom.Defence,
+                SELECT kb_Kingdom, kb_Settlement, kb_Size, kb_Population, kb_Corruption, kb_Crime, kb_Productivity, kb_Law, kb_Lore, kb_Society, kb_Danger, kb_Defence,
+                kb_Base_Value, kb_Spellcasting, kb_Supply, kb_Decay, Custom.Corruption, Custom.Crime, Custom.Productivity, Custom.Law, Custom.Lore, Custom.Society, Custom.Danger, Custom.Defence,
                 Custom.Base_Value, Custom.Spellcasting, Custom.Supply
-                FROM Settlements as KB left join Settlements_Custom as Custom on kb.settlement = custom.settlement Limit ? Offset ?
+                FROM kb_settlements as KB left join kb_settlements_Custom as Custom on kb_settlement = custom.settlement Limit ? Offset ?
                 """
                 cursor = await db.execute(statement, (self.limit, self.offset))
             self.results = await cursor.fetchall()
@@ -1873,11 +1771,11 @@ class SettlementView(shared_functions.ShopView):
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         if self.kingdom:
             self.embed = discord.Embed(
-                title=f"Settlements for {self.kingdom}",
+                title=f"kb_settlements for {self.kingdom}",
                 description=f"Page {current_page} of {total_pages}")
         else:
             self.embed = discord.Embed(
-                title=f"Settlements",
+                title=f"kb_settlements",
                 description=f"Page {current_page} of {total_pages}")
 
         for item in self.results:
@@ -1910,10 +1808,10 @@ class SettlementView(shared_functions.ShopView):
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
                 if self.kingdom:
-                    cursor = await db.execute("SELECT COUNT(*) FROM Settlements WHERE Kingdom = ?",
+                    cursor = await db.execute("SELECT COUNT(*) FROM kb_settlements WHERE Kingdom = ?",
                                               (self.kingdom,))
                 else:
-                    cursor = await db.execute("SELECT COUNT(*) FROM Settlements")
+                    cursor = await db.execute("SELECT COUNT(*) FROM kb_settlements")
                 count = await cursor.fetchone()
                 self.max_items = count[0]
         return self.max_items
@@ -1935,7 +1833,7 @@ class HexView(shared_functions.ShopView):
                         SELECT 
                         Kingdom, Hex_Terrain, Amount, Improvement,
                         Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation
-                        from Hexes WHERE Kingdom = ? Limit ? Offset ?
+                        from kb_hexes WHERE Kingdom = ? Limit ? Offset ?
                     """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
             cursor = await db.execute(statement, (self.kingdom, self.limit, self.offset))
@@ -1961,7 +1859,7 @@ class HexView(shared_functions.ShopView):
         """Get the total number of titles."""
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
-                cursor = await db.execute("SELECT COUNT(*) FROM Hexes WHERE Kingdom = ?",
+                cursor = await db.execute("SELECT COUNT(*) FROM kb_hexes WHERE Kingdom = ?",
                                           (self.kingdom,))
                 count = await cursor.fetchone()
                 self.max_items = count[0]
@@ -1988,7 +1886,7 @@ class ImprovementView(shared_functions.ShopView):
                         SELECT Improvement, Road_Multiplier, Build_Points,
                         Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation,
                         Cavernous, Coastline, Desert, Forest, Hill, Jungle, Marsh, Mountain, Plains, Swamp, Tundra, Water
-                        FROM Hexes_Improvements Limit ? Offset ?
+                        FROM kb_Hexes_Improvements Limit ? Offset ?
                     """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
             cursor = await db.execute(statement, (self.limit, self.offset))
@@ -1999,7 +1897,7 @@ class ImprovementView(shared_functions.ShopView):
         current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(
-            title=f"Improvements for Hexes",
+            title=f"Improvements for kb_hexes",
             description=f"Page {current_page} of {total_pages}")
 
         for item in self.results:
@@ -2044,7 +1942,7 @@ class ImprovementView(shared_functions.ShopView):
         """Get the total number of titles."""
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
-                cursor = await db.execute("SELECT COUNT(*) FROM Hexes_Improvements")
+                cursor = await db.execute("SELECT COUNT(*) FROM kb_Hexes_Improvements")
                 count = await cursor.fetchone()
                 self.max_items = count[0]
         return self.max_items
@@ -2098,7 +1996,16 @@ class BlueprintView(shared_functions.ShopView):
         """Get the total number of titles."""
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
-                cursor = await db.execute("SELECT COUNT(*) FROM Buildings_Blueprints")
+                cursor = await db.execute("SELECT COUNT(*) FROM kb_Buildings_Blueprints")
                 count = await cursor.fetchone()
                 self.max_items = count[0]
         return self.max_items
+
+
+
+logging.basicConfig(
+    level=logging.INFO,  # Set the minimum logging level
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    filename='application.log',  # Log to a file
+    filemode='a'  # Append to the file
+)

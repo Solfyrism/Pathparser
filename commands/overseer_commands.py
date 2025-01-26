@@ -89,33 +89,33 @@ async def remove_blueprint(
                 status = f"You have done the YEETETH of this particular building which is {building}."
                 await cursor.execute("""Delete FROM Buildings_Blueprints WHERE Building = '{building}'""")
                 await cursor.execute(
-                    "Select Kingdom, Settlement, Building, Constructed, Lots, Economy, Loyalty, Stability, Fame, Unrest, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Settlement_Limit, District_Limit, Description FROM Settlements WHERE Building = ?",
+                    "Select Kingdom, Settlement, Building, Constructed, Lots, Economy, Loyalty, Stability, Fame, Unrest, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Settlement_Limit, District_Limit, Description FROM KB.Settlements WHERE Building = ?",
                     (building,))
                 built_buildings = await cursor.fetchall()
                 for built_building in built_buildings:
                     (kingdom, settlement, building, constructed, lots, economy, loyalty, stability, fame, unrest,
                      corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting,
                      supply, settlement_limit, district_limit, description) = built_building
-                    await cursor.execute("SELECT Size from Settlements WHERE Kingdom = ? AND Settlement = ?",
+                    await cursor.execute("SELECT Size from KB.Settlements WHERE Kingdom = ? AND Settlement = ?",
                                          (kingdom, settlement))
                     size = await cursor.fetchone()
                     adjusted_dc = math.floor(size[0] / 36) - math.floor((size[0] - (lots * constructed) / 36))
                     await cursor.execute(
-                        "Update Settlements SET Size = size - ?, population = population - ?, corruption = corruption - ?, crime = crime - ?, productivity = productivity - ?, law = law - ?, lore = lore - ?, society = society - ?, danger = danger - ?, defence = defence - ?, base_value = base_value - ?, spellcasting = spellcasting - ?, supply = supply - ? WHERE Kingdom = ? AND Settlement = ?",
+                        "Update KB.Settlements SET Size = size - ?, population = population - ?, corruption = corruption - ?, crime = crime - ?, productivity = productivity - ?, law = law - ?, lore = lore - ?, society = society - ?, danger = danger - ?, defence = defence - ?, base_value = base_value - ?, spellcasting = spellcasting - ?, supply = supply - ? WHERE Kingdom = ? AND Settlement = ?",
                         (lots * constructed, lots * 250 * constructed, economy * constructed, loyalty * constructed,
                          stability * constructed, fame * constructed, unrest * constructed, corruption * constructed,
                          crime * constructed, productivity * constructed, law * constructed, lore * constructed,
                          society * constructed, danger * constructed, defence * constructed, base_value * constructed,
                          spellcasting * constructed, supply * constructed, kingdom, settlement))
                     await cursor.execute(
-                        "Update Kingdoms set population = population - ?, Control_DC = Control_DC - ?, Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Fame = Fame - ?, Unrest = Unrest - ?, Consumption = Consumption - ? WHERE Kingdom = ?",
+                        "Update KB.Kingdoms set population = population - ?, Control_DC = Control_DC - ?, Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Fame = Fame - ?, Unrest = Unrest - ?, Consumption = Consumption - ? WHERE Kingdom = ?",
                         (lots * 250 * constructed, adjusted_dc, economy * constructed, loyalty * constructed,
                          stability * constructed, fame * constructed, unrest * constructed, corruption * constructed,
                          kingdom))
-                await cursor.execute("Delete FROM Settlements WHERE Building = ?", (building,))
+                await cursor.execute("Delete FROM KB.Settlements WHERE Building = ?", (building,))
                 await cursor.execute(
                     "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                    (author, datetime.datetime.now(), "Settlements", "Update", f"Removed the building of {building}"))
+                    (author, datetime.datetime.now(), "KB.Settlements", "Update", f"Removed the building of {building}"))
                 await db.commit()
                 return status
     except (TypeError, ValueError, aiosqlite.Error) as error:
@@ -193,19 +193,19 @@ async def modify_blueprint(
             cursor = await db.cursor()
 
             await cursor.execute(
-                "Select Kingdom, Settlement, Building, Constructed, Lots, Economy, Loyalty, Stability, Fame, Unrest, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Settlement_Limit, District_Limit, Description FROM Settlements WHERE Building = ?",
+                "Select Kingdom, Settlement, Building, Constructed, Lots, Economy, Loyalty, Stability, Fame, Unrest, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Settlement_Limit, District_Limit, Description FROM KB.Settlements WHERE Building = ?",
                 (building,))
             built_buildings = await cursor.fetchall()
             for built_building in built_buildings:
                 (kingdom, settlement, building, constructed, lots, economy, loyalty, stability, fame, unrest,
                  corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting,
                  supply, settlement_limit, district_limit, description) = built_building
-                await cursor.execute("SELECT Size from Settlements WHERE Kingdom = ? AND Settlement = ?",
+                await cursor.execute("SELECT Size from KB.Settlements WHERE Kingdom = ? AND Settlement = ?",
                                      (kingdom, settlement))
                 size = await cursor.fetchone()
                 adjusted_dc = math.floor(size[0] / 36) - math.floor((size[0] + (net_lots * constructed) / 36))
                 await cursor.execute(
-                    "Update Settlements SET Size = size + ?, population = population + ?, corruption = corruption + ?, crime = crime + ?, productivity = productivity + ?, law = law + ?, lore = lore + ?, society = society + ?, danger = danger + ?, defence = defence + ?, base_value = base_value + ?, spellcasting = spellcasting + ?, supply = supply + ? WHERE Kingdom = ? AND Settlement = ?",
+                    "Update KB.Settlements SET Size = size + ?, population = population + ?, corruption = corruption + ?, crime = crime + ?, productivity = productivity + ?, law = law + ?, lore = lore + ?, society = society + ?, danger = danger + ?, defence = defence + ?, base_value = base_value + ?, spellcasting = spellcasting + ?, supply = supply + ? WHERE Kingdom = ? AND Settlement = ?",
                     (net_lots * constructed, net_lots * 250 * constructed, net_economy * constructed,
                      net_loyalty * constructed,
                      net_stability * constructed, net_fame * constructed, net_unrest * constructed,
@@ -216,7 +216,7 @@ async def modify_blueprint(
                      net_base_value * constructed,
                      net_spell_casting * constructed, net_supply * constructed, kingdom, settlement))
                 await cursor.execute(
-                    "Update Kingdoms set population = population + ?, Control_DC = Control_DC + ?, Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Fame = Fame + ?, Unrest = Unrest + ?, Consumption = Consumption + ? WHERE Kingdom = ?",
+                    "Update KB.Kingdoms set population = population + ?, Control_DC = Control_DC + ?, Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Fame = Fame + ?, Unrest = Unrest + ?, Consumption = Consumption + ? WHERE Kingdom = ?",
                     (net_lots * 250 * constructed, adjusted_dc, net_economy * constructed, net_loyalty * constructed,
                      net_stability * constructed, net_fame * constructed, net_unrest * constructed,
                      net_corruption * constructed,
@@ -253,7 +253,7 @@ async def customize_kingdom_modifiers(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("""select Kingdom, Password FROM Kingdoms where Kingdom = ?""", (kingdom,))
+            await cursor.execute("""select Kingdom, Password FROM KB.Kingdoms where Kingdom = ?""", (kingdom,))
             result = await cursor.fetchone()
             if result is None:
                 status = f"the kingdom of {kingdom} which you have attempted to set new modifiers for couldn't be found."
@@ -261,7 +261,7 @@ async def customize_kingdom_modifiers(
                 return status
             if result is not None:
                 await cursor.execute(
-                    "SELECT Control_DC, Economy, loyalty, Stability, Fame, Unrest, Consumption FROM Kingdoms_Custom WHERE Kingdom = ?",
+                    "SELECT Control_DC, Economy, loyalty, Stability, Fame, Unrest, Consumption FROM KB.Kingdoms_Custom WHERE Kingdom = ?",
                     (kingdom,))
                 result = await cursor.fetchone()
                 (
@@ -276,18 +276,18 @@ async def customize_kingdom_modifiers(
                 consumption = consumption if consumption else old_consumption
 
                 await cursor.execute(
-                    "UPDATE Kingdoms_Custom SET Control_DC = ?, Economy = ?, Loyalty = ?, Stability = ?, Fame = ?, Unrest = ?, Consumption = ? WHERE Kingdom = ?",
+                    "UPDATE KB.Kingdoms_Custom SET Control_DC = ?, Economy = ?, Loyalty = ?, Stability = ?, Fame = ?, Unrest = ?, Consumption = ? WHERE Kingdom = ?",
                     (control_dc, economy, loyalty, stability, fame, unrest, consumption, kingdom))
 
                 await cursor.execute(
-                    "UPDATE Kingdoms SET Control_DC = Control_DC + ?, Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Fame = Fame + ?, Unrest = Unrest + ?, Consumption = Consumption + ? WHERE Kingdom = ?",
+                    "UPDATE KB.Kingdoms SET Control_DC = Control_DC + ?, Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Fame = Fame + ?, Unrest = Unrest + ?, Consumption = Consumption + ? WHERE Kingdom = ?",
                     (control_dc - old_control_dc, economy - old_economy, loyalty - old_loyalty,
                      stability - old_stability, fame - old_fame, unrest - old_unrest, consumption - old_consumption,
                      kingdom))
 
                 await cursor.execute(
                     "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                    (author, datetime.datetime.now(), "Kingdoms", "Update",
+                    (author, datetime.datetime.now(), "KB.Kingdoms", "Update",
                      f"Updated the custom modifiers of {kingdom}"))
                 await db.commit()
                 status = f"The kingdom of {kingdom} which you have set new modifiers for has been adjusted"
@@ -316,7 +316,7 @@ async def custom_settlement_modifiers(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("""select Settlement FROM Settlements WHERE Settlement = ? AND Kingdom = ?""",
+            await cursor.execute("""select Settlement FROM KB.Settlements WHERE Settlement = ? AND Kingdom = ?""",
                                  (settlement, kingdom))
             result = await cursor.fetchone()
             if result is None:
@@ -325,7 +325,7 @@ async def custom_settlement_modifiers(
                 return status
             if result is not None:
                 await cursor.execute(
-                    "SELECT Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply FROM Settlements_Custom WHERE Kingdom = ? AND Settlement = ?",
+                    "SELECT Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply FROM KB.Settlements_Custom WHERE Kingdom = ? AND Settlement = ?",
                     (kingdom, settlement))
                 result = await cursor.fetchone()
                 (old_corruption, old_crime, old_productivity, old_law, old_lore, old_society, old_danger, old_defence,
@@ -343,18 +343,18 @@ async def custom_settlement_modifiers(
                 supply = supply if supply else old_supply
 
                 await cursor.execute(
-                    "UPDATE Settlements_Custom SET Corruption = ?, Crime = ?, Productivity = ?, Law = ?, Lore = ?, Society = ?, Danger = ?, Defence = ?, Base_Value = ?, Spellcasting = ?, Supply = ? WHERE Kingdom = ? AND Settlement = ?",
+                    "UPDATE KB.Settlements_Custom SET Corruption = ?, Crime = ?, Productivity = ?, Law = ?, Lore = ?, Society = ?, Danger = ?, Defence = ?, Base_Value = ?, Spellcasting = ?, Supply = ? WHERE Kingdom = ? AND Settlement = ?",
                     (corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting,
                      supply, kingdom, settlement))
                 await cursor.execute(
-                    "UPDATE Settlements SET Corruption = Corruption + ?, Crime = Crime + ?, Productivity = Productivity + ?, Law = Law + ?, Lore = Lore + ?, Society = Society + ?, Danger = Danger + ?, Defence = Defence + ?, Base_Value = Base_Value + ?, Spellcasting = Spellcasting + ?, Supply = Supply + ? WHERE Kingdom = ? AND Settlement = ?",
+                    "UPDATE KB.Settlements SET Corruption = Corruption + ?, Crime = Crime + ?, Productivity = Productivity + ?, Law = Law + ?, Lore = Lore + ?, Society = Society + ?, Danger = Danger + ?, Defence = Defence + ?, Base_Value = Base_Value + ?, Spellcasting = Spellcasting + ?, Supply = Supply + ? WHERE Kingdom = ? AND Settlement = ?",
                     (corruption - old_corruption, crime - old_crime, productivity - old_productivity, law - old_law,
                      lore - old_lore, society - old_society, danger - old_danger, defence - old_defence,
                      base_value - old_base_value, spellcasting - old_spellcasting, supply - old_supply, kingdom,
                      settlement))
                 await cursor.execute(
                     "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                    (author, datetime.datetime.now(), "Settlements", "Update",
+                    (author, datetime.datetime.now(), "KB.Settlements", "Update",
                      f"Updated the custom modifiers of {settlement}"))
                 await db.commit()
                 status = f"You have modified the settlement of {settlement} congratulations!"
@@ -379,7 +379,7 @@ async def settlement_decay_set(
             return "Decay is disabled on this server."
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("Select Kingdom FROM Settlements where Kingdom = ? AND Settlement = ?",
+            await cursor.execute("Select Kingdom FROM KB.Settlements where Kingdom = ? AND Settlement = ?",
                                  (kingdom, settlement))
             result = await cursor.fetchone()
             if result is None:
@@ -387,11 +387,11 @@ async def settlement_decay_set(
                 await db.commit()
                 return status
             if result is not None:
-                await cursor.execute("UPDATE Settlements SET Decay = ? WHERE Kingdom = ? AND Settlement = ?",
+                await cursor.execute("UPDATE KB.Settlements SET Decay = ? WHERE Kingdom = ? AND Settlement = ?",
                                      (decay, kingdom, settlement))
                 await cursor.execute(
                     "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                    (author, datetime.datetime.now(), "Settlements", "Update", f"Updated the decay of {settlement}"))
+                    (author, datetime.datetime.now(), "KB.Settlements", "Update", f"Updated the decay of {settlement}"))
                 await db.commit()
                 status = f"The settlement of {settlement} within the kingdom of {kingdom} has had it's decay set to {decay}!"
                 return status
@@ -426,11 +426,11 @@ async def add_hex_improvements(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("""select Improvement from Hexes_Improvements where Improvement = ?""", (improvement,))
+            await cursor.execute("""select Improvement from KB.Hexes_Improvements where Improvement = ?""", (improvement,))
             result = await cursor.fetchone()
             if result is None:
                 await cursor.execute(
-                    """INSERT INTO Hexes_Improvements (
+                    """INSERT INTO KB.Hexes_Improvements (
                     Improvement, Road_Multiplier, Build_Points, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation, Cavernous, Coastline, Desert, Forest, Hills, Jungle, Marsh, Mountain, Plains, Water) 
                     VALUES 
                     (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
@@ -439,7 +439,7 @@ async def add_hex_improvements(
                      water))
                 await cursor.execute(
                     """Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)""",
-                    (author, datetime.datetime.now(), "Hexes_Improvements", "Create",
+                    (author, datetime.datetime.now(), "KB.Hexes_Improvements", "Create",
                      f"Created the hex improvement of {improvement}"))
                 await db.commit()
                 status = f"You have allowed the creation the new hex improvement: {improvement}!"
@@ -459,17 +459,17 @@ async def remove_hex_improvements(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("""select Improvement FROM Hexes_Improvements WHERE Improvement = ?""", (improvement,))
+            await cursor.execute("""select Improvement FROM KB.Hexes_Improvements WHERE Improvement = ?""", (improvement,))
             result = await cursor.fetchone()
             if result is None:
                 status = f"The improvement of {improvement} did not previously exist."
                 await db.commit()
                 return status
             else:
-                await cursor.execute("""Delete FROM Hexes_Improvements WHERE Improvement = ?""", (improvement,))
+                await cursor.execute("""Delete FROM KB.Hexes_Improvements WHERE Improvement = ?""", (improvement,))
                 await cursor.execute(
                     """Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)""",
-                    (author, datetime.datetime.now(), "Hexes_Improvements", "Delete",
+                    (author, datetime.datetime.now(), "KB.Hexes_Improvements", "Delete",
                      f"Deleted the hex improvement of {improvement}"))
                 await db.commit()
                 status = f"You have removed the hex improvement of {improvement}!"
@@ -533,30 +533,30 @@ async def modify_hex_improvements(
             difference_consumption = consumption - old_hex_info.consumption
             difference_defence = defence - old_hex_info.defence
             difference_taxation = taxation - old_hex_info.taxation
-            await cursor.execute("SELECT Kingdom, Amount from Hexes WHERE Improvement = ?", (improvement,))
+            await cursor.execute("SELECT Kingdom, Amount from KB.Hexes WHERE Improvement = ?", (improvement,))
             improvements = await cursor.fetchall()
             for improvement in improvements:
                 (kingdom, amount) = improvement
                 await cursor.execute(
-                    "UPDATE Hexes SET Economy = ?, Loyalty = ?, Stability = ?, Unrest = ?, Consumption = ?, Defence = ?, Taxation = ?, Cavernous = ?, Coastline = ?, Desert =  ?, Forest = ?, Hills = ?, Jungle = ?, Marsh = ?, Mountain = ?, Plains = ?, Water = ? WHERE Improvement = ?",
+                    "UPDATE KB.Hexes SET Economy = ?, Loyalty = ?, Stability = ?, Unrest = ?, Consumption = ?, Defence = ?, Taxation = ?, Cavernous = ?, Coastline = ?, Desert =  ?, Forest = ?, Hills = ?, Jungle = ?, Marsh = ?, Mountain = ?, Plains = ?, Water = ? WHERE Improvement = ?",
                     (economy, loyalty, stability, unrest, consumption, defence, taxation, cavernous, coastline, desert,
                      forest, hills, jungle, marsh, mountain, plains, water, improvement))
                 await cursor.execute(
-                    "UPDATE Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ?, Consumption = Consumption + ?, Defence = Defence + ?, Taxation = Taxation + ? WHERE Kingdom = ?",
+                    "UPDATE KB.Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ?, Consumption = Consumption + ?, Defence = Defence + ?, Taxation = Taxation + ? WHERE Kingdom = ?",
                     (difference_economy * amount, difference_loyalty * amount, difference_stability * amount,
                      difference_unrest * amount, difference_consumption * amount, difference_defence * amount,
                      difference_taxation * amount, kingdom))
-            await cursor.execute("""select Improvement FROM Hexes_Improvements WHERE Improvement = ?""", (improvement,))
+            await cursor.execute("""select Improvement FROM KB.Hexes_Improvements WHERE Improvement = ?""", (improvement,))
             result = await cursor.fetchone()
             if result is None:
                 await cursor.execute(
-                    """UPDATE Hexes_Improvements SET Improvement = ?, Road_Multiplier = ?, Build_Points = ?, Economy = ?, Loyalty = ?, Stability = ?, Unrest = ?, Consumption = ?, Defence = ?, Taxation = ?, Cavernous = ?, Coastline = ?, Desert = ?, Forest = ?, Hills = ?, Jungle = ?, Marsh = ?, Mountain = ?, Plains = ?, Water = ? WHERE Improvement = ?""",
+                    """UPDATE KB.Hexes_Improvements SET Improvement = ?, Road_Multiplier = ?, Build_Points = ?, Economy = ?, Loyalty = ?, Stability = ?, Unrest = ?, Consumption = ?, Defence = ?, Taxation = ?, Cavernous = ?, Coastline = ?, Desert = ?, Forest = ?, Hills = ?, Jungle = ?, Marsh = ?, Mountain = ?, Plains = ?, Water = ? WHERE Improvement = ?""",
                     (improvement, road_multiplier, build_points, economy, loyalty, stability, unrest, consumption,
                      defence, taxation, cavernous, coastline, desert, forest, hills, jungle, marsh, mountain, plains,
                      water, old_hex_info.improvement))
                 await cursor.execute(
                     """Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)""",
-                    (author, datetime.datetime.now(), "Hexes_Improvements", "Update",
+                    (author, datetime.datetime.now(), "KB.Hexes_Improvements", "Update",
                      f"Updated the hex improvement of {improvement}"))
                 await db.commit()
                 status = f"The hex improvement of {improvement} has been modified!"
@@ -576,14 +576,14 @@ async def rebalance_kingdom_building(
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
-                "UPDATE Kingdoms SET Control_DC = 1, Size = 1, Economy = 0, Loyalty = 0, Stability = 0, Fame = 0, Unrest = 0, Consumption = 0")
+                "UPDATE KB.Kingdoms SET Control_DC = 1, Size = 1, Economy = 0, Loyalty = 0, Stability = 0, Fame = 0, Unrest = 0, Consumption = 0")
             await cursor.execute(
-                "UPDATE Settlements SET Size = 1, Population = 1, Economy = 0, Loyalty = 0, Stability = 0, Fame = 0, Unrest = 0, Corruption = 0, Crime = 0, Productivity = 0, Law = 0, Lore = 0, Society = 0, Danger = 0, Defence = 0, Base_Value = 0, Spellcasting = 0, Supply = 0")
+                "UPDATE KB.Settlements SET Size = 1, Population = 1, Economy = 0, Loyalty = 0, Stability = 0, Fame = 0, Unrest = 0, Corruption = 0, Crime = 0, Productivity = 0, Law = 0, Lore = 0, Society = 0, Danger = 0, Defence = 0, Base_Value = 0, Spellcasting = 0, Supply = 0")
             await cursor.execute(
                 "INSERT into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                (author, datetime.datetime.now(), "Kingdoms", "Update", "Rebalanced all kingdom buildings"))
+                (author, datetime.datetime.now(), "KB.Kingdoms", "Update", "Rebalanced all kingdom buildings"))
             await db.commit()
-            await cursor.execute("SELECT Kingdom from Kingdoms")
+            await cursor.execute("SELECT Kingdom from KB.Kingdoms")
             kingdoms = await cursor.fetchall()
             for kingdom in kingdoms:
                 await rebalance_settlements(db, kingdom[0])
@@ -602,7 +602,7 @@ async def rebalance_hexes(
         kingdom: str) -> None:
     cursor = await db.cursor()
     await cursor.execute(
-        "SELECT Improvement, Amount, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation FROM Hexes WHERE Kingdom = ?",
+        "SELECT Improvement, Amount, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation FROM KB.Hexes WHERE Kingdom = ?",
         (kingdom,))
     improvements = await cursor.fetchall()
     total_hexes = 0
@@ -624,7 +624,7 @@ async def rebalance_hexes(
         total_defence += defence * amount
         total_taxation += taxation * amount
     await cursor.execute(
-        "Update Kingdoms SET Control_DC = Control_DC + ?, Size = Size + ?, economy = economy + ?, loyalty = loyalty + ?, stability = stability + ?, unrest = unrest + ?, consumption = consumption + ?, defence = defence + ?, taxation = taxation + ? WHERE Kingdom = ?",
+        "Update KB.Kingdoms SET Control_DC = Control_DC + ?, Size = Size + ?, economy = economy + ?, loyalty = loyalty + ?, stability = stability + ?, unrest = unrest + ?, consumption = consumption + ?, defence = defence + ?, taxation = taxation + ? WHERE Kingdom = ?",
         (total_hexes, total_hexes, total_economy, total_loyalty, total_stability, total_unrest, total_consumption,
          total_defence, total_taxation, kingdom))
     await db.commit()
@@ -634,7 +634,7 @@ async def rebalance_settlements(
         db: aiosqlite.Connection,
         kingdom: str) -> None:
     cursor = await db.cursor()
-    await cursor.execute("SELECT Settlement FROM Settlements WHERE Kingdom = ?", (kingdom,))
+    await cursor.execute("SELECT Settlement FROM KB.Settlements WHERE Kingdom = ?", (kingdom,))
     settlements = await cursor.fetchall()
     total_size = 0
     total_economy = 0
@@ -652,7 +652,7 @@ async def rebalance_settlements(
         total_fame += fame
         total_unrest += unrest
     await cursor.execute(
-        "Update Kingdoms SET Control_DC = Control_DC + ?, Size = Size + ?, economy = economy + ?, loyalty = loyalty + ?, stability = stability + ?, fame = fame + ?, unrest = unrest + ? WHERE Kingdom = ?",
+        "Update KB.Kingdoms SET Control_DC = Control_DC + ?, Size = Size + ?, economy = economy + ?, loyalty = loyalty + ?, stability = stability + ?, fame = fame + ?, unrest = unrest + ? WHERE Kingdom = ?",
         (math.floor(total_size / 36), total_size, total_economy, total_loyalty, total_stability, total_fame,
          total_unrest, kingdom))
 
@@ -662,7 +662,7 @@ async def rebalance_buildings(
         kingdom: str,
         settlement: str) -> typing.Tuple[int, int, int, int, int, int]:
     cursor = await db.cursor()
-    await cursor.execute("SELECT Building, Constructed FROM Settlements WHERE Kingdom = ? AND Settlement = ?",
+    await cursor.execute("SELECT Building, Constructed FROM KB.Settlements WHERE Kingdom = ? AND Settlement = ?",
                          (kingdom, settlement))
     buildings = await cursor.fetchall()
     size = 0
@@ -684,7 +684,7 @@ async def rebalance_buildings(
         fame += fame * constructed
         unrest += unrest * constructed
     await cursor.execute(
-        "UPDATE Settlements SET Size = ?, population = ?, Economy = ?, Loyalty = ?, Stability = ?, Fame = ?, Unrest = ? WHERE Kingdom = ? AND Settlement = ?",
+        "UPDATE KB.Settlements SET Size = ?, population = ?, Economy = ?, Loyalty = ?, Stability = ?, Fame = ?, Unrest = ? WHERE Kingdom = ? AND Settlement = ?",
         (size, size * 250, economy, loyalty, stability, fame, unrest, kingdom, settlement))
     await db.commit()
     return size, economy, loyalty, stability, fame, unrest
@@ -712,7 +712,7 @@ class OverseerCommands(commands.Cog, name='overseer'):
     )
 
     hex_group = discord.app_commands.Group(
-        name='settlement',
+        name='hex',
         description='Commands related to settlement management',
         parent=overseer_group
     )
@@ -848,7 +848,7 @@ class OverseerCommands(commands.Cog, name='overseer'):
     @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
     @app_commands.autocomplete(settlement=kingdom_commands.settlement_autocomplete)
     async def build_in_settlement(self, interaction: discord.Interaction, kingdom: str, settlement: str, building: str,
-                                  amount):
+                                  amount: int):
         """Add a new blueprint for players to use."""
         await interaction.response.defer(thinking=True)
         try:
@@ -858,7 +858,7 @@ class OverseerCommands(commands.Cog, name='overseer'):
                 return
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("Select Size from Settlements where Kingdom = ? AND Settlement = ?",
+                await cursor.execute("Select Size from KB.Settlements where Kingdom = ? AND Settlement = ?",
                                      (kingdom, settlement))
                 size = await cursor.fetchone()
                 status = await kingdom_commands.add_building(
@@ -874,11 +874,11 @@ class OverseerCommands(commands.Cog, name='overseer'):
             logging.exception(f"Error in build_in_settlement: {e}")
             await interaction.followup.send("An error occurred while adding a building to a settlement.")
 
-    @settlement_group.command(name='remove', description='Remove buildings from a specified settlements.')
+    @settlement_group.command(name='remove', description='Remove buildings from a specified KB.Settlements.')
     @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
     @app_commands.autocomplete(settlement=kingdom_commands.settlement_autocomplete)
     async def remove_from_settlement(self, interaction: discord.Interaction, kingdom: str, settlement: str,
-                                     building: str, amount):
+                                     building: str, amount: int):
         """Remove buildings from a specified settlement."""
         await interaction.response.defer(thinking=True)
         try:
@@ -888,7 +888,7 @@ class OverseerCommands(commands.Cog, name='overseer'):
                 return
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("Select Size from Settlements where Kingdom = ? AND Settlement = ?",
+                await cursor.execute("Select Size from KB.Settlements where Kingdom = ? AND Settlement = ?",
                                      (kingdom, settlement))
                 size = await cursor.fetchone()
                 status = await kingdom_commands.remove_building(
@@ -1098,3 +1098,12 @@ class OverseerCommands(commands.Cog, name='overseer'):
         except (TypeError, ValueError) as e:
             logging.exception(f"Error in modify_blueprint: {e}")
             await interaction.followup.send("An error occurred while modifying a blueprint.")
+
+
+
+logging.basicConfig(
+    level=logging.INFO,  # Set the minimum logging level
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    filename='application.log',  # Log to a file
+    filemode='a'  # Append to the file
+)

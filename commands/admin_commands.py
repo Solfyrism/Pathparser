@@ -282,6 +282,7 @@ class AdminCommands(commands.Cog, name='admin'):
         description='Commands related to administration'
     )
 
+
     @admin_group.command(name='help', description='Help commands for the character tree')
     async def help(self, interaction: discord.Interaction):
         """Display the help command for the admin commands."""

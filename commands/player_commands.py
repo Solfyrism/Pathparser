@@ -2388,12 +2388,13 @@ class PlayerCommands(commands.Cog, name='Player'):
                     (session_name, play_location, hammer_time, game_link, session_range_id, session_range,
                      session_thread,
                      overflow) = session_info
+
                     await cursor.execute(
                         "SELECT Player_Name from Sessions_Signups WHERE Session_ID = ? AND Player_Name = ?",
-                    )
+                        (session_id, interaction.user.name))
                     signup_present = await cursor.fetchone()
                     await cursor.execute(
-                        "SELECT Player_Name from Sessions_Participants WHERE Session_ID = ? AND Player_Name = ?",
+                        "SELECT Player_Name from Sessions_Participants WHERE Session_ID = ? AND Player_Name = ?", (session_id, interaction.user.name)
                     )
                     participant_present = await cursor.fetchone()
                     if signup_present or participant_present:
@@ -2401,56 +2402,38 @@ class PlayerCommands(commands.Cog, name='Player'):
                             f"Player {interaction.user.name} has already signed up for session {session_name} ({session_id})",
                             ephemeral=True)
                         return
-
-                    await cursor.execute(
-                        "SELECT Level from Player_Characters WHERE Player_ID = ? AND Character_Name = ?",
-                        (interaction.user.id, character_name))
-                    character_info = await cursor.fetchone()
-                    if not character_info:
-                        await interaction.followup.send(
-                            f"Character {character_name} not found for player {interaction.user.name}")
-                        return
                     else:
-                        level = character_info[0]
-                        quest_thread = interaction.guild.get_thread(session_thread)
-                        if not quest_thread:
-                            quest_thread = await interaction.guild.fetch_channel(session_thread)
-                        if not quest_thread:
-                            raise ValueError(f"Thread {session_thread} not found in guild {interaction.guild_id}")
 
-                        if overflow == 2 or overflow == 3:
-                            secondary_role = await gamemaster_commands.validate_overflow(guild=interaction.guild,
-                                                                                         overflow=overflow,
-                                                                                         session_range_id=session_range_id)
-                            await cursor.execute(
-                                "Select min(level), max(level) FROM Milestone_System WHERE  Level_Range_ID in (? , ?)",
-                                (secondary_role.id, session_range_id))
-                        elif overflow == 1:
-                            await cursor.execute(
-                                "Select min(level), max(level) Role_Name from Milestone_System WHERE Level_Range_ID = ?",
-                                (session_range_id,))
-                        level_range_info = await cursor.fetchone()
-                        if overflow == 4:
-                            join_session = await player_signup(guild=interaction.guild, thread_id=session_thread,
-                                                               session_name=session_name, session_id=session_id,
-                                                               player_id=interaction.user.id,
-                                                               character_name=character_name,
-                                                               warning_duration=warning_duration)
-                            if join_session:
-                                await interaction.followup.send(
-                                    content="You have submitted your request! Please wait for the GM to accept or deny your request!",
-                                    ephemeral=True)
-                            else:
-                                await interaction.followup.send(
-                                    f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})",
-                                    ephemeral=True)
-                        elif not level_range_info[0]:
-                            role = interaction.guild.get_role(session_range_id)
-                            if not role:
-                                await interaction.followup.send(
-                                    f"Role {session_range_id} not found in guild {interaction.guild_id}")
-                                raise ValueError(f"Role {session_range_id} not found in guild {interaction.guild_id}")
-                            if role in interaction.user.roles:
+                        await cursor.execute(
+                            "SELECT Level from Player_Characters WHERE Player_ID = ? AND Character_Name = ?",
+                            (interaction.user.id, character_name))
+                        character_info = await cursor.fetchone()
+                        if not character_info:
+                            await interaction.followup.send(
+                                f"Character {character_name} not found for player {interaction.user.name}")
+                            return
+                        else:
+                            level = character_info[0]
+                            quest_thread = interaction.guild.get_thread(session_thread)
+                            if not quest_thread:
+                                quest_thread = await interaction.guild.fetch_channel(session_thread)
+                            if not quest_thread:
+                                raise ValueError(f"Thread {session_thread} not found in guild {interaction.guild_id}")
+
+                            if overflow == 2 or overflow == 3:
+                                secondary_role = await gamemaster_commands.validate_overflow(guild=interaction.guild,
+                                                                                             overflow=overflow,
+                                                                                             session_range_id=session_range_id)
+                                await cursor.execute(
+                                    "Select min(level), max(level) FROM Milestone_System WHERE  Level_Range_ID in (? , ?)",
+                                    (secondary_role.id, session_range_id))
+                            elif overflow == 1:
+                                await cursor.execute(
+                                    "Select min(level), max(level) Role_Name from Milestone_System WHERE Level_Range_ID = ?",
+                                    (session_range_id,))
+                            level_range_info = await cursor.fetchone()
+
+                            if overflow == 4:
                                 join_session = await player_signup(
                                     guild=interaction.guild,
                                     thread_id=session_thread,
@@ -2461,38 +2444,63 @@ class PlayerCommands(commands.Cog, name='Player'):
                                     warning_duration=warning_duration)
                                 if join_session:
                                     await interaction.followup.send(
-                                        content=f"You have submitted your request! Please wait for the GM to accept or deny your request!",
+                                        content="You have submitted your request! Please wait for the GM to accept or deny your request!",
                                         ephemeral=True)
                                 else:
                                     await interaction.followup.send(
                                         f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})",
                                         ephemeral=True)
-                            else:
-                                await interaction.followup.send(
-                                    f"You do not have the required role to join this session.", ephemeral=True)
-                        elif level_range_info[0]:
-                            print(level_range_info[0], level_range_info[1])
-                            if level_range_info[0] <= level <= level_range_info[1]:
-                                join_session = await player_signup(
-                                    guild=interaction.guild,
-                                    thread_id=session_thread,
-                                    session_name=session_name,
-                                    session_id=session_id,
-                                    player_id=interaction.user.id,
-                                    character_name=character_name,
-                                    warning_duration=warning_duration)
-                                if join_session:
+                            elif not level_range_info[0]:
+
+                                role = interaction.guild.get_role(session_range_id)
+                                if not role:
                                     await interaction.followup.send(
-                                        content=f"You have submitted your request! Please wait for the GM to accept or deny your request!",
-                                        ephemeral=True)
+                                        f"Role {session_range_id} not found in guild {interaction.guild_id}")
+                                    raise ValueError(f"Role {session_range_id} not found in guild {interaction.guild_id}")
+                                if role in interaction.user.roles:
+
+                                    join_session = await player_signup(
+                                        guild=interaction.guild,
+                                        thread_id=session_thread,
+                                        session_name=session_name,
+                                        session_id=session_id,
+                                        player_id=interaction.user.id,
+                                        character_name=character_name,
+                                        warning_duration=warning_duration)
+                                    if join_session:
+                                        await interaction.followup.send(
+                                            content=f"You have submitted your request! Please wait for the GM to accept or deny your request!",
+                                            ephemeral=True)
+                                    else:
+                                        await interaction.followup.send(
+                                            f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})",
+                                            ephemeral=True)
                                 else:
                                     await interaction.followup.send(
-                                        f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})",
+                                        f"You do not have the required role to join this session.", ephemeral=True)
+                            elif level_range_info[0]:
+                                print(level_range_info[0], level_range_info[1])
+                                if level_range_info[0] <= level <= level_range_info[1]:
+                                    join_session = await player_signup(
+                                        guild=interaction.guild,
+                                        thread_id=session_thread,
+                                        session_name=session_name,
+                                        session_id=session_id,
+                                        player_id=interaction.user.id,
+                                        character_name=character_name,
+                                        warning_duration=warning_duration)
+                                    if join_session:
+                                        await interaction.followup.send(
+                                            content=f"You have submitted your request! Please wait for the GM to accept or deny your request!",
+                                            ephemeral=True)
+                                    else:
+                                        await interaction.followup.send(
+                                            f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})",
+                                            ephemeral=True)
+                                else:
+                                    await interaction.followup.send(
+                                        f"Character {character_name} is not within the level range of the session.",
                                         ephemeral=True)
-                            else:
-                                await interaction.followup.send(
-                                    f"Character {character_name} is not within the level range of the session.",
-                                    ephemeral=True)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(
                 f"Failed to sign up player {interaction.user.name} for session with id: ({session_id}:{e}")
@@ -2544,13 +2552,13 @@ class PlayerCommands(commands.Cog, name='Player'):
                     await interaction.followup.send(f"No active session with {session_id} can be found!")
                 if session_info is not None:
                     await cursor.execute(
-                        "SELECT Character_Name, Level, Effective_Wealth from Sessions_Signups where Player_Name = ?",
-                        (interaction.user.name,))
+                        "SELECT Character_Name, Level, Effective_Wealth from Sessions_Signups where Player_Name = ? and session_ID = ?",
+                        (interaction.user.name, session_id))
                     character_info = await cursor.fetchone()
                     if character_info is None:
                         await cursor.execute(
-                            "SELECT Character_Name, Level, Effective_Wealth from Sessions_Participants where Player_Name = ?",
-                            (interaction.user.name,))
+                            "SELECT Character_Name, Level, Effective_Wealth from Sessions_Participants where Player_Name = ? and session_ID = ?",
+                            (interaction.user.name,session_id))
                         character_info = await cursor.fetchone()
                         if character_info is None:
                             await interaction.followup.send(
@@ -3440,3 +3448,5 @@ class DisplayGroupTimesheet(discord.ui.View):
 
             self.max_range_id = count[0]
             return self.max_range_id
+
+

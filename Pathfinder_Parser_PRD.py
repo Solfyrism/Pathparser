@@ -203,6 +203,8 @@ async def on_message(message):
                     await message.channel.send("https://cdn.discordapp.com/attachments/479089930816192513/1330383824315613275/hq720.png?ex=678dc7fd&is=678c767d&hm=a4ae84c616d84827555e18cee3a61337d2f65f36eae0caf89dc9d06bd42377bd&")
                 elif message.author.id == 318796580662542347 and 'tried to set me on fire' in message.content.lower():
                     await message.channel.send("https://i.imgflip.com/pwruu.jpg")
+                if "%soulisawesome" in message.content.lower():
+                    await message.channel.send("https://y.yarn.co/6447b331-7aa2-4785-a5a0-9d20fa4dae35_text.gif")
                 swears = {
                     "fuck": 0,
                     "shit": 0,

@@ -1174,8 +1174,25 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                 guild_id=interaction.guild_id,
                                 bot=self.bot
                             )
-                            await interaction.followup.send(
-                                f"""Session #{session_id}: "{session_name}" was successfully created at {announcement_message.jump_url}!""")
+                            if game_link:
+                                await interaction.followup.send(
+                                    f"""Session #{session_id}: "{session_name}" was successfully created at {announcement_message.jump_url}!""")
+                            else:
+                                await cursor.execute("SELECT Game_Link from sessions where Game_Link is not null and GM_Name = ? order by session_id desc limit 1",
+                                                     (interaction.user.name,))
+                                game_link_fetch = await cursor.fetchone()
+                                if game_link_fetch:
+                                    game_view = UpdateGameLinkView(
+                                        announcement_message=announcement_message,
+                                        content=f"You didn't provide a game link in your announcement, would you like to use the last one you provided? \r\n {game_link_fetch[0]}",
+                                        session_content=message_content,
+                                        session_embed=embed,
+                                        interaction=interaction,
+                                        game_link=game_link_fetch[0])
+                                    await game_view.send_initial_message()
+                                else:
+                                    await interaction.followup.send(
+                                    f"""Session #{session_id}: "{session_name}" was successfully created at {announcement_message.jump_url}!""")
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"An error occurred whilst creating a session: {e}")
             await interaction.followup.send("An error occurred whilst creating a session. Please try again later.")
@@ -1296,7 +1313,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                             content += f"\r\n {interaction.user.mention} is running a session"
                             content += f" in <@&{build_info_base.region}>!" if build_info_base.region else "!"
 
-                            await announcement_message.edit(content=build_info_base.session_range, embed=embed,
+                            await announcement_message.edit(content=content, embed=embed,
                                                             view=view)
                             clear_session_reminders(
                                 session_id=session_id,
@@ -2407,6 +2424,35 @@ class ReplaceRewardsView(shared_functions.SelfAcknowledgementView):
             description=f"{interaction.user.name} has decided to remove the rewards from {self.character_origin} and give the rewards to {self.character_recipient_info[0]}.",
             color=discord.Color.green()
         )
+
+    async def create_embed(self):
+        """Dummy because this breaks without it, but just sets the embed to the one I made outside, so I don't have to pass as many variables in."""
+        self.embed = self.embed
+
+
+class UpdateGameLinkView(shared_functions.SelfAcknowledgementView):
+    def __init__(self,
+                 announcement_message: discord.Message,
+                 content: str,
+                 session_content: str,
+                 session_embed: discord.Embed,
+                 interaction: discord.Interaction,
+                 game_link: str):
+        super().__init__(content=content, interaction=interaction)
+        self.announcement_message = announcement_message
+        self.session_content = session_content
+        self.session_embed = session_embed
+        self.game_link = game_link
+
+    async def accepted(self, interaction: discord.Interaction):
+        """Handle the approval logic."""
+        # Update the database to mark the proposition as accepted
+        # Adjust prestige, log the transaction, notify the requester, etc.
+        self.session_embed.url = self.game_link
+        print("i got here")
+        print(self.game_link)
+        print(self.announcement_message.jump_url, self.announcement_message.id)
+        await self.announcement_message.edit(content=self.session_content, embed=self.session_embed)
 
     async def create_embed(self):
         """Dummy because this breaks without it, but just sets the embed to the one I made outside, so I don't have to pass as many variables in."""
