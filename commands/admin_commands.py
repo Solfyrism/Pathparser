@@ -23,6 +23,50 @@ import commands.character_commands as character_commands
 os.chdir("C:\\pathparser")
 
 
+async def update_region_level_range(interaction: discord.Interaction, database_conn: aiosqlite.Connection,
+                                    level_range_info, region: str, min_level: int, max_level: int, role: discord.Role):
+    cursor = await database_conn.cursor()
+    for level_range in level_range_info:
+        (name, min_stored_level, max_stored_level, old_role_id) = level_range
+        print("PT2", level_range)
+        if min_level < min_stored_level < max_stored_level < max_level:
+            await interaction.followup.send(
+                f"The level range you are trying to add overlaps with an existing level range of {name} and cannot split it into two entries either rename it, or set the min level to be below or equal to {min_stored_level} or the max level to be above or equal to {max_stored_level}.",
+                ephemeral=True)
+            return None
+        elif min_level <= min_stored_level < max_stored_level <= max_level:
+            await cursor.execute("DELETE FROM Regions_Level_Range WHERE Name = ? and Min_Level = ? and Max_Level = ?",
+                                 (name, min_stored_level, max_stored_level))
+            content = f"The level range of {min_stored_level}-{max_stored_level} has been removed as it was entirely within the new level range.\r\n"
+            catch_range_higher = max_stored_level
+            catch_range_lower = min_stored_level
+        elif min_stored_level < min_level < max_stored_level < max_level:
+            await cursor.execute(
+                "UPDATE Regions_Level_Range SET Max_Level = ? WHERE Name = ? AND Min_level = ? and Max_Level = ?",
+                (min_level - 1, name, min_stored_level, max_stored_level))
+            content = f"The level range of {min_stored_level}-{max_stored_level} has been reduced to to {min_stored_level}-{max_level - 1}.\r\n"
+            catch_range_higher = min_level
+            catch_range_lower = max_stored_level
+        elif min_level < min_stored_level < max_level < max_stored_level:
+            await cursor.execute(
+                "UPDATE Regions_Level_Range SET Min_Level = ? WHERE Name = ? AND Min_level = ? and Max_Level = ?",
+                (max_level + 1, name, min_stored_level, max_stored_level))
+            content = f"The level range of {min_stored_level}-{max_stored_level} has been reduced to to {min_level + 1}-{max_stored_level}.\r\n"
+            catch_range_higher = max_level
+            catch_range_lower = min_stored_level
+        else:
+            catch_range_higher = 0
+            catch_range_lower = 0
+            content = ""
+        await cursor.execute("select player_id from Player_Characters where region = ? and level >= ? and level <= ?",
+                             (region, catch_range_lower, catch_range_higher))
+        players = await cursor.fetchall()
+        for player in players:
+            old_role = interaction.guild.get_role(old_role_id)
+            await interaction.guild.get_member(player[0]).remove_roles(old_role)
+        return content
+
+
 async def transactions_reverse(guild_id: int, transaction_id: int, author_id: int, author_name: str,
                                reason: str) -> (
         Union[tuple[int, int, str, int, float, float, float, float], str]):
@@ -281,7 +325,6 @@ class AdminCommands(commands.Cog, name='admin'):
         name='admin',
         description='Commands related to administration'
     )
-
 
     @admin_group.command(name='help', description='Help commands for the character tree')
     async def help(self, interaction: discord.Interaction):
@@ -1383,7 +1426,7 @@ class AdminCommands(commands.Cog, name='admin'):
 
                 else:
                     await cursor.execute(
-                        "Select True_Character_Name, Character_Name, Thread_ID, Level, Milestones, Tier, Trials, Personal_Cap FROM Player_Characters where Character_Name = ? OR Nickname = ?",
+                        "Select True_Character_Name, Character_Name, Thread_ID, Level, Milestones, Tier, Trials, Personal_Cap, Region FROM Player_Characters where Character_Name = ? OR Nickname = ?",
                         (unidecode_name, unidecode_name))
                     player_info = await cursor.fetchone()
                     if not player_info:
@@ -1391,7 +1434,7 @@ class AdminCommands(commands.Cog, name='admin'):
                                                         ephemeral=True)
                     if player_info:
                         (true_character_name, character_name, thread_id, character_level, milestones, tier, trials,
-                         personal_cap) = player_info
+                         personal_cap, region) = player_info
                         # Determine the level to use for the calculation, default to the character's current level and default jobs to None
                         character_level = level if level is not None else character_level
                         easy = amount if job.name == 'Easy' else 0
@@ -1411,7 +1454,8 @@ class AdminCommands(commands.Cog, name='admin'):
                             medium=medium,
                             hard=hard,
                             deadly=deadly,
-                            misc=misc_milestones)
+                            misc=misc_milestones,
+                            region=region)
                         print(level_adjustment)
                         (new_level,
                          total_milestones,
@@ -1503,7 +1547,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         # Reset the cache to apply the new level cap.
                         await shared_functions.config_cache.load_configurations(guild_id=guild_id)
                         await cursor.execute(
-                            "SELECT True_Character_Name, Character_Name, Level, Milestones, Tier, Trials, personal_cap, Thread_ID FROM Player_Characters WHERE Milestones >= ?",
+                            "SELECT True_Character_Name, Character_Name, Level, Milestones, Tier, Trials, personal_cap, Thread_ID, region FROM Player_Characters WHERE Milestones >= ?",
                             (minimum_milestones,))
                         characters_to_adjust = await cursor.fetchall()
                         if characters_to_adjust:
@@ -1513,7 +1557,7 @@ class AdminCommands(commands.Cog, name='admin'):
                                 # Calculate the new level and tier for each character that had their level cap increased.
                                 try:
                                     (true_character_name, character_name, character_level, milestones, tier, trials,
-                                     personal_cap, thread_id) = character
+                                     personal_cap, thread_id, region) = character
                                     level_adjustment = await character_commands.level_calculation(
                                         character_name=character_name,
                                         level=character_level,
@@ -1525,7 +1569,8 @@ class AdminCommands(commands.Cog, name='admin'):
                                         medium=0,
                                         hard=0,
                                         deadly=0,
-                                        misc=0)
+                                        misc=0,
+                                        region=region)
                                     (new_level,
                                      total_milestones,
                                      min_milestones,
@@ -1736,12 +1781,12 @@ class AdminCommands(commands.Cog, name='admin'):
 
                 # Update all characters that are affected by the milestone change.
                 await cursor.execute(
-                    "Select character_name, level, milestones, trials, personal_cap, Tier, Thread_ID FROM Player_Characters WHERE milestones BETWEEN ? AND ?",
+                    "Select character_name, level, milestones, trials, personal_cap, Tier, Thread_ID, Region FROM Player_Characters WHERE milestones BETWEEN ? AND ?",
                     (center_milestones_range, upper_milestone_range))
                 characters_to_adjust = await cursor.fetchall()
 
                 for character in characters_to_adjust:
-                    (character_name, level, milestones, trials, personal_cap, tier, thread_id) = character
+                    (character_name, level, milestones, trials, personal_cap, tier, thread_id, region) = character
                     level_adjustment = await character_commands.level_calculation(
                         character_name=character_name,
                         level=level,
@@ -1753,7 +1798,8 @@ class AdminCommands(commands.Cog, name='admin'):
                         medium=0,
                         hard=0,
                         deadly=0,
-                        misc=0)
+                        misc=0,
+                        region=region)
                     (new_level,
                      total_milestones,
                      min_milestones,
@@ -3522,6 +3568,158 @@ class AdminCommands(commands.Cog, name='admin'):
 
             await interaction.followup.send(
                 f"An error occurred whilst responding. Please try again later.")
+
+    region_group = discord.app_commands.Group(
+        name='region',
+        description='region group commands',
+        parent=admin_group
+    )
+
+    @region_group.command(name='add', description='Add a region to the server')
+    async def add_region(self, interaction: discord.Interaction, name: str, role: discord.Role,
+                         channel: discord.TextChannel, kingdom_building: bool = False):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("INSERT INTO Regions (Name, Role_ID, Channel_ID, kingdom_building) VALUES (?, ?, ?, ?)",
+                                     (name, role.id, channel.id, kingdom_building))
+                await db.commit()
+
+                await interaction.followup.send(f"{name} has been added as a region.", ephemeral=True)
+
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception(f"an issue occurred in the add_region command: {e}")
+
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later.", ephemeral=True)
+
+    @region_group.command(name='remove', description='Remove a region from the server')
+    @app_commands.autocomplete(name=shared_functions.region_autocomplete)
+    async def remove_region(self, interaction: discord.Interaction, name: str):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("DELETE FROM Regions WHERE Name = ?", (name,))
+                await cursor.execute("DELETE FROM Regions_Level_Range WHERE Name = ?", (name,))
+                await db.commit()
+
+                await interaction.followup.send(f"{name} has been removed as a region.", ephemeral=True)
+
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception(f"an issue occurred in the remove_region command: {e}")
+
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later.", ephemeral=True)
+
+    @region_group.command(name='edit', description='Edit a region on the server')
+    @app_commands.autocomplete(old_name=shared_functions.region_autocomplete)
+    async def edit_region(self, interaction: discord.Interaction, old_name: str, new_name: typing.Optional[str],
+                          role: typing.Optional[discord.Role], channel: typing.Optional[discord.TextChannel],
+                          kingdom_building: typing.Optional[bool]):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Role_ID, Channel_ID, Kingdom_Building FROM Regions WHERE Name = ?", (old_name,))
+                region = await cursor.fetchone()
+                if not region:
+                    await interaction.followup.send(f"{old_name} is not a region.", ephemeral=True)
+                    return
+                else:
+                    (role_id, channel_id, old_kingdom_building) = region
+                    role = role.id if role is not None else role_id
+                    channel = channel.id if channel is not None else channel_id
+                    kingdom_building = kingdom_building if kingdom_building is not None else old_kingdom_building
+                    if new_name:
+                        await cursor.execute("Update Regions_Level_Range set Name = ? WHERE Name = ?",
+                                             (new_name, old_name))
+                        content = f"{old_name} has been edited as a region to be {new_name}."
+                    else:
+                        content = f"{old_name} has been edited as a region."
+                    new_name = new_name if new_name is not None else old_name
+                    await cursor.execute("UPDATE Regions SET Name = ?, Role_ID = ?, Channel_ID = ?, Kingdom_Building = ? WHERE Name = ?",
+                                         (new_name, role, channel, kingdom_building, old_name))
+                    await db.commit()
+                await interaction.followup.send(content, ephemeral=True)
+
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception(f"an issue occurred in the edit_region command: {e}")
+
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later {e}.", ephemeral=True)
+
+    @region_group.command(name='level_range', description='Add a level range to a region')
+    @app_commands.autocomplete(region=shared_functions.region_autocomplete)
+    async def add_level_range(self, interaction: discord.Interaction, region: str, min_level: int, max_level: int,
+                              role: discord.Role):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT 1 FROM Regions WHERE Name = ?", (region,))
+                region_validation = await cursor.fetchone()
+                if not region_validation:
+                    await interaction.followup.send(f"{region} is not a region.", ephemeral=True)
+                    return
+                if min_level > max_level:
+                    await interaction.followup.send(f"Minimum level must be less than maximum level.", ephemeral=True)
+                    return
+                await cursor.execute(
+                    "SELECT MIN(Level), MAX(Level) from Milestone_System WHERE LEVEL >= ? AND LEVEL <= ?",
+                    (min_level, max_level))
+                levels = await cursor.fetchone()
+                content = ""
+                (min_stored_level, max_stored_level) = levels
+                if min_level != min_stored_level or max_level != max_stored_level:
+                    await interaction.followup.send(
+                        f"Levels {min_level} to {max_level} are not valid levels as compared to the minimum {min_stored_level} and maximum {min_stored_level} stored levels in the milestone system.",
+                        ephemeral=True)
+                    return
+                await cursor.execute(
+                    "Select name, min_level, max_level, Role_ID from regions_level_range where name = ? and max_level between ? and ?",
+                    (region, min_level, max_level))
+                below_ranges = await cursor.fetchall()
+                print(below_ranges)
+                content = ""
+                if below_ranges:
+                    below_result = await update_region_level_range(interaction=interaction, region=region,
+                                                               min_level=min_level, max_level=max_level, role=role,
+                                                               level_range_info=below_ranges, database_conn=db)
+                    if isinstance(below_result, str):
+                        content += below_result
+                    else:
+                        return
+                await cursor.execute("Select name, min_level, max_level, Role_ID from regions_level_range where name = ? and min_level between ? AND ?",
+                        (region, min_level, max_level))
+
+                above_ranges = await cursor.fetchall()
+                if above_ranges:
+                    above_result = await update_region_level_range(interaction=interaction, region=region,
+                                                                   min_level=min_level, max_level=max_level, role=role,
+                                                                   level_range_info=above_ranges, database_conn=db)
+                    if isinstance(above_result, str):
+                        content = below_result
+                        content += f"{above_result}"
+                    else:
+                        return
+                await cursor.execute(
+                    "INSERT INTO Regions_Level_Range (Name, Min_Level, Max_Level, Role_ID) VALUES (?, ?, ?, ?)",
+                    (region, min_level, max_level, role.id))
+                await cursor.execute("SELECT Player_ID from Player_Characters where region = ? and level >= ? and level <= ?",
+                                     (region, min_level, max_level))
+                await db.commit()
+                players = await cursor.fetchall()
+                for player in players:
+                    await interaction.guild.get_member(player[0]).add_roles(role)
+                content += f"{region} has been granted the ranges of {min_level}-{max_level} with the role {role}."
+                await interaction.followup.send(content, ephemeral=True)
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception(f"an issue occurred in the add_region command: {e}")
+
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later. {e}", ephemeral=True)
 
 
 class MilestoneDisplayView(shared_functions.ShopView):

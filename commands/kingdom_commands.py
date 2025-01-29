@@ -58,7 +58,9 @@ class SettlementInfo:
 
 @dataclass
 class BuildingInfo:
-    building: str
+    full_name: str
+    type: str
+    subtype: str
     build_points: int
     lots: int
     economy: int
@@ -80,12 +82,16 @@ class BuildingInfo:
     settlement_limit: int
     district_limit: int
     description: str
+    upgrade: str
+    discount: str
+    tier: int
 
 
 @dataclass
 class HexImprovementInfo:
-    improvement: str
-    road_multiplier: int
+    full_name: str
+    name: str
+    subtype: str
     build_points: int
     economy: int
     loyalty: int
@@ -104,6 +110,8 @@ class HexImprovementInfo:
     mountains: int
     plains: int
     water: int
+    source: int
+    size: int
 
 
 # autocompletes functions for kingdom
@@ -144,6 +152,56 @@ async def blueprint_autocomplete(interaction: discord.Interaction, current: str
     return data
 
 
+async def improvement_subtype_autocomplete(interaction: discord.Interaction, current: str
+                                 ) -> typing.List[app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild_id
+    async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        cursor = await db.cursor()
+        current = unidecode(str.title(current))
+        await cursor.execute(
+            "SELECT Full_Name, Subtype FROM KB_Hexes_Improvements WHERE Full_Name LIKE ? AND Type = 'Farm' Limit 20",
+            (f"%{current}%",))
+        blueprint_list = await cursor.fetchall()
+        for blueprint in blueprint_list:
+            if current in blueprint[0]:
+                data.append(app_commands.Choice(name=f"{blueprint[0]} produces {blueprint[1]}", value=blueprint[0]))
+    return data
+
+async def blueprint_repurpose_autocomplete(interaction: discord.Interaction, current: str
+                                 ) -> typing.List[app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild_id
+    async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        cursor = await db.cursor()
+        current = unidecode(str.title(current))
+        await cursor.execute(
+            "SELECT Full_name FROM kb_Buildings_Blueprints WHERE Full_Name LIKE ? AND (Subtype in ('Magical Items', 'Magical Consumables', 'Textile', 'Mundane Exotic', 'Mundane Complex', 'Metallurgy', 'Weaponry') OR Type = 'Granary') Limit 20",
+            (f"%{current}%",))
+        blueprint_list = await cursor.fetchall()
+        for blueprint in blueprint_list:
+            if current in blueprint[0]:
+                data.append(app_commands.Choice(name=blueprint[0], value=blueprint[0]))
+    return data
+
+
+async def blueprint_upgrade_autocomplete(interaction: discord.Interaction, current: str
+                                 ) -> typing.List[app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild_id
+    async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        cursor = await db.cursor()
+        current = unidecode(str.title(current))
+        await cursor.execute(
+            "SELECT Full_Name, Upgrade From Kb_Building_Blueprints WHERE Upgrade is not Null and Full_Name like ? Limit 20",
+            (f"%{current}%",))
+        blueprint_list = await cursor.fetchall()
+        for blueprint in blueprint_list:
+            if current in blueprint[0]:
+                data.append(app_commands.Choice(name=f"{blueprint[0]} - {blueprint[1]}", value=blueprint[0]))
+    return data
+
+
 async def government_autocompletion(
         interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
     data = []
@@ -175,7 +233,7 @@ async def hex_terrain_autocomplete(
         hex_list = await cursor.fetchall()
         for kb_hexes in hex_list:
             if current in kb_hexes[0]:
-                data.append(app_commands.Choice(name=hexes[0], value=hexes[0]))
+                data.append(app_commands.Choice(name=kb_hexes[0], value=kb_hexes[0]))
 
     return data
 
@@ -425,6 +483,7 @@ async def create_a_kingdom(
         guild_id: int,
         author: str,
         kingdom: str,
+        region: str,
         password: str,
         government: str,
         alignment: str) -> str:
@@ -448,9 +507,20 @@ async def create_a_kingdom(
             if alignment_type is not None and kingdom_presence is None and government_type is not None:
                 (economy, loyalty, stability) = alignment_type
                 await cursor.execute("""
-                INSERT INTO kb_Kingdoms (Kingdom, Password, Government, Alignment, Economy, Loyalty, Stability, 
-                Fame, Unrest, Consumption, Size, Population, Control_DC, Build_Points) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0)
-                """, (kingdom, hashed_password, government, alignment, economy, loyalty, stability))
+                INSERT INTO kb_Kingdoms (
+                Kingdom, Password, Government, Alignment, Region, Size, Population, 
+                Economy, Loyalty, Stability, 
+                Fame, Unrest, Consumption,
+                Control_DC, Build_Points,
+                Stored_seafood, Stored_meat, Stored_grain, Stored_produce,
+                ) VALUES (
+                ?, ?, ?, ?, ?, 0, 0, 
+                ?, ?, ?,
+                0, 0, 0,
+                0, 0,
+                0, 0, 0, 0
+                )
+                """, (kingdom, hashed_password, government, alignment, region, economy, loyalty, stability))
                 await cursor.execute(
                     """Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)""",
                     (author, datetime.datetime.now(), "kb_Kingdoms", "Create", f"Created the kingdom of {kingdom}"))
@@ -482,6 +552,20 @@ async def generate_leadership(
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error generating leadership: {e}")
         return f"An error occurred while generating leadership. {e}"
+
+async def generate_permissions(
+        db: aiosqlite.Connection,
+        kingdom: str):
+    try:
+        cursor = await db.cursor()
+        await cursor.execute("""
+        INSERT INTO KB_Building_Permits (Kingdom, Building_Name, Building_ID)
+        SELECT ?, Building, Building_ID FROM KB_Buildings_Blueprints WHERE Tier = 0
+        """, (kingdom,))
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error generating permissions: {e}")
+        return f"An error occurred while generating permissions. {e}"
+
 
 
 async def edit_a_kingdom(
@@ -677,8 +761,8 @@ async def fetch_building(
     async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
         cursor = await db.cursor()
         await cursor.execute(
-            """SELECT Building, Build_Points, Lots, Economy, Loyalty, Stability, Fame, Unrest, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Settlement_Limit, District_Limit, Description FROM kb_Buildings_Blueprints WHERE Building = ?""",
-            (building,))
+            """SELECT Full_Name, Type, Subtype, Quality, Build_Points, Lots, Economy, Loyalty, Stability, Fame, Unrest, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Settlement_Limit, District_Limit, Description, Upgrade, Discount, Tier FROM kb_Buildings_Blueprints WHERE Full_Name = ? OR Type = ?""",
+            (building, building))
         building_info = await cursor.fetchone()
         if building_info is not None:
             return BuildingInfo(*building_info)
@@ -691,7 +775,7 @@ async def fetch_hex_improvement(
     async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
         cursor = await db.cursor()
         await cursor.execute(
-            """SELECT Improvement, Road_Multiplier, Build_Points, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation, Cavernous, Coastline, Desert, Forest, Hills, Jungle, Marsh, Mountains, Plains, Water FROM kb_Hexes_Improvements WHERE Improvement = ?""",
+            """SELECT Full_name, Name, Subtype, Quality, Build_Points, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation, Cavernous, Coastline, Desert, Forest, Hills, Jungle, Marsh, Mountains, Plains, Water, Source, Size FROM kb_Hexes_Improvements WHERE Improvement = ?""",
             (improvement,))
         improvement_info = await cursor.fetchone()
         if improvement_info is not None:
@@ -785,27 +869,18 @@ async def claim_hex(
         guild_id: int,
         author: int,
         kingdom: str,
-        hex_terrain: str) -> str:
+        hex_id: int) -> str:
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("SELECT Kingdom FROM kb_hexes WHERE Hex_Terrain = ? and Improvement is Null",
-                                 (hex_terrain,))
-            hex_info = await cursor.fetchone()
-            if hex_info is not None:
-                await cursor.execute(
-                    "Update kb_hexes set Amount = Amount + 1 WHERE Hex_Terrain = ? and improvement is Null",
-                    (hex_terrain,))
-            else:
-                await cursor.execute("INSERT INTO kb_hexes (Kingdom, Hex_Terrain, Amount) VALUES (?, ?, 1)",
-                                     (kingdom, hex_terrain))
+            await cursor.execute("Update KB_Hexes set Kingdom = ? WHERE Hex_ID = ?", (kingdom, hex_id))
             await cursor.execute("UPDATE kb_Kingdoms SET Size = Size + 1, Control_DC = Control_DC + 1 WHERE Kingdom = ?",
                                  (kingdom,))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                (author, datetime.datetime.now(), "Hexes", "Claim", f"Claimed the hex of {hex_terrain}"))
+                (author, datetime.datetime.now(), "Hexes", "Claim", f"Claimed the hex of {hex_id}"))
             await db.commit()
-            return f"The hex of {hex_terrain} has been claimed by {kingdom}."
+            return f"The hex of {hex_id} has been claimed by {kingdom}."
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error claiming hex: {e}")
         return "An error occurred while claiming the hex."
@@ -815,81 +890,85 @@ async def relinquish_hex(
         guild_id: int,
         author: int,
         kingdom: str,
-        hex_terrain: str) -> str:
+        hex_id: int) -> str:
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("SELECT Kingdom FROM kb_hexes WHERE Hex_Terrain = ? and Improvement is Null",
-                                 (hex_terrain,))
-            hex_info = await cursor.fetchone()
-            if hex_info is None:
-                return "The hex does not exist."
-            await cursor.execute("Update kb_hexes set Amount = Amount - 1 WHERE Hex_Terrain = ? and improvement is Null",
-                                 (hex_terrain,))
+            await cursor.execute("Update kb_hexes set Kingdom = Null WHERE Hex_ID = ? and Kingdom = ?", (hex_id, kingdom))
             await cursor.execute("UPDATE kb_Kingdoms SET Size = Size - 1, Control_DC = Control_DC - 1 WHERE Kingdom = ?",
                                  (kingdom,))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                (author, datetime.datetime.now(), "Hexes", "relinquish", f"Unclaimed the hex of {hex_terrain}"))
+                (author, datetime.datetime.now(), "Hexes", "relinquish", f"Unclaimed the hex of {hex_id}"))
             await db.commit()
-            return f"The hex of {hex_terrain} has been unclaimed by {kingdom}."
+            return f"The hex of {hex_id} has been unclaimed by {kingdom}."
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error unclaiming hex: {e}")
         return "An error occurred while unclaiming the hex."
 
 
-async def add_improvement(
+async def add_an_improvement(
         guild_id: int,
-        author: int,
+        hex_id: int,
         kingdom: str,
-        hex_information: HexImprovementInfo,
-        hex_terrain: str
+        improvement: str,
+        amount: int,
+        build_points: int,
+        kingdom_size: int,
+        iscost: bool = True
 ) -> str:
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
+            await cursor.execute("SELECT Kingdom, Hex_Terrain, Farm, Ore, Stone, Wood FROM KB_Hexes WHERE ID = ?",
+                                 (hex_id,))
+            base_hex_info = await cursor.fetchone()
+            if not base_hex_info:
+                return f"The hex terrain of {hex_id} does not exist."
+            if base_hex_info['Kingdom'] != kingdom:
+                return f"The hex terrain of {hex_id} is not in the kingdom of {kingdom}."
             await cursor.execute(
-                "SELECT Amount FROM kb_hexes WHERE Hex_Terrain = ? and Improvement = Null",
-                (hex_terrain,))
+                """SELECT Full_name, Type, Subtype, Quality, Build_Points, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation, Cavernous, Coastline, Desert, Forest, Hills, Jungle, Marsh, Mountains, Plains, Water, Source, Size FROM kb_Hexes_Improvements WHERE full_name = ?""",
+                (improvement,))
+            improvement_info = await cursor.fetchone()
+            if not improvement_info:
+                return f"The improvement of {improvement} does not exist."
+            if improvement_info[f'{base_hex_info["Hex_Terrain"]}'] == 0:
+                return f"The improvement of {improvement} cannot be built on {base_hex_info['Hex_Terrain']}."
+            if improvement_info['Size'] > kingdom_size:
+                return f"The improvement of {improvement} requires a kingdom size of {improvement_info['Size']} or greater."
+            await cursor.execute("Select Sum(Amount) From KB_Hexes_Constructed where Type = ? and Hex_ID = ?",
+                                 (improvement_info['Type'], hex_id))
+            constructed = await cursor.fetchone()
+            constructed = constructed[0] if constructed[0] else 0
+            if constructed >= base_hex_info['Type']:
+                return f"The improvement of {improvement} has reached its maximum amount. \r\nIf it is a farm You may want to convert an existing improvement to a different type."
+            await cursor.execute("SELECT Amount FROM kb_hexes_constructed WHERE full_name = ? and Improvement = ?",
+                                    (improvement, hex_id))
             availability = await cursor.fetchone()
+            if iscost:
+                cost_modifier = improvement_info['Build_Points'] * improvement_info[f'{base_hex_info["Hex_Terrain"]}']
+                max_amount = min(base_hex_info[f'{improvement_info["Type"]}'] - constructed, amount, build_points // cost_modifier)
+                build_cost = max_amount * cost_modifier
+            else:
+                max_amount = min(base_hex_info[f'{improvement_info["Type"]}'] - constructed, amount)
+                build_cost = 0
+            await cursor.execute("Update Kingdoms Set Build_Points = Build_Points - ?, economy = economy + ?, Loyalty = loyalty + ?, Stability = stability + ?, Unrest = unrest + ? WHERE Kingdom = ?",
+                                 (build_cost, improvement_info['Economy'] * max_amount, improvement_info['Loyalty'] * max_amount, improvement_info['Stability'] * max_amount, improvement_info['Unrest'] * max_amount,  kingdom))
             if not availability:
-                return f"No kb_hexes of {hex_terrain} are available for improvement."
-            elif availability[0] == 1:
-                await cursor.execute(
-                    "DELETE FROM kb_hexes WHERE Hex_Terrain = ? and Improvement = Null",
-                    (hex_terrain,))
+                await cursor.execute("""
+                INSERT into KB_Hexes_Constructed(ID, Full_Name, Type, Subtype, Quality, Amount, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation) 
+                VALUES 
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (hex_id, improvement_info['Full_name'], improvement_info['Type'], improvement_info['Subtype'], improvement_info['Quality'], max_amount, improvement_info['Economy'], improvement_info['Loyalty'], improvement_info['Stability'], improvement_info['Unrest'], improvement_info['Consumption'], improvement_info['Defence'], improvement_info['Taxation']))
             else:
                 await cursor.execute(
-                    "UPDATE kb_hexes SET Amount = Amount - 1 WHERE Hex_Terrain = ? and Improvement = Null",
-                    (hex_terrain,))
-            await cursor.execute("SELECT Amount FROM kb_hexes WHERE Hex_Terrain = ? and Improvement = ?",
-                                 (hex_terrain, hex_information.improvement))
-            hex_info = await cursor.fetchone()
-            if not hex_info:
-                await cursor.execute(
-                    "INSERT INTO kb_hexes (Kingdom, Hex_Terrain, Amount, Improvement, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        kingdom, hex_terrain, hex_information.improvement, hex_information.economy,
-                        hex_information.loyalty,
-                        hex_information.stability, hex_information.unrest, hex_information.consumption,
-                        hex_information.defence, hex_information.taxation))
-            else:
-                await cursor.execute(
-                    "UPDATE kb_hexes SET Amount = Amount + 1 WHERE Hex_Terrain = ? and Improvement = ?",
-                    (hex_terrain, hex_information.improvement))
-            await cursor.execute(
-                "Update kb_Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ?, Consumption = Consumption + ? WHERE Kingdom = ?",
-                (hex_information.economy, hex_information.loyalty, hex_information.stability, hex_information.unrest,
-                 hex_information.consumption, hex_information.defence, hex_information.taxation, kingdom))
-            await cursor.execute(
-                "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
-                (author, datetime.datetime.now(), "Hexes", "Add Improvement",
-                 f"Added the improvement of {hex_information.improvement} to the hex of {hex_terrain}"))
-            await db.commit()
-            return f"The improvement of {hex_information.improvement} has been added to the hex of {hex_terrain}."
+                    "UPDATE kb_hexes_constructed SET Amount = Amount + ? WHERE Full_Name = ? and ID = ?",
+                    (max_amount, improvement, hex_id))
+            return f"The improvement of {improvement} has been added to the hex of {hex_id}."
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error adding improvement: {e}")
-        return "An error occurred while adding the improvement."
+        return f"An error occurred while adding the improvement. {e}"
 
 
 async def remove_improvement(
@@ -897,38 +976,78 @@ async def remove_improvement(
         author: int,
         kingdom: str,
         hex_information: HexImprovementInfo,
-        hex_terrain: str
+        hex_id: int,
+        amount: int
 ) -> str:
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute(
-                "SELECT Amount FROM kb_hexes WHERE Hex_Terrain = ? and Improvement = ?",
-                (hex_terrain, hex_information.improvement))
+                "SELECT Amount FROM kb_hexes_constructed WHERE ID = ? and Full_Name = ?",
+                (hex_id, hex_information.full_name))
             availability = await cursor.fetchone()
             if not availability:
-                return f"No kb_hexes of {hex_terrain} have the improvement of {hex_information.improvement}."
-            elif availability[0] == 1:
+                return f"Hex {hex_id} has no the improvements of {hex_information.improvement}."
+            amount = min(amount, availability[0])
+            if availability[0] == amount:
                 await cursor.execute(
                     "DELETE FROM kb_hexes WHERE Hex_Terrain = ? and Improvement = ?",
-                    (hex_terrain, hex_information.improvement))
+                    (hex_id, hex_information.full_name))
             else:
                 await cursor.execute(
-                    "UPDATE kb_hexes SET Amount = Amount - 1 WHERE Hex_Terrain = ? and Improvement = ?",
-                    (hex_terrain, hex_information.improvement))
+                    "UPDATE kb_hexes SET Amount = Amount - ? WHERE ID = ? and Full_Name = ?",
+                    (amount, hex_id, hex_information.full_name))
             await cursor.execute(
-                "Update kb_Kingdoms SET Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ?, Consumption = Consumption - ? WHERE Kingdom = ?",
-                (hex_information.economy, hex_information.loyalty, hex_information.stability, hex_information.unrest,
+                "Update kb_Kingdoms SET size = size - ?, Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Kingdom = ?",
+                (amount, amount * hex_information.economy, amount * hex_information.loyalty, amount * hex_information.stability, amount * hex_information.unrest,
                  hex_information.consumption, kingdom))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
                 (author, datetime.datetime.now(), "Hexes", "Remove Improvement",
-                 f"Removed the improvement of {hex_information.improvement} from the hex of {hex_terrain}"))
+                 f"Removed the improvement of {hex_information.improvement} from the hex of {hex_id}"))
             await db.commit()
-            return f"The improvement of {hex_information.improvement} has been removed from the hex of {hex_terrain}."
+            return f"The improvement of {hex_information.improvement} has been removed from the hex of {hex_id}."
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error removing improvement: {e}")
         return "An error occurred while removing the improvement."
+
+async def repurpose_an_improvement(
+        guild_id: int,
+        hex_id: int,
+        old_full_name: str,
+        new_full_name: str,
+        amount: int):
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("Select Amount from KB_Hexes_Constructed where Full_Name = ? and id = ?", (old_full_name, hex_Id))
+            availability = await cursor.fetchone()
+            if not availability:
+                return f"No improvements of {old_full_name} are present."
+            amount = min(amount, availability[0])
+            await cursor.execute("Select Full_Name from KB_Hexes_Improvements where Full_Name = ? and id = ?", (new_full_name,hex_id))
+            new_improvement = await cursor.fetchone()
+            if not new_improvement:
+                return f"No improvements of {new_full_name} are present."
+            await cursor.execute("Select Amount from KB_Hexes_Constructed where Full_Name = ?", (new_full_name,))
+            new_availability = await cursor.fetchone()
+            if availability[0] == amount and not new_availability:
+                await cursor.execute("UPDATE KB_Hexes_Constructed set Full_Name = ? where Full_Name = ? and id = ?", (new_full_name, old_full_name, hex_id))
+            elif availability[0] == amount and new_availability:
+                await cursor.execute("UPDATE KB_Hexes_Constructed set Amount = Amount + ? where Full_Name = ? and id = ?", (amount, new_full_name, hex_id))
+                await cursor.execute("DELETE from KB_Hexes_Constructed where Full_Name = ? and id = ?", (old_full_name,hex_id))
+            elif availability[0] != amount and not new_availability:
+                await cursor.execute("UPDATE KB_Hexes_Constructed set Amount = Amount - ? where Full_Name = ? and id = ?", (amount, old_full_name, hex_id))
+                await cursor.execute("""INSERT into KB_Hexes_Constructed (ID, Full_Name, Type, Subtype, Quality, Amount, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation)
+                SELECT ?, full_name, Type, Subtype, Quality, ?, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation FROM KB_Hexes_Improvements where Full_Name = ?""", (hex_id, amount, new_full_name))
+            else:
+                await cursor.execute("UPDATE KB_Hexes_Constructed set Amount = Amount + ? where Full_Name = ? and id = ?", (amount, new_full_name, hex_id))
+                await cursor.execute("UPDATE KB_Hexes_Constructed set Amount = Amount - ? where Full_Name = ? and id = ?", (amount, old_full_name, hex_id))
+            await db.commit()
+            return f"{amount} improvements of {old_full_name} have been repurposed to {new_full_name}."
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"Error repurposing improvement: {e}")
+        return "An error occurred while repurposing the improvement."
 
 
 async def add_building(
@@ -949,18 +1068,18 @@ async def add_building(
                 await cursor.execute(
                     """INSERT INTO Buildings (
                     Kingdom, Settlement, 
-                    Building, Constructed, Lots, 
+                    Full_Name, Type, Subtype, Constructed, Lots, 
                     Economy, Loyalty, Stability, 
                     Fame, Unrest, Corruption, Crime, Productivity, Law, Lore, Society, 
-                    Danger, Defence, Base_Value, Spellcasting, Supply) 
+                    Danger, Defence, Base_Value, Spellcasting, Supply, Discounted) 
                     VALUES 
                     (?, ?,
                     ?, ?,
                     ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?)""",
+                    ?, ?, ?, ?, ?, 0)""",
                     (kingdom, settlement,
-                     building_info.building, amount, building_info.lots,
+                     building_info.full_name, building_info.type, building_info.subtype, amount, building_info.lots,
                      building_info.economy, building_info.loyalty, building_info.stability,
                      building_info.fame, building_info.unrest, building_info.corruption, building_info.crime,
                      building_info.productivity, building_info.law, building_info.lore, building_info.society,
@@ -969,7 +1088,7 @@ async def add_building(
             else:
                 await cursor.execute(
                     "Update Buildings Set Constructed = Constructed + ? WHERE Building = ? and Settlement = ?",
-                    (amount, building_info.building, settlement))
+                    (amount, building_info.full_name, settlement))
             new_population_adjustment = amount * building_info.lots * 250
             new_lots_adjustment = amount * building_info.lots
             new_dc_adjustment = math.floor((size + new_lots_adjustment) / 36) - math.floor(size / 36)
@@ -984,7 +1103,7 @@ async def add_building(
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
                 (author, datetime.datetime.now(), "Buildings", "Add",
-                 f"Added the building of {building_info.building} to the settlement of {settlement}"))
+                 f"Added the building of {building_info.full_name} to the settlement of {settlement}"))
             await db.commit()
             return f"{amount} building(s) of {building_info.building} have been added. Costing {building_info.build_points * amount} build points."
     except (aiosqlite.Error, TypeError, ValueError) as e:
@@ -1039,25 +1158,24 @@ async def remove_building(
         return "An error occurred while removing the building.", 0
 
 
-async def claim_settlement(
+async def claim_a_settlement(
         guild_id: int,
         author: int,
         kingdom: str,
-        settlement: str) -> str:
+        settlement: str,
+        hex_id: int) -> str:
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("SELECT Kingdom FROM kb_settlements WHERE Settlement = ?", (settlement,))
-            settlement_info = await cursor.fetchone()
-            if settlement_info is not None:
-                return "The settlement is already claimed."
+
             await cursor.execute(
-                "INSERT INTO kb_settlements (Kingdom, Settlement, Size, Population, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Decay) VALUES (?, ?, 1, 250, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)",
-                (kingdom, settlement))
+                "INSERT INTO kb_settlements (Kingdom, Settlement, Size, Population, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply, Decay, hex_id) VALUES (?, ?, 1, 250, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?)",
+                (kingdom, settlement, hex_id))
             await cursor.execute(
                 "INSERT INTO kb_settlements_Custom (Kingdom, Settlement, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply) VALUES (?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)",
                 (kingdom, settlement))
             await cursor.execute("UPDATE kb_Kingdoms SET Control_DC = Control_DC + 1 WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("UPDATE KB_Hexes set IsTown = 1 WHERE ID = ?", (hex_id,))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
                 (author, datetime.datetime.now(), "kb_settlements", "Claim", f"Claimed the settlement of {settlement}"))
@@ -1076,7 +1194,7 @@ async def relinquish_settlement(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("SELECT Kingdom FROM kb_settlements WHERE Settlement = ?", (settlement,))
+            await cursor.execute("SELECT Kingdom, Hex_ID FROM kb_settlements WHERE Settlement = ?", (settlement,))
             settlement_info = await cursor.fetchone()
             if settlement_info is None:
                 return "The settlement is not claimed."
@@ -1097,6 +1215,7 @@ async def relinquish_settlement(
             await cursor.execute("DELETE FROM Buildings WHERE Kingdom = ? and Settlement = ?", (kingdom, settlement))
             await cursor.execute("DELETE FROM kb_settlements WHERE Settlement = ?", (settlement,))
             await cursor.execute("DELETE FROM kb_settlements_Custom WHERE Settlement = ?", (settlement,))
+            await cursor.execute("UPDATE KB_Hexes set IsTown = 0 WHERE ID = ?", (settlement_info[1],))
             await cursor.execute("UPDATE kb_Kingdoms SET Control_DC = Control_DC - 1 - ? WHERE Kingdom = ?",
                                  (control_dc, kingdom))
             await cursor.execute(
@@ -1140,11 +1259,13 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
     @kingdom_group.command(name="create", description="Create a kingdom")
     @app_commands.autocomplete(government=government_autocompletion)
     @app_commands.autocomplete(alignment=alignment_autocomplete)
+    @app_commands.autocomplete(region=shared_functions.region_autocomplete)
     async def create(
             self,
             interaction: discord.Interaction,
             kingdom: str,
             password: str,
+            region: str,
             government: str,
             alignment: str):
         """This creates allows a player to create a new kingdom"""
@@ -1157,6 +1278,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 kingdom=kingdom,
                 alignment=alignment,
                 government=government,
+                region=region,
                 password=password)
             await interaction.followup.send(content=kingdom_create)
         except Exception as e:
@@ -1434,13 +1556,13 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
     @hex_group.command(name="claim", description="Claim a hex for a kingdom")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
     @app_commands.autocomplete(hex_terrain=hex_terrain_autocomplete)
-    async def claim(self, interaction: discord.Interaction, kingdom: str, password: str, hex_terrain: str):
+    async def claim(self, interaction: discord.Interaction, kingdom: str, password: str, hex_id: int):
         """This command is used to claim a hex for a kingdom"""
         await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password, Region FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1449,13 +1571,19 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 if not valid_password:
                     await interaction.followup.send(content="The password provided is incorrect.")
                     return
-                await cursor.execute("SELECT Hex_Terrain FROM AA_Hex_Terrains WHERE Hex_Terrain = ?", (hex_terrain,))
+                await cursor.execute("SELECT Kingdom, Region FROM KB_Hexes WHERE ID = ?", (hex_id,))
                 hex_results = await cursor.fetchone()
                 if not hex_results:
-                    await interaction.followup.send(content=f"The hex terrain of {hex_terrain} does not exist.")
+                    await interaction.followup.send(content=f"The hex of {hex_id} does not exist.")
+                    return
+                elif hex_results[0]:
+                    await interaction.followup.send(content=f"The hex of {hex_id} is already claimed by {hex_results[0]}.")
+                    return
+                elif hex_results[1] != kingdom_results[1]:
+                    await interaction.followup.send(content=f"The hex of {hex_id} is not in the kingdom's region of {kingdom_results[1]}.")
                     return
                 status = await claim_hex(guild_id=interaction.guild_id, author=interaction.user.id, kingdom=kingdom,
-                                         hex_terrain=hex_terrain)
+                                         hex_id=hex_id)
                 await interaction.followup.send(content=status)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"Error claiming hex: {e}")
@@ -1464,7 +1592,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
     @hex_group.command(name="relinquish", description="relinquish a hex for a kingdom")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
     @app_commands.autocomplete(hex_terrain=hex_terrain_autocomplete)
-    async def relinquish_hex(self, interaction: discord.Interaction, kingdom: str, password: str, hex_terrain: str):
+    async def relinquish_hex(self, interaction: discord.Interaction, kingdom: str, password: str, hex_id: int):
         """This command is used to relinquish a hex for a kingdom"""
         await interaction.response.defer(thinking=True)
         try:
@@ -1479,12 +1607,12 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 if not valid_password:
                     await interaction.followup.send(content="The password provided is incorrect.")
                     return
-                await cursor.execute("SELECT Hex_Terrain FROM AA_Hex_Terrains WHERE Hex_Terrain = ?", (hex_terrain,))
+                await cursor.execute("SELECT Hex_ID FROM KB_Hexes WHERE Hex_ID = ? and Kingdom = ?", (hex_id, kingdom))
                 hex_results = await cursor.fetchone()
                 if not hex_results:
-                    await interaction.followup.send(content=f"The hex terrain of {hex_terrain} does not exist.")
+                    await interaction.followup.send(content=f"The hex terrain of {hex_id} does not exist.")
                     return
-                status = await relinquish_hex(interaction.guild_id, interaction.user.id, kingdom, hex_terrain)
+                status = await relinquish_hex(interaction.guild_id, interaction.user.id, kingdom, hex_id)
                 await interaction.followup.send(content=status)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"Error unclaiming hex: {e}")
@@ -1494,28 +1622,39 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
     @app_commands.autocomplete(hex_terrain=hex_terrain_autocomplete)
     @app_commands.autocomplete(improvement=hex_improvement_autocomplete)
-    async def add_improvement(self, interaction: discord.Interaction, kingdom: str, password: str, hex_terrain: str,
-                              improvement: str):
+    async def add_improvement(
+            self,
+            interaction: discord.Interaction,
+            kingdom: str,
+            password: str,
+            hex_id: int,
+            improvement: str,
+            amount: int):
         """This command is used to add an improvement to a hex"""
         await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                db.row_factory = aiosqlite.Row
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password, Build_Points, Size FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
                     return
-                valid_password = validate_password(password, kingdom_results[0])
+                valid_password = validate_password(password, kingdom_results['Password'])
                 if not valid_password:
                     await interaction.followup.send(content="The password provided is incorrect.")
                     return
-                hex_information = await fetch_hex_improvement(interaction.guild_id, improvement)
-                if not hex_information:
-                    await interaction.followup.send(content=f"The improvement of {improvement} does not exist.")
-                    return
-                status = await add_improvement(interaction.guild_id, interaction.user.id, kingdom, hex_information,
-                                               hex_terrain)
+
+                status = await add_an_improvement(
+                    guild_id=interaction.guild_id,
+                    hex_id=hex_id,
+                    kingdom=kingdom,
+                    improvement=improvement,
+                    amount=amount,
+                    build_points=kingdom_results['Build_Points'],
+                    kingdom_size=kingdom_results['Size']
+                )
                 await interaction.followup.send(content=status)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"Error adding improvement: {e}")
@@ -1525,8 +1664,13 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
     @app_commands.autocomplete(hex_terrain=hex_terrain_autocomplete)
     @app_commands.autocomplete(improvement=hex_improvement_autocomplete)
-    async def remove_improvement(self, interaction: discord.Interaction, kingdom: str, password: str, hex_terrain: str,
-                                 improvement: str):
+    async def remove_improvement(
+            self,
+            interaction: discord.Interaction,
+            kingdom: str,
+            password: str,
+            hex_terrain: str,
+            improvement: str):
         """This command is used to remove an improvement from a hex"""
         await interaction.response.defer(thinking=True)
         try:
@@ -1552,9 +1696,50 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
             logging.exception(f"Error removing improvement: {e}")
             await interaction.followup.send(content="An error occurred while removing an improvement.")
 
+    @hex_group.command(name='repurpose', description='Change the behavior of an improvement')
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    @app_commands.autocomplete(original_purpose=improvement_subtype_autocomplete)
+    @app_commands.autocomplete(new_purpose=improvement_subtype_autocomplete)
+    async def repurpose_improvement(
+            self,
+            interaction: discord.Interaction,
+            hex_id: int,
+            kingdom: str,
+            original_purpose: str,
+            new_purpose: str,
+            password: str,
+            amount: int):
+        """This command is used to repurpose an improvement in a hex"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                status = await repurpose_an_improvement(
+                    guild_id=interaction.guild_id,
+                    hex_id=hex_id,
+                    new_full_name=new_purpose,
+                    old_full_name=original_purpose,
+                    amount=amount
+                )
+                await interaction.followup.send(content=status)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error repurposing improvement: {e}")
+            await interaction.followup.send(content="An error occurred while repurposing an improvement.")
+
+
+
     @settlement_group.command(name="claim", description="Claim a settlement for a kingdom")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
-    async def claim_settlement(self, interaction: discord.Interaction, kingdom: str, password: str, settlement: str):
+    async def claim_settlement(self, interaction: discord.Interaction, kingdom: str, password: str, settlement: str, hex_id: int):
         """This command is used to claim a settlement for a kingdom"""
         await interaction.response.defer(thinking=True)
         try:
@@ -1569,8 +1754,26 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 if not valid_password:
                     await interaction.followup.send(content="The password provided is incorrect.")
                     return
-            status = await claim_settlement(interaction.guild_id, interaction.user.id, kingdom, settlement)
-            await interaction.followup.send(content=status)
+
+                await cursor.execute("SELECT Kingdom FROM kb_settlements WHERE Settlement = ?", (settlement,))
+                settlement_info = await cursor.fetchone()
+                if settlement_info is not None:
+                    await interaction.followup.send(content="A settlement with this name is already claimed.")
+                await cursor.execute("SELECT ID, IsTown from KB_Hexes where ID = ?", (hex_id,))
+                hex_results = await cursor.fetchone()
+                if not hex_results:
+                    await interaction.followup.send(content=f"The hex of {hex_id} does not exist.")
+                    return
+                if hex_results[1]:
+                    await interaction.followup.send(content="The hex is already a town.")
+                    return
+                await cursor.execute("Select Count(Full_Name) from KB_Hexes_Constructed Where ID = ?", (hex_id,))
+                improvements = await cursor.fetchone()
+                if improvements[0] > 0:
+                    await interaction.followup.send(content="The hex has improvements built upon it and cannot share them with a settlement!")
+                    return
+                status = await claim_a_settlement(interaction.guild_id, interaction.user.id, kingdom, settlement, hex_id)
+                await interaction.followup.send(content=status)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"Error claiming settlement: {e}")
             await interaction.followup.send(content="An error occurred while claiming a settlement.")
@@ -1625,14 +1828,43 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 if settlement_info is None:
                     await interaction.followup.send(content="The settlement is not claimed.")
                     return
+
+                await cursor.execute("SELECT Kingdom from KB_Buildings_Permits where Kingdom = ? AND Building_Name = ?", (kingdom, building))
+                permits = await cursor.fetchone()
+                if permits is None:
+                    await interaction.followup.send(content="The kingdom does not have a permit for this building.")
+                    return
                 building_info = await fetch_building(interaction.guild_id, building)
                 cost = building_info.build_points * amount
+                await cursor.execute("SELECT SUM(Amount * Quality) from KB_Buildings where Kingdom = ? and Settlement = ? and Subtype = 'Housing'", (kingdom, settlement))
+                supply = await cursor.fetchone()
+                if settlement_info[0] + (amount * building_info.supply) > supply[0]:
+                    await interaction.followup.send(
+                        content=f"The settlement does not have enough housing. it has {supply[0]} and needs {settlement_info[0] + (amount * building_info.supply)}.")
+                    return
+                await cursor.execute("""
+                SELECT Build.Full_Name, sum(Build.amount), sum(Build.discounted) from KB_Buildings Build 
+                left join KB_Buildings_Blueprints Blue on Blue.Full_Name = Build.Full_Name 
+                where Build.Kingdom = ? and Build.Settlement = ? and Build.Full_Name = ? and Blue.discount like ?
+                group by Build.Full_Name""", (kingdom, settlement, building, f"%{building_info.type}%"))
+                discount_info = await cursor.fetchall()
+                discount_count = amount
+                for discount in discount_info:
+                    (full_name, amount_built, discounted) = discount
+                    discountable = amount_built - discounted
+                    discounted_change = min(discountable, discount_count)
+                    discount_count -= min(discountable, discount_count)
+                    await cursor.execute("UPDATE KB_Buildings SET Discounted = Discounted + ? WHERE Kingdom = ? and Settlement = ? and Full_Name = ?", (discounted_change, kingdom, settlement, full_name))
+                    if discount_count == 0:
+                        break
+                cost -= building_info.build_points * .5 * (amount - discount_count)
                 if cost > kingdom_results[1]:
                     await interaction.followup.send(
-                        fcontent="The kingdom does not have enough build points. it has {kingdom_results[1]} and needs {cost}.")
+                        content=f"The kingdom does not have enough build points. it has {kingdom_results[1]} and needs {cost}.")
                     return
                 await cursor.execute("UPDATE kb_Kingdoms SET bp = bp - ? WHERE Kingdom = ?", (cost, kingdom))
                 await db.commit()
+
                 status = await add_building(guild_id=interaction.guild_id, author=interaction.user.id, kingdom=kingdom,
                                             settlement=settlement, building_info=building_info, amount=amount,
                                             size=settlement_info[0])
@@ -1676,6 +1908,104 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"Error destroying building: {e}")
             await interaction.followup.send(content="An error occurred while destroying a building.")
+
+    @settlement_group.command(name="Upgrade", description="upgrade a building in a settlement")
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    @app_commands.autocomplete(settlement=settlement_autocomplete)
+    @app_commands.autocomplete(building=blueprint_upgrade_autocomplete)
+    async def upgrade_building(
+            self, interaction: discord.Interaction, kingdom: str, password: str, settlement: str,
+            building: str, amount: int):
+        """This command is used to upgrade a building in a settlement"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password, BP FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                await cursor.execute("Select Amount from KB_Buildings where Kingdom = ? and Settlement = ? and Full_Name = ?", (kingdom, settlement, building))
+                settlement_info = await cursor.fetchone()
+                if not settlement_info:
+                    await interaction.followup.send(content=f"Settlement of {settlement} has no {building}s built!")
+                    return
+                amount = min(amount, settlement_info[0])
+                old_building_info = await fetch_building(interaction.guild_id, building)
+                new_building_info = await fetch_building(interaction.guild_id, old_building_info.upgrade)
+                cost = (new_building_info.build_points - old_building_info.build_points) * amount
+                if cost > kingdom_results[1]:
+                    await interaction.followup.send(
+                        content=f"The kingdom does not have enough build points. it has {kingdom_results[1]} and needs {cost}.")
+                    return
+                await cursor.execute("UPDATE kb_Kingdoms SET BP = BP - ? WHERE Kingdom = ?", (cost, kingdom))
+                await remove_building(guild_id=interaction.guild_id, author=interaction.user.id, kingdom=kingdom,
+                                      settlement=settlement, building_info=old_building_info, amount=amount)
+                status = await add_building(guild_id=interaction.guild_id, author=interaction.user.id, kingdom=kingdom,
+                                            settlement=settlement, building_info=new_building_info, amount=amount,
+                                            size=settlement_info[0])
+                await interaction.followup.send(content=status)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error upgrading building: {e}")
+            await interaction.followup.send(content="An error occurred while upgrading a building.")
+
+
+
+    @settlement_group.command(name="Repurpose", description="Change the behavior of a building")
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    @app_commands.autocomplete(settlement=settlement_autocomplete)
+    @app_commands.autocomplete(old_purpose=blueprint_repurpose_autocomplete)
+    @app_commands.autocomplete(new_purpose=blueprint_repurpose_autocomplete)
+    async def repurpose_building(
+            self, interaction: discord.Interaction, kingdom: str, password: str, settlement: str,
+            old_purpose: str, new_purpose: str, amount: int):
+        """This command is used to repurpose a building in a settlement"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password, BP FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                await cursor.execute("Select Amount from KB_Buildings where Kingdom = ? and Settlement = ? and Full_Name = ?", (kingdom, settlement, old_purpose))
+                settlement_info = await cursor.fetchone()
+                if not settlement_info:
+                    await interaction.followup.send(content=f"Settlement of {settlement} has no {old_purpose} buildings built!")
+                    return
+                amount = min(amount, settlement_info[0])
+                await cursor.execute("Select Amount from KB_Buildings where Kingdom = ? and Settlement = ? and Full_Name = ?", (kingdom, settlement, new_purpose))
+                new_building_count = await cursor.fetchone()
+                old_building_info = await fetch_building(interaction.guild_id, old_purpose)
+                new_building_info = await fetch_building(interaction.guild_id, new_purpose)
+                if old_building_info.type != new_building_info.type:
+                    await interaction.followup.send(content=f"Building types do not match!")
+                    return
+                if not new_building_count and amount == settlement_info[0]:
+                    await cursor.execute("UPDATE KB_Buildings Set Full_Name = ?, Subtype = ? where Kingdom = ? and Settlement = ? and Full_Name = ?", (new_purpose, new_building_info.subtype, kingdom, settlement, old_purpose))
+                elif new_building_count and amount == settlement_info[0]:
+                    await cursor.execute("UPDATE KB_Buildings Set Amount = Amount + ? where Kingdom = ? and Settlement = ? and Full_Name = ?", (amount, kingdom, settlement, new_purpose))
+                    await cursor.execute("DELETE FROM KB_Buildings where Kingdom = ? and Settlement = ? and Full_Name = ?", (kingdom, settlement, old_purpose))
+                else:
+                    await cursor.execute("UPDATE KB_Buildings Set Amount = Amount + ? where Kingdom = ? and Settlement = ? and Full_Name = ?", (amount, kingdom, settlement, new_purpose))
+                    await cursor.execute("UPDATE KB_Buildings Set Amount = Amount - ? where Kingdom = ? and Settlement = ? and Full_Name = ?", (amount, kingdom, settlement, old_purpose))
+                await interaction.followup.send(content=f"{amount} {old_purpose} buildings have been repurposed into {new_purpose}!")
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error repurposing building: {e}")
+            await interaction.followup.send(content="An error occurred while repurposing a building.")
+
+
+
 
 
 class KingdomView(shared_functions.ShopView):

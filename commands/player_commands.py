@@ -2042,6 +2042,11 @@ async def player_signup(
                  mythweavers, image_link, color,
                  description, titles,
                  essence, oath) = character_info
+                await cursor.execute("SELECT Character_Name from Sessions_Signups WHERE Character_Name = ? and Session_ID = ?",
+                                     (character_name,session_id))
+                character_present = await cursor.fetchone()
+                if character_present:
+                    return False
 
                 await cursor.execute(
                     """INSERT INTO Sessions_Signups (Session_ID, Session_Name, Player_Name, Player_ID, Character_Name, Level, Effective_Wealth, Tier, Notification_Warning) Values (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -2329,6 +2334,7 @@ class PlayerCommands(commands.Cog, name='Player'):
         description='Commands related to setting your availability',
         parent=player_group
     )
+
 
     @player_group.command(name='help', description="Get help with player commands")
     async def help(self, interaction: discord.Interaction):

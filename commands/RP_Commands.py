@@ -567,12 +567,15 @@ class RPCommands(commands.Cog, name='RP'):
     @roleplay_group.command(name="balance", description="Check your roleplay balance")
     async def roleplay_balance(self, interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
+
         async with roleplay_info_cache.lock:
             if interaction.guild.id not in roleplay_info_cache.cache:
                 await add_guild_to_rp_cache(interaction.guild.id)
             settings = roleplay_info_cache.cache[interaction.guild.id]
+
             reward_name = settings.reward_name if settings.reward_name else "coins"
             reward_emoji = settings.reward_emoji if settings.reward_emoji else "<:RPCash:884166313260503060>"
+
         user_id = interaction.user.id
         async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
             cursor = await db.cursor()

@@ -1370,6 +1370,21 @@ def validate_worldanvil(url: str) -> Tuple[bool, str, int]:
         return False, "An error occurred during validation.", -1  # Exception case uses step indicator -1
 
 
+async def region_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:
+    data = []
+    async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+        cursor = await db.cursor()
+        current = unidecode(str.title(current))
+        await cursor.execute(
+            "SELECT Name from Regions WHERE Name LIKE ?",
+            (f"%{current}%",))
+        region_list = await cursor.fetchall()
+        for regions in region_list:
+            if current in regions[0]:
+                data.append(app_commands.Choice(name=f"{regions[0]}", value=regions[0]))
+    return data
+
+
 def validate_vtt(url: str) -> Tuple[bool, str, int]:
     """
     Validates a Virtual Tabletop (VTT) game link URL for platforms like Roll20 and Forge.

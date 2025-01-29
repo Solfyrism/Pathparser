@@ -102,7 +102,7 @@ async def session_reward_reversal(
                     """SELECT 
                     True_Character_Name, Oath, Level, Personal_Cap, Tier, 
                     Milestones, Trials, Gold, Gold_Value, Gold_Value_Max, 
-                    Essence, Fame, Prestige, Accepted_Date, Thread_ID FROM Player_Characters WHERE Character_Name = ? OR Nickname = ?""",
+                    Essence, Fame, Prestige, Accepted_Date, Thread_ID, Region FROM Player_Characters WHERE Character_Name = ? OR Nickname = ?""",
                     (character_name, character_name))
                 player_info = await cursor.fetchone()
 
@@ -112,7 +112,7 @@ async def session_reward_reversal(
                 else:
                     (true_character_name, oath, level, personal_cap, tier,
                      milestones, trials, gold, gold_value, gold_value_max,
-                     essence, fame, prestige, accepted_date, thread_id) = player_info
+                     essence, fame, prestige, accepted_date, thread_id, region) = player_info
 
                     try:
                         return_level = await character_commands.level_calculation(
@@ -127,7 +127,8 @@ async def session_reward_reversal(
                             deadly=0,
                             misc=-info_received_milestones,
                             author_id=interaction.user.id,
-                            character_name=character_name)
+                            character_name=character_name,
+                            region=region)
 
                     except character_commands.CalculationAidFunctionError as e:
                         return_level = f"An error occurred whilst adjusting levels for {character_name} \r\n"
@@ -287,7 +288,7 @@ async def session_reward_calculation(
             cursor = await conn.cursor()
 
             await cursor.execute(
-                "SELECT Player_ID, player_name, True_Character_Name, Oath, Level, Tier, Milestones, Trials, Gold, Gold_Value, Gold_Value_Max, Essence, Thread_ID, Accepted_Date, Fame, Prestige, Personal_Cap, Thread_ID FROM Player_Characters WHERE Character_Name = ? OR Nickname = ?",
+                "SELECT Player_ID, player_name, True_Character_Name, Oath, Level, Tier, Milestones, Trials, Gold, Gold_Value, Gold_Value_Max, Essence, Thread_ID, Accepted_Date, Fame, Prestige, Personal_Cap, Thread_ID, Region FROM Player_Characters WHERE Character_Name = ? OR Nickname = ?",
                 (character_name, character_name))
             player_info = await cursor.fetchone()
 
@@ -297,7 +298,7 @@ async def session_reward_calculation(
             else:
                 (player_id, player_name, true_character_name, oath, character_level, character_tier, milestones, trials,
                  gold, gold_value, gold_value_max,
-                 essence, thread_id, accepted_date, fame, prestige, personal_cap, thread_id) = player_info
+                 essence, thread_id, accepted_date, fame, prestige, personal_cap, thread_id, region) = player_info
 
                 try:
                     return_level = await character_commands.level_calculation(
@@ -312,7 +313,8 @@ async def session_reward_calculation(
                         deadly=session_base_info.rewarded_deadly,
                         misc=0,
                         author_id=interaction.user.id,
-                        character_name=character_name)
+                        character_name=character_name,
+                        region=region)
 
                 except character_commands.CalculationAidFunctionError as e:
                     return_level = f"An error occurred whilst adjusting levels for {character_name} \r\n"
@@ -1433,10 +1435,6 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                     else:
                         (session_name, play_location, hammer_time, game_link, session_thread) = session_info
                         hammer_validated = shared_functions.validate_hammertime(hammer_time)
-                        if not hammer_validated[0]:
-                            await interaction.followup.send(
-                                f"Issue with hammer time detected. hammer time was {hammer_time} \r\n {hammer_validated[1]}")
-                            return
                         if hammer_validated[1]:
                             hammer_times = hammer_validated[2]
                             (hammer_date, hammer_hour, hammer_until, hammer_time) = hammer_times

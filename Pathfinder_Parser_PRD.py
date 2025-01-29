@@ -120,11 +120,12 @@ async def on_ready():
     print("cogs added")
     await bot.tree.sync()
     print("tree synced.")
-    await reinstate_reminders(bot)
-    await reinstate_session_buttons(bot)
+
     await reinstate_cache(bot)
     await reinstate_rp_cache(bot)
+    await reinstate_reminders(bot)
     await shared_functions.config_cache.initialize_configuration(discord_bot=bot)
+    await reinstate_session_buttons(bot)
     await bot.loop.create_task(shared_functions.config_cache.refresh_cache_periodically(600, bot))
 
 
@@ -146,6 +147,14 @@ async def on_message(message):
         channel_id = message.channel.parent_id
     else:
         channel_id = None
+    try:
+        async with shared_functions.config_cache.lock:
+            configs = shared_functions.config_cache.cache[message.guild.id]
+            no_ping_role = configs.get('Do_Not_Ping')
+            no_ping_emoji = configs.get('Do_Not_Ping_React')
+    except:
+        logging.error("Error getting server configs")
+        pass
     # Check if the guild is in the cache
     async with shared_functions.approved_channel_cache.lock:
         if guild_id in shared_functions.approved_channel_cache.cache:
@@ -153,9 +162,31 @@ async def on_message(message):
             if channel_id in shared_functions.approved_channel_cache.cache[guild_id]:
                 logging.debug(f"Channel {channel_id} is approved for RP messages.")
                 await handle_rp_message(message)
+                if message.mentions:
+                    try:
+                        if no_ping_role:
+                            no_ping_role_flake = message.guild.get_role(no_ping_role)
+                            for member in message.mentions:
+                                if no_ping_role_flake in member.roles:
+                                    await message.add_reaction(no_ping_emoji)
+                                    break
+                    except:
+                        pass
+
             else:
                 logging.debug(f"Channel {channel_id} is not approved. Processing commands.")
                 random_number = random.randint(1, 50)
+                if message.mentions:
+                    try:
+                        if no_ping_role:
+                            no_ping_role_flake = message.guild.get_role(no_ping_role)
+                            for member in message.mentions:
+
+                                if no_ping_role_flake in member.roles:
+                                    await message.add_reaction(no_ping_emoji)
+                                    break
+                    except:
+                        pass
                 if 'einstein' in message.content.lower():
                     await message.channel.send(
                         "https://i.insider.com/641ca0f5d67fe70018a376ca?width=800&format=jpeg&auto=webp")

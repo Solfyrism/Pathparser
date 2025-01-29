@@ -111,7 +111,9 @@ async def level_calculation(
         deadly: int,
         misc: int,
         guild=None,
-        author_id=None
+        author_id=None,
+        region=None
+
 ) -> Tuple[int, int, int, int, int, int]:
     """
     Calculates the new level and milestone requirements for a character.
@@ -190,7 +192,7 @@ async def level_calculation(
 
             # If level_ranges is required and guild and author_id are provided
             if guild and author_id:
-                await level_ranges(cursor, guild, author_id, level, new_level)
+                await level_ranges(cursor, guild, author_id, level, new_level, region)
 
             return (
                 new_level,
@@ -209,7 +211,7 @@ async def level_calculation(
             f"Unexpected error in level calculation for character '{character_name}': {e}")
 
 
-async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: int, new_level: int) -> None:
+async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: int, new_level: int, region: str) -> None:
     try:
         await cursor.execute("SELECT Level, Level_Range_Name, Level_Range_ID FROM Milestone_System WHERE level = ?",
                              (new_level,))
@@ -247,6 +249,32 @@ async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: i
 
                         await member.remove_roles(old_level_range_role)
 
+                if region:
+                    await cursor.execute(
+                        "SELECT Min_Level, Max_Level, Role_ID FROM Regions_Level_Range WHERE Name = ? AND Min_Level <= ? AND Max_Level >= ?",
+                        (region, new_level, new_level))
+                    region_role = await cursor.fetchone()
+                    if region_role:
+                        (min_level, max_level, new_role_id) = region_role
+                        if level < min_level or level > max_level:
+                            region_role = guild.get_role(int(new_role_id))
+                            await member.add_roles(region_role)
+                            await cursor.execute("SELECT Min_level, Max_Level, Role_ID FROM Regions_Level_Range WHERE Name = ? and Min_Level <= ? and Max_Level >= ?",
+                                                 (region, level, level))
+                            old_region_role = await cursor.fetchone()
+                            if old_region_role:
+                                (min_level_old, max_level_old, old_region_role) = old_region_role
+                                await cursor.execute("""
+                                                    SELECT COUNT(*) AS Total_Characters,
+                                                    SUM(CASE WHEN level BETWEEN ? AND ? THEN 1 ELSE 0 END) AS Characters_In_Range
+                                                    FROM Player_Characters
+                                                    WHERE Player_ID = ? and Region = ?;""",
+                                                     (min_level_old, max_level_old, author_id, region))
+                                character_in_old_range = await cursor.fetchone()
+                                if character_in_old_range:
+                                    (total_characters, characters_in_range) = character_in_old_range
+                                    if not characters_in_range:
+                                        await member.remove_roles(guild.get_role(int(old_region_role[2])))
             except discord.Forbidden:
                 logging.error(f"Bot does not have permissions to add roles to <@{author_id}>")
                 return None
@@ -715,6 +743,7 @@ class CharacterCommands(commands.Cog, name='character'):
                 **/Character Pouch** - Consume gold pouches from your inventory to meet WPL. \n
                 **/Character Retire** - Retire a registered character. \n
                 **/Character Trialup** - Consume trial catch ups from your inventory to level up. \n
+                **/Character Move** - Move to a new region. \n
                 """, inline=False)
             embed.add_field(
                 name="**__Display Commands__**",
@@ -759,6 +788,84 @@ class CharacterCommands(commands.Cog, name='character'):
             await interaction.channel.send(embed=embed)
         finally:
             return
+
+    @character_group.command(name='move', description="Change Region")
+    @app_commands.autocomplete(region=shared_functions.region_autocomplete)
+    @app_commands.autocomplete(character=shared_functions.own_character_select_autocompletion)
+    async def change_region(self, interaction: discord.Interaction, region: str, character: str, reason: str):
+        await interaction.response.defer(thinking=True, ephemeral=False)
+        guild_id = interaction.guild_id
+        author_id = interaction.user.id
+        author_name = interaction.user.name
+        time = datetime.datetime.now()
+        try:
+            async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+                await cursor.execute("SELECT Player_ID, Character_Name, Level, Region FROM Player_Characters WHERE Character_Name = ? and Player_ID = ?", (character, author_id))
+                character_info = await cursor.fetchone()
+                if character_info is None:
+                    await interaction.followup.send(f"Character {character} not found")
+                    return
+                (player_id, character_name, level, old_region) = character_info
+                if old_region == region:
+                    await interaction.followup.send(f"Character {character} is already in {region}")
+                    return
+                await cursor.execute("SELECT Role_ID, Channel_id FROM Regions WHERE Name = ?", (region,))
+                region_role = await cursor.fetchone()
+                if region_role is None:
+                    await interaction.followup.send(f"Region {region} not found")
+                    return
+                await cursor.execute("SELECT Role_ID, Channel_id FROM Regions WHERE Name = ?", (old_region,))
+                old_region_role = await cursor.fetchone()
+                if old_region_role is not None:
+                    (old_role_id, old_channel) = old_region_role
+                    if old_channel is not None:
+                        old_text_channel = interaction.guild.get_channel(old_channel)
+                        if not old_text_channel:
+                            await interaction.guild.fetch_channel(old_channel)
+                        await old_text_channel.send(f"{datetime.date.today()}\r\nCharacter {character} moved to {region} by {author_name}\r\n{reason}")
+                    await cursor.execute(
+                        "SELECT Role_ID, Min_Level, Max_Level from Regions_Level_Range where Name = ? AND min_level <= ? AND max_level >= ?",
+                        (old_region, level, level))
+                    old_level_range = await cursor.fetchone()
+                    print(old_level_range)
+                    if old_level_range:
+                        (role_id, min_level_old, max_level_old) = old_level_range
+                    else:
+                        min_level_old = 0
+                        max_level_old = 0
+                    await cursor.execute("UPDATE Player_Characters SET Region = ? WHERE Character_Name = ?",
+                                         (region, character))
+                    await interaction.user.add_roles(interaction.guild.get_role(region_role[0]))
+                    await cursor.execute("""
+                    SELECT COUNT(*) AS Total_Characters,
+                    SUM(CASE WHEN level BETWEEN ? AND ? THEN 1 ELSE 0 END) AS Characters_In_Range
+                    FROM Player_Characters
+                    WHERE Player_ID = ? and Region = ?;""",
+                    (min_level_old, max_level_old, author_id, old_region))
+                    character_in_old_range = await cursor.fetchone()
+                    print(character_in_old_range)
+                    if character_in_old_range:
+                        (total_characters, characters_in_range) = character_in_old_range
+                        if not total_characters:
+                            await interaction.user.remove_roles(interaction.guild.get_role(old_region_role[0]))
+                        if not characters_in_range:
+                            await interaction.user.remove_roles(interaction.guild.get_role(old_level_range[0]))
+
+
+                await cursor.execute("SELECT Role_ID FROM Regions_Level_Range WHERE Name = ? AND Min_Level <= ? AND Max_Level >= ?", (region, level, level))
+                new_level_range = await cursor.fetchone()
+                if new_level_range:
+                    await interaction.user.add_roles(interaction.guild.get_role(new_level_range[0]))
+                await conn.commit()
+                new_text_channel = interaction.guild.get_channel(region_role[1])
+                if not new_text_channel:
+                    await interaction.guild.fetch_channel(region_role[1])
+                await new_text_channel.send(f"{datetime.date.today()}\r\nCharacter {character} moved from {old_region} to {region} by {interaction.user}\r\n{reason}")
+                await interaction.followup.send(f"Character {character} moved from {old_region} to {region}")
+        except aiosqlite.Error as e:
+            logging.exception(f"Error in character move for {character}: {e}")
+            await interaction.followup.send(f"Error in character move for {character}: {e}")
 
     @character_group.command(name='register', description='register a character')
     @app_commands.describe(oath="Determining future gold gain from sessions and gold claims.")
@@ -1290,7 +1397,7 @@ class CharacterCommands(commands.Cog, name='character'):
                 cursor = await conn.cursor()
                 try:
                     await cursor.execute(
-                        "SELECT Character_Name, Personal_Cap, Level, Milestones, tier, trials, Thread_ID FROM Player_Characters WHERE Player_Name = ? AND (Character_Name = ? OR Nickname = ?)",
+                        "SELECT Character_Name, Personal_Cap, Level, Milestones, tier, trials, Thread_ID, region FROM Player_Characters WHERE Player_Name = ? AND (Character_Name = ? OR Nickname = ?)",
                         (interaction.user.name, character_name, character_name))
                     player_info = await cursor.fetchone()
                     if player_info is None:
@@ -1301,7 +1408,7 @@ class CharacterCommands(commands.Cog, name='character'):
                     else:
                         server_max_level = await get_max_level(guild_id)
                         (character_name, personal_cap, level, starting_base, tier, trials,
-                         logging_thread_id) = player_info
+                         logging_thread_id, region) = player_info
                         base = starting_base
 
                         personal_cap = server_max_level if not personal_cap else personal_cap
@@ -1344,7 +1451,8 @@ class CharacterCommands(commands.Cog, name='character'):
                                         deadly=0,
                                         misc=0,
                                         author_id=interaction.user.id,
-                                        character_name=character_name
+                                        character_name=character_name,
+                                        region=region
                                     )
                                     level = new_level_info[0]
                                     base = new_level_info[1]
@@ -2143,7 +2251,7 @@ class CharacterCommands(commands.Cog, name='character'):
                     # Fetch character information
                 await cursor.execute(
                     """
-                    SELECT Character_Name, Milestones, Level, tier, Trials, Thread_ID
+                    SELECT Character_Name, Milestones, Level, tier, Trials, Thread_ID, Region
                     FROM Player_Characters
                     WHERE Player_Name = ? AND (Character_Name = ? OR Nickname = ?)
                     """,
@@ -2158,7 +2266,7 @@ class CharacterCommands(commands.Cog, name='character'):
                     )
                     return
 
-                (character_name_db, milestones, level, tier, trials, thread_id) = character_info
+                (character_name_db, milestones, level, tier, trials, thread_id, region) = character_info
 
                 # Update the personal cap in the database
                 await cursor.execute(
@@ -2189,7 +2297,8 @@ class CharacterCommands(commands.Cog, name='character'):
                             medium=0,
                             hard=0,
                             deadly=0,
-                            misc=0
+                            misc=0,
+                            region=region
                         )
 
                         # Check if level_result is a tuple
