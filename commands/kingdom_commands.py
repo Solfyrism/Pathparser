@@ -140,6 +140,34 @@ class HexImprovementInfo:
     size: int
 
 
+def safe_min(a, b):
+    """Safely add two values together, treating None as zero and converting to Decimal if necessary."""
+    # Treat None as zero
+    a = a if a is not None else 0
+    b = b if b is not None else 0
+
+    # If either value is a Decimal, convert both to Decimal
+    if isinstance(a, int) or isinstance(b, int):
+        a = int(a)
+        b = int(b)
+
+    return max(min(a, b), 0)
+
+
+def safe_sub(a, b):
+    """Safely add two values together, treating None as zero and converting to Decimal if necessary."""
+    # Treat None as zero
+    a = a if a is not None else 0
+    b = b if b is not None else 0
+
+    # If either value is a Decimal, convert both to Decimal
+    if isinstance(a, int) or isinstance(b, int):
+        a = int(a)
+        b = int(b)
+
+    return a - b
+
+
 # autocompletes functions for kingdom
 async def alignment_autocomplete(interaction: discord.Interaction, current: str
                                  ) -> typing.List[app_commands.Choice[str]]:
@@ -400,7 +428,7 @@ class LeadershipModifier(discord.ui.Select):
 class LeadershipView(discord.ui.View):
     def __init__(self, options, guild_id: int, user_id: int, kingdom: str, role: str,
                  character_name: str, additional: int, economy: float, loyalty: float,
-                 stability: float, hexes: int, modifier: int):
+                 stability: float, hexes: int, modifier: int, recipient_id: int):
         super().__init__()
         self.options = options  # Store options
         self.guild_id = guild_id
@@ -415,6 +443,7 @@ class LeadershipView(discord.ui.View):
         self.stability = stability
         self.stability_modified = 0
         self.hexes = hexes
+        self.recipient_id = recipient_id
         self.additional = additional
         self.modifier_selection_count = 0  # Counter for modifiers selected
         self.modifier = modifier
@@ -490,6 +519,7 @@ class LeadershipView(discord.ui.View):
                 character_name=self.character_name,
                 stat=self.attribute,
                 modifier=self.modifier,
+                player_id=self.recipient_id,
                 economy=self.modifier if self.economy_modified else 0,
                 loyalty=self.modifier if self.loyalty_modified else 0,
                 stability=self.modifier if self.stability_modified else 0
@@ -819,6 +849,7 @@ async def update_leader(
         author: int,
         kingdom: str,
         title: str,
+        player_id: int,
         character_name: str,
         stat: str,
         modifier: int,
@@ -841,8 +872,8 @@ async def update_leader(
             sum_loyalty = loyalty - old_loyalty
             sum_stability = stability - old_stability
             await cursor.execute(
-                "UPDATE kb_Leadership Set Character_Name = ?, Stat = ?, Modifier = ?, Economy = ?, Loyalty = ?, Stability = ?, unrest = ? WHERE Kingdom = ? AND Title = ?",
-                (character_name, stat, modifier, economy, loyalty, stability, 0, kingdom, title))
+                "UPDATE kb_Leadership Set Character_Name = ?, Player_ID = ?, Stat = ?, Modifier = ?, Economy = ?, Loyalty = ?, Stability = ?, unrest = ? WHERE Kingdom = ? AND Title = ?",
+                (character_name, player_id, stat, modifier, economy, loyalty, stability, 0, kingdom, title))
             await cursor.execute(
                 "UPDATE kb_Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ? WHERE Kingdom = ?",
                 (sum_economy, sum_loyalty, sum_stability, -old_unrest, kingdom))
@@ -881,7 +912,7 @@ async def remove_leader(
             sum_stability = -old_stability + base_stability
             sum_unrest = -old_unrest + base_unrest
             await cursor.execute(
-                "UPDATE kb_Leadership SET Character_Name = 'Vacant', Stat = Null, Modifier = Null, Economy = ?, Loyalty = ? , Stability = ?, Unrest = ? WHERE Kingdom = ? AND Title = ?",
+                "UPDATE kb_Leadership SET Character_Name = 'Vacant', Player_ID = Null, Stat = Null, Modifier = Null, Economy = ?, Loyalty = ? , Stability = ?, Unrest = ? WHERE Kingdom = ? AND Title = ?",
                 (base_economy, base_loyalty, base_stability, base_unrest, kingdom, title))
             await cursor.execute(
                 "UPDATE kb_Kingdoms SET Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Kingdom = ?",
@@ -1563,6 +1594,10 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 if not valid_password:
                     await interaction.followup.send(content="The password provided is incorrect.")
                     return
+                await cursor.execute("Select Player_ID, Character_Name from Player_Characters where Character_Name = ?",
+                                     (character_name,))
+                recipient = await cursor.fetchone()
+                recipient_id = recipient[0]
                 await cursor.execute(
                     "SELECT Ability, Economy, Loyalty, Stability FROM AA_Leadership_Roles WHERE Title = ?",
                     (title,))
@@ -1572,12 +1607,14 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 options = [
                     discord.SelectOption(label=ability) for ability in abilities
                 ]
+
                 additional = 1 if title != "Ruler" and kingdom_results[1] < 26 else 2
                 additional = 3 if title == "Ruler" and kingdom_results[1] < 101 else additional
                 view = LeadershipView(
                     options, interaction.guild_id, interaction.user.id, kingdom, title, character_name,
-                    additional, economy, loyalty, stability, kingdom_results[1], modifier=modifier
-                )
+                    additional, economy, loyalty, stability, kingdom_results[1], modifier=modifier,
+                    recipient_id=recipient_id)
+
                 await interaction.followup.send("Please select an attribute:", view=view)
             # Store the message object
             view.message = await interaction.original_response()
@@ -2113,56 +2150,318 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
             logging.exception(f"Error displaying kingdom events: {e}")
             await interaction.followup.send(content="An error occurred while displaying kingdom events.")
 
+    trade_group = discord.app_commands.Group(
+        name='trade',
+        description='Commands related to kingdom management',
+        parent=kingdom_group
+    )
+
+    @trade_group.command(name="Request", description="Request a trade route to another kingdom")
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    @app_commands.autocomplete(target_kingdom=kingdom_autocomplete)
+    async def request_trade(
+            self, interaction: discord.Interaction, kingdom: str, password: str, target_kingdom: str,
+            seafood: typing.Optional[int], husbandry: typing.Optional[int], produce: typing.Optional[int],
+            grain: typing.Optional[int],
+            ore: typing.Optional[int], lumber: typing.Optional[int], stone: typing.Optional[int],
+            raw_textiles: typing.Optional[int],
+            textiles: typing.Optional[int], metallurgy: typing.Optional[int], woodworking: typing.Optional[int],
+            stoneworking: typing.Optional[int],
+            magical_consumables: typing.Optional[int], magical_items: typing.Optional[int],
+            mundane_exotic: typing.Optional[int], mundane_complex: typing.Optional[int]
+    ):
+        """This command is used to request a trade route to another kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                await cursor.execute(
+                    "SELECT Character_Name, PLayer_ID FROM KB_Leadership WHERE Kingdom = ? And Title = Ruler",
+                    (target_kingdom,))
+                target_kingdom_results = await cursor.fetchone()
+                if not target_kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {target_kingdom} does not exist.")
+                    return
+                (target_ruler_name, target_ruler_id) = target_kingdom_results
+                await cursor.execute(
+                    "SELECT Character_Name, PLayer_ID FROM KB_Leadership WHERE Kingdom = ? And Title = Ruler",
+                    (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                (source_ruler_name, source_ruler_id) = kingdom_results
+                await cursor.execute("SELECT * FROM KB_Trade WHERE Source_Kingdom = ? AND Target_Kingdom = ?",
+                                     (kingdom, target_kingdom))
+                trade_results = await cursor.fetchone()
+                if trade_results:
+                    await interaction.followup.send(content="There is already a trade route between these kingdoms. You have to end it before starting a new one.")
+                    return
+
+                await cursor.execute("""
+                SELECT 
+                SUM(Husbandry), SUM(Produce), SUM(Grain), SUM(Seafood), 
+                SUM(Ore), SUM(Stone), SUM(Wood), SUM(Raw_Textiles),
+                SUM(Textiles), SUM(Metallurgy), SUM(Woodworking), SUM(Stoneworking),
+                SUM(Magical_Consumables), SUM(Magical_Items), SUM(Mundane_Exotic), SUM(Mundane_Complex)
+                FROM KB_Trade 
+                WHERE Source_Kingdom = ?
+                """, (kingdom,))
+                trade_results = await cursor.fetchone()
+                (trade_husbandry, trade_produce, trade_grain, trade_seafood,
+                 trade_ore, trade_stone, trade_wood, trade_raw_textiles,
+                 trade_textiles, trade_metallurgy, trade_woodworking, trade_stoneworking,
+                 trade_magical_consumables, trade_magical_items, trade_mundane_exotic, trade_mundane_complex
+                 ) = trade_results
+                await cursor.execute("""
+                SELECT 
+                    SUM(CASE WHEN subtype = 'Grain' THEN amount * quality ELSE 0 END) AS Grain_total,
+                    SUM(CASE WHEN subtype = 'Produce' THEN amount * quality ELSE 0 END) AS Produce_total
+                    SUM(CASE WHEN subtype = 'Husbandry' THEN amount * quality ELSE 0 END) AS Husbandry_total
+                    SUM(CASE WHEN subtype = 'Seafood' THEN amount * quality ELSE 0 END) AS Seafood_total
+                    SUM(CASE WHEN subtype = 'Ore' THEN amount * quality ELSE 0 END) AS ore_total
+                    SUM(CASE WHEN subtype = 'Stone' THEN amount * quality ELSE 0 END) AS stone_total
+                    SUM(CASE WHEN subtype = 'Wood' THEN amount * quality ELSE 0 END) AS wood_total
+                    SUM(CASE WHEN subtype = 'Raw Textiles' THEN amount * quality ELSE 0 END) AS raw_textile_total
+                FROM KB_Hexes_Constructed 
+                WHERE kingdom = ?;""", (kingdom,))
+                resources = await cursor.fetchone()
+                (grain_total, produce_total, husbandry_total, seafood_total, ore_total, stone_total, lumber_total,
+                 raw_textiles_total) = resources
+                await cursor.execute("""
+                SELECT 
+                    SUM(CASE WHEN subtype = 'Textiles' THEN amount * quality ELSE 0 END) AS Textiles_total,
+                    SUM(CASE WHEN subtype = 'Metallurgy' THEN amount * quality ELSE 0 END) AS Metallurgy_total,
+                    SUM(CASE WHEN subtype = 'Woodworking' THEN amount * quality ELSE 0 END) AS Woodworking_total,
+                    SUM(CASE WHEN subtype = 'Stoneworking' THEN amount * quality ELSE 0 END) AS Stoneworking_total,
+                    SUM(CASE WHEN subtype = 'Magical Consumables' THEN amount * quality ELSE 0 END) AS magical_consumables_total,
+                    SUM(CASE WHEN subtype = 'Magical Items' THEN amount * quality ELSE 0 END) AS magical_items_total,
+                    SUM(CASE WHEN subtype = 'Mundane Exotic' THEN amount * quality ELSE 0 END) AS mundane_exotic_total,
+                    SUM(CASE WHEN subtype = 'Mundane Complex' THEN amount * quality ELSE 0 END) AS mundane_complex_total
+                FROM KB_Buildings 
+                WHERE kingdom = ?;""", (kingdom,))
+                goods = await cursor.fetchone()
+                (textiles_total, metallurgy_total, woodworking_total, stoneworking_total, magical_consumables_total,
+                 magical_items_total, mundane_exotic_total, mundane_complex_total) = goods
+                tradeable_husbandry = safe_min(husbandry, safe_sub(husbandry_total, trade_husbandry))
+                tradeable_produce = safe_min(produce, safe_sub(produce_total, trade_produce))
+                tradeable_grain = safe_min(grain, safe_sub(grain_total, trade_grain))
+                tradeable_seafood = safe_min(seafood, safe_sub(seafood_total, trade_seafood))
+                tradeable_ore = safe_min(ore, safe_sub(ore_total, trade_ore))
+                tradeable_stone = safe_min(stone, safe_sub(stone_total, trade_stone))
+                tradeable_wood = safe_min(lumber, safe_sub(lumber_total, trade_wood))
+                tradeable_raw_textiles = safe_min(raw_textiles, safe_sub(raw_textiles_total, trade_raw_textiles))
+                tradeable_textiles = safe_min(textiles, safe_sub(textiles_total, trade_textiles))
+                tradeable_metallurgy = safe_min(metallurgy, safe_sub(metallurgy_total, trade_metallurgy))
+                tradeable_woodworking = safe_min(woodworking, safe_sub(woodworking_total, trade_woodworking))
+                tradeable_stoneworking = safe_min(stoneworking, safe_sub(stoneworking_total, trade_stoneworking))
+                tradeable_magical_consumables = safe_min(magical_consumables,
+                                                         safe_sub(magical_consumables_total, trade_magical_consumables))
+                tradeable_magical_items = safe_min(magical_items, safe_sub(magical_items_total, trade_magical_items))
+                tradeable_mundane_exotic = safe_min(mundane_exotic,
+                                                    safe_sub(mundane_exotic_total, trade_mundane_exotic))
+                tradeable_mundane_complex = safe_min(mundane_complex,
+                                                     safe_sub(mundane_complex_total, trade_mundane_complex))
+                view = TradeView(
+                    allowed_user_id=target_ruler_id,
+                    requester_name=interaction.user.name,
+                    requester_id=interaction.user.id,
+                    character_name=source_ruler_name,
+                    recipient_name=target_ruler_name,
+                    requesting_kingdom=kingdom,
+                    sending_kingdom=target_kingdom,
+                    bot=self.bot,
+                    guild_id=interaction.guild_id,
+                    interaction=interaction,
+                    seafood=tradeable_seafood,
+                    husbandry=tradeable_husbandry,
+                    produce=tradeable_produce,
+                    grain=tradeable_grain,
+                    ore=tradeable_ore,
+                    lumber=tradeable_wood,
+                    stone=tradeable_stone,
+                    raw_textiles=tradeable_raw_textiles,
+                    textiles=tradeable_textiles,
+                    metallurgy=tradeable_metallurgy,
+                    woodworking=tradeable_woodworking,
+                    stoneworking=tradeable_stoneworking,
+                    magical_consumables=tradeable_magical_consumables,
+                    magical_items=tradeable_magical_items,
+                    mundane_exotic=tradeable_mundane_exotic,
+                    mundane_complex=tradeable_mundane_complex
+                )
+
+                await view.create_embed()
+                await view.send_initial_message()
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error requesting trade route: {e}")
+            await interaction.followup.send(content="An error occurred while requesting a trade route.")
+
+    @trade_group.command(name="Cancel", description="Cancel a trade route with another kingdom")
+    @app_commands.choices(
+        intent=[discord.app_commands.Choice(name='outgoing', value=1),
+                discord.app_commands.Choice(name='incoming', value=2)])
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    @app_commands.autocomplete(target_kingdom=kingdom_autocomplete)
+    async def cancel_trade(
+            self,
+            interaction: discord.Interaction,
+            kingdom: str,
+            password: str,
+            target_kingdom: str,
+            intent: int
+    ):
+        """This command is used to cancel a trade route with another kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                await cursor.execute(
+                    "SELECT Character_Name, PLayer_ID FROM KB_Leadership WHERE Kingdom = ? And Title = Ruler",
+                    (target_kingdom,))
+                target_kingdom_results = await cursor.fetchone()
+                if not target_kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {target_kingdom} does not exist.")
+                    return
+                (target_ruler_name, target_ruler_id) = target_kingdom_results
+                await cursor.execute(
+                    "SELECT Character_Name, PLayer_ID FROM KB_Leadership WHERE Kingdom = ? And Title = Ruler",
+                    (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                (source_ruler_name, source_ruler_id) = kingdom_results
+                statement = """
+                SELECT Source_Kingdom, End_Kingdom, 
+                Husbandry, Seafood, Grain, Produce
+                Ore, Stone, Wood, Raw_Textiles, Textiles, Metallurgy, Woodworking, Stoneworking,
+                Magical_Consumables, Magical_Items, Mundane_Exotic, Mundane_Complex
+                FROM KB_Trade
+                WHERE Source_Kingdom = ? AND End_Kingdom = ?"""
+                if intent == 2:
+                    await cursor.execute(statement, (target_kingdom, kingdom))
+                else:
+                    await cursor.execute(statement, (kingdom, target_kingdom))
+                trade_results = await cursor.fetchone()
+                if not trade_results:
+                    await interaction.followup.send(content="No trade route exists between these kingdoms.")
+                    return
+                (source_kingdom, end_kingdom, husbandry, seafood, grain, produce, ore, stone, wood, raw_textiles,
+                    textiles, metallurgy, woodworking, stoneworking, magical_consumables, magical_items, mundane_exotic,
+                    mundane_complex) = trade_results
+                embed = discord.Embed(
+                    title=f"Trade Route Cancellation",
+                    description=f"{source_ruler_name} is canceling a trade route with {target_ruler_name}."
+                )
+                if any((husbandry, seafood, grain, produce)):
+                    embed.add_field(name="Food", value=f"Husbandry: {husbandry}, Seafood: {seafood}, Grain: {grain}, Produce: {produce}")
+                if any((ore, stone, wood, raw_textiles)):
+                    embed.add_field(name="Resources", value=f"Ore: {ore}, Stone: {stone}, Wood: {wood}, Raw Textiles: {raw_textiles}")
+                if any((textiles, metallurgy, woodworking, stoneworking)):
+                    embed.add_field(name="Goods", value=f"Textiles: {textiles}, Metallurgy: {metallurgy}, Woodworking: {woodworking}, Stoneworking: {stoneworking}")
+                if any((magical_consumables, magical_items, mundane_exotic, mundane_complex)):
+                    embed.add_field(name="Items", value=f"Magical Consumables: {magical_consumables}, Magical Items: {magical_items}, Mundane Exotic: {mundane_exotic}, Mundane Complex: {mundane_complex}")
+                content = f"<@{interaction.user.id}> is cancelling their trade with <@{target_ruler_id}>"
+                await interaction.followup.send(content=content, embed=embed, allowed_mentions=discord.AllowedMentions.users)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error canceling trade route: {e}")
+            await interaction.followup.send(content="An error occurred while canceling a trade route.")
 
 class KingdomView(shared_functions.ShopView):
+    """
+    A paginated view for displaying kingdom data (kb_Kingdoms).
+    """
+
     def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, interaction: discord.Interaction):
         super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction,
                          content="")
-        self.max_items = None  # Cache total number of items
+        self.max_items = None
         self.content = None
+        self.results = []
+        self.embed = None
 
     async def update_results(self):
-        """Fetch the history of prestige request  for the current page."""
-
+        """
+        Fetch the kingdom rows for the current page.
+        """
         statement = """
-                        SELECT kb_Kingdom, kb_Government, kb_Alignment, kb_Control_DC, kb_Build_Points, 
-                        kb_Size, kb_Population, kb_Economy, kb_Loyalty, kb_Stability,
-                        kb_Unrest, kb_Consumption, 
-                        Custom.Control_DC, Custom.Economy, Custom.Loyalty, Custom.Stability, Custom.Unrest, Custom.Consumption
-                        FROM kb_Kingdoms as KB left join kb_Kingdoms_Custom as Custom on kb_Kingdom = Custom.Kingdom 
-                        Limit ? Offset ?
-                    """
+            SELECT 
+                kb_Kingdom, kb_Government, kb_Alignment, kb_Control_DC, kb_Build_Points, 
+                kb_Size, kb_Population, kb_Economy, kb_Loyalty, kb_Stability,
+                kb_Unrest, kb_Consumption, 
+                Custom.Control_DC, Custom.Economy, Custom.Loyalty, Custom.Stability, 
+                Custom.Unrest, Custom.Consumption
+            FROM kb_Kingdoms AS KB
+            LEFT JOIN kb_Kingdoms_Custom AS Custom ON kb_Kingdom = Custom.Kingdom
+            LIMIT ? OFFSET ?
+        """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
             cursor = await db.execute(statement, (self.limit, self.offset))
             self.results = await cursor.fetchall()
 
     async def create_embed(self):
-        """Create the embed for the titles."""
+        """
+        Create the embed that shows the currently fetched kingdom rows.
+        """
         current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+
         self.embed = discord.Embed(
-            title=f"kb_Kingdoms",
-            description=f"Page {current_page} of {total_pages}")
+            title="kb_Kingdoms",
+            description=f"Page {current_page} of {total_pages}"
+        )
+
         for item in self.results:
-            (kingdom, government, alignment, control_dc, build_points, size, population, economy,
-             loyalty, stability, unrest, consumption, custom_control_dc, custom_economy, custom_loyalty,
-             custom_stability, custom_unrest, custom_consumption) = item
-            self.embed.add_field(name=f'**__Kingdom__**: {kingdom}, Control DC: {control_dc}', value=f"""
-            **Government**: {government}, **Alignment**: {alignment}\n
-            **Resources**: {build_points} BP, \n
-            **Size**: {size}, **Population**: {population}\n
-            **Economy**: {economy}, **Loyalty**: {loyalty}, **Stability**: {stability}\n
-            **Unrest**: {unrest}, **Consumption**: {consumption}\n
-            **Unique Modifiers** **Control DC Adjustment**: {custom_control_dc}, \n
-             **Economy Adjustment**: {custom_economy} **Loyalty Adjustment**: {custom_loyalty}, **Stability Adjustment**: {custom_stability}\n
-            **Unrest Adjustment**: {custom_unrest}, **Consumption Adjustment**: {custom_consumption}""", inline=False)
-            '''self.embed.add_field(name="**Command Card Adjustments**", value=f"""
-            **Control DC Adjustment**: {custom_control_dc}, \n
-            **Economy Adjustment**: {custom_economy} **Loyalty Adjustment**: {custom_loyalty}, **Stability Adjustment**: {custom_stability}\n   
-            **Unrest Adjustment**: {custom_unrest}, **Consumption Adjustment**: {custom_consumption}""", inline=False)'''
+            (
+                kingdom, government, alignment, control_dc, build_points, size, population,
+                economy, loyalty, stability, unrest, consumption,
+                custom_control_dc, custom_economy, custom_loyalty,
+                custom_stability, custom_unrest, custom_consumption
+            ) = item
+
+            # Build your string for the embed field
+            description = (
+                f"**Government**: {government}, **Alignment**: {alignment}\n"
+                f"**Resources**: {build_points} BP\n"
+                f"**Size**: {size}, **Population**: {population}\n"
+                f"**Economy**: {economy}, **Loyalty**: {loyalty}, **Stability**: {stability}\n"
+                f"**Unrest**: {unrest}, **Consumption**: {consumption}\n"
+                f"**Unique Modifiers**\n"
+                f" - Control DC Adjustment: {custom_control_dc}\n"
+                f" - Economy Adjustment: {custom_economy} | Loyalty Adjustment: {custom_loyalty}\n"
+                f" - Stability Adjustment: {custom_stability}\n"
+                f" - Unrest Adjustment: {custom_unrest} | Consumption Adjustment: {custom_consumption}"
+            )
+
+            self.embed.add_field(
+                name=f"**Kingdom**: {kingdom}, Control DC: {control_dc}",
+                value=description,
+                inline=False
+            )
 
     async def get_max_items(self):
-        """Get the total number of titles."""
+        """
+        Return the total number of kingdoms.
+        """
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
                 cursor = await db.execute("SELECT COUNT(*) FROM kb_Kingdoms")
@@ -2172,85 +2471,117 @@ class KingdomView(shared_functions.ShopView):
 
 
 class SettlementView(shared_functions.ShopView):
-    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, interaction: discord.Interaction,
-                 kingdom: str):
+    """
+    A paginated view for displaying settlement data (kb_settlements).
+    """
+
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int,
+                 interaction: discord.Interaction, kingdom: typing.Optional[str]):
         super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction,
                          content="")
-        self.max_items = None  # Cache total number of items
+        self.max_items = None
         self.content = None
+        self.results = []
+        self.embed = None
         self.kingdom = kingdom
 
     async def update_results(self):
-        """Fetch the history of prestige request  for the current page."""
-
+        """
+        Fetch settlement rows for the current page, optionally filtered by kingdom.
+        """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
             if self.kingdom:
                 statement = """ 
-                SELECT kb_Kingdom, kb_Settlement, kb_Size, kb_Population, kb_Corruption, kb_Crime, kb_Productivity, kb_Law, kb_Lore, kb_Society, kb_Danger, kb_Defence,
-                kb_Base_Value, kb_Spellcasting, kb_Supply, kb_Decay, Custom.Corruption, Custom.Crime, Custom.Productivity, Custom.Law, Custom.Lore, Custom.Society, Custom.Danger, Custom.Defence,
-                Custom.Base_Value, Custom.Spellcasting, Custom.Supply
-                FROM kb_settlements as KB left join kb_settlements_Custom as Custom on kb_settlement = custom.settlement WHERE Kingdom = ? Limit ? Offset ?
+                    SELECT 
+                        kb_Kingdom, kb_Settlement, kb_Size, kb_Population, 
+                        kb_Corruption, kb_Crime, kb_Productivity, kb_Law, kb_Lore, kb_Society, 
+                        kb_Danger, kb_Defence, kb_Base_Value, kb_Spellcasting, kb_Supply, kb_Decay,
+                        Custom.Corruption, Custom.Crime, Custom.Productivity, Custom.Law, 
+                        Custom.Lore, Custom.Society, Custom.Danger, Custom.Defence,
+                        Custom.Base_Value, Custom.Spellcasting, Custom.Supply
+                    FROM kb_settlements AS KB
+                    LEFT JOIN kb_settlements_Custom AS Custom 
+                        ON KB.kb_Settlement = Custom.Settlement
+                    WHERE KB.Kingdom = ?
+                    LIMIT ? OFFSET ?
                 """
                 cursor = await db.execute(statement, (self.kingdom, self.limit, self.offset))
             else:
                 statement = """
-                SELECT kb_Kingdom, kb_Settlement, kb_Size, kb_Population, kb_Corruption, kb_Crime, kb_Productivity, kb_Law, kb_Lore, kb_Society, kb_Danger, kb_Defence,
-                kb_Base_Value, kb_Spellcasting, kb_Supply, kb_Decay, Custom.Corruption, Custom.Crime, Custom.Productivity, Custom.Law, Custom.Lore, Custom.Society, Custom.Danger, Custom.Defence,
-                Custom.Base_Value, Custom.Spellcasting, Custom.Supply
-                FROM kb_settlements as KB left join kb_settlements_Custom as Custom on kb_settlement = custom.settlement Limit ? Offset ?
+                    SELECT 
+                        kb_Kingdom, kb_Settlement, kb_Size, kb_Population, 
+                        kb_Corruption, kb_Crime, kb_Productivity, kb_Law, kb_Lore, kb_Society, 
+                        kb_Danger, kb_Defence, kb_Base_Value, kb_Spellcasting, kb_Supply, kb_Decay,
+                        Custom.Corruption, Custom.Crime, Custom.Productivity, Custom.Law, 
+                        Custom.Lore, Custom.Society, Custom.Danger, Custom.Defence,
+                        Custom.Base_Value, Custom.Spellcasting, Custom.Supply
+                    FROM kb_settlements AS KB
+                    LEFT JOIN kb_settlements_Custom AS Custom 
+                        ON KB.kb_Settlement = Custom.Settlement
+                    LIMIT ? OFFSET ?
                 """
                 cursor = await db.execute(statement, (self.limit, self.offset))
             self.results = await cursor.fetchall()
 
     async def create_embed(self):
-        """Create the embed for the titles."""
+        """
+        Create the embed showing settlement data for the current page.
+        """
         current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+
         if self.kingdom:
             self.embed = discord.Embed(
-                title=f"kb_settlements for {self.kingdom}",
-                description=f"Page {current_page} of {total_pages}")
+                title=f"Settlements in {self.kingdom}",
+                description=f"Page {current_page} of {total_pages}"
+            )
         else:
             self.embed = discord.Embed(
-                title=f"kb_settlements",
-                description=f"Page {current_page} of {total_pages}")
+                title="Settlements",
+                description=f"Page {current_page} of {total_pages}"
+            )
 
-        for item in self.results:
-            (group_id, player_name) = item
-            self.embed.add_field(name=f'**Player**: {player_name}', value=f'**Group**: {group_id}', inline=False)
+        for row in self.results:
             (
-                kingdom, settlement, size, population, corruption, crime, productivity, law, lore, society, danger,
-                defence,
-                base_value, spellcasting, supply, decay, custom_corruption, custom_crime, custom_productivity,
-                custom_law,
-                custom_lore, custom_society, custom_danger, custom_defence, custom_base_value, custom_spellcasting,
-                custom_supply) = item
-            self.embed.add_field(name=f'**Kingdom**: {kingdom} **Settlement**: {settlement}', value=f"""
-            **Size**: {size}, **Population**: {population}\n
-            **Corruption**: {corruption}, **Crime**: {crime}, **Productivity**: {productivity}\n
-            **Law**: {law}, **Lore**: {lore}, **Society**: {society}\n
-            **Danger**: {danger}, **Defence**: {defence}\n
-            **Base Value**: {base_value}, **Spellcasting**: {spellcasting}, **Supply**: {supply}\n
-            **Decay**: {decay}\n
-            **Custom Modifiers** **Corruption**: {custom_corruption}, **Crime**: {custom_crime}, **Productivity**: {custom_productivity}\n
-            **Law**: {custom_law}, **Lore**: {custom_lore}, **Society**: {custom_society}\n
-            **Danger**: {custom_danger}, **Defence**: {custom_defence}\n
-            **Base Value**: {custom_base_value}, **Spellcasting**: {custom_spellcasting}, **Supply**: {custom_supply}
-            """, inline=False)
-            '''self.embed.add_field(name="**Command Card Adjustments**", value=f"""
-            **Corruption**: {custom_corruption}, **Crime**: {custom_crime}, **Productivity**: {custom_productivity}\n
-            **Law**: {custom_law}, **Lore**: {custom_lore}, **Society**: {custom_society}\n
-            **Danger**: {custom_danger}, **Defence**: {custom_defence}\n
-            **Base Value**: {custom_base_value}, **Spellcasting**: {custom_spellcasting}, **Supply**: {custom_supply}
-            """, inline=False)'''
+                kingdom, settlement, size, population,
+                corruption, crime, productivity, law, lore, society,
+                danger, defence, base_value, spellcasting, supply, decay,
+                custom_corruption, custom_crime, custom_productivity, custom_law,
+                custom_lore, custom_society, custom_danger, custom_defence,
+                custom_base_value, custom_spellcasting, custom_supply
+            ) = row
+
+            desc = (
+                f"**Size**: {size}, **Population**: {population}\n"
+                f"**Corruption**: {corruption}, **Crime**: {crime}, **Productivity**: {productivity}\n"
+                f"**Law**: {law}, **Lore**: {lore}, **Society**: {society}\n"
+                f"**Danger**: {danger}, **Defence**: {defence}\n"
+                f"**Base Value**: {base_value}, **Spellcasting**: {spellcasting}, **Supply**: {supply}\n"
+                f"**Decay**: {decay}\n\n"
+                f"**Custom Modifiers**\n"
+                f" - Corruption: {custom_corruption}, Crime: {custom_crime}, Productivity: {custom_productivity}\n"
+                f" - Law: {custom_law}, Lore: {custom_lore}, Society: {custom_society}\n"
+                f" - Danger: {custom_danger}, Defence: {custom_defence}\n"
+                f" - Base Value: {custom_base_value}, Spellcasting: {custom_spellcasting}, Supply: {custom_supply}"
+            )
+
+            self.embed.add_field(
+                name=f"{kingdom} - {settlement}",
+                value=desc,
+                inline=False
+            )
 
     async def get_max_items(self):
-        """Get the total number of titles."""
+        """
+        Return the total number of settlements, optionally filtered by kingdom.
+        """
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
                 if self.kingdom:
-                    cursor = await db.execute("SELECT COUNT(*) FROM kb_settlements WHERE Kingdom = ?",
-                                              (self.kingdom,))
+                    cursor = await db.execute(
+                        "SELECT COUNT(*) FROM kb_settlements WHERE Kingdom = ?",
+                        (self.kingdom,)
+                    )
                 else:
                     cursor = await db.execute("SELECT COUNT(*) FROM kb_settlements")
                 count = await cursor.fetchone()
@@ -2259,129 +2590,163 @@ class SettlementView(shared_functions.ShopView):
 
 
 class HexView(shared_functions.ShopView):
-    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, kingdom: str,
-                 interaction: discord.Interaction):
+    """
+    A paginated view for displaying hex data (kb_hexes) for a particular kingdom.
+    """
+
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int,
+                 kingdom: str, interaction: discord.Interaction):
         super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction,
                          content="")
-        self.max_items = None  # Cache total number of items
-        self.content = None
+        self.max_items = None
+        self.results = []
+        self.embed = None
         self.kingdom = kingdom
 
     async def update_results(self):
-        """Fetch the history of prestige request  for the current page."""
-
+        """
+        Fetch hex rows for the current page for the given kingdom.
+        """
         statement = """
-                        SELECT 
-                        Kingdom, Hex_Terrain, Amount, Improvement,
-                        Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation
-                        from kb_hexes WHERE Kingdom = ? Limit ? Offset ?
-                    """
+            SELECT 
+                Kingdom, Hex_Terrain, Amount, Improvement,
+                Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation
+            FROM kb_hexes
+            WHERE Kingdom = ?
+            LIMIT ? OFFSET ?
+        """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
             cursor = await db.execute(statement, (self.kingdom, self.limit, self.offset))
             self.results = await cursor.fetchall()
 
     async def create_embed(self):
-        """Create the embed for the titles."""
+        """
+        Create the embed showing hex data for the current page.
+        """
         current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(
             title=f"Hexes for {self.kingdom}",
-            description=f"Page {current_page} of {total_pages}")
+            description=f"Page {current_page} of {total_pages}"
+        )
 
-        for item in self.results:
-            (kingdom, hex_terrain, amount, improvement, economy, loyalty, stability, unrest, consumption, defence,
-             taxation) = item
-            self.embed.add_field(name=f'**Improvement**: {improvement} **Hex Terrain**: {hex_terrain}', value=f"""
-            **Amount**: {amount}\n
-            **Economy**: {economy}, **Loyalty**: {loyalty}, **Stability**: {stability}\n
-            **Unrest**: {unrest}, **Consumption**: {consumption}\n
-            **Defence**: {defence}, **Taxation**: {taxation}""", inline=False)
+        for row in self.results:
+            (
+                kingdom, hex_terrain, amount, improvement,
+                economy, loyalty, stability, unrest, consumption, defence, taxation
+            ) = row
+
+            desc = (
+                f"**Amount**: {amount}\n"
+                f"**Economy**: {economy}, **Loyalty**: {loyalty}, **Stability**: {stability}\n"
+                f"**Unrest**: {unrest}, **Consumption**: {consumption}\n"
+                f"**Defence**: {defence}, **Taxation**: {taxation}"
+            )
+
+            self.embed.add_field(
+                name=f"Improvement: {improvement} | Terrain: {hex_terrain}",
+                value=desc,
+                inline=False
+            )
 
     async def get_max_items(self):
-        """Get the total number of titles."""
+        """
+        Return the total number of hexes for the given kingdom.
+        """
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
-                cursor = await db.execute("SELECT COUNT(*) FROM kb_hexes WHERE Kingdom = ?",
-                                          (self.kingdom,))
+                cursor = await db.execute(
+                    "SELECT COUNT(*) FROM kb_hexes WHERE Kingdom = ?",
+                    (self.kingdom,)
+                )
                 count = await cursor.fetchone()
                 self.max_items = count[0]
         return self.max_items
 
 
 class ImprovementView(shared_functions.ShopView):
+    """
+    A paginated view for displaying possible improvements for hexes (kb_Hexes_Improvements).
+    """
+
     def __init__(self, user_id: int, guild_id: int, offset: int, limit: int,
                  interaction: discord.Interaction):
         super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction,
                          content="")
-        self.max_items = None  # Cache total number of items
-        self.content = None
-
-    def if_value_then_True(self, value):
-        if value:
-            return True
-        return False
+        self.max_items = None
+        self.results = []
+        self.embed = None
 
     async def update_results(self):
-        """Fetch the history of prestige request  for the current page."""
-
+        """
+        Fetch improvement rows for the current page.
+        """
         statement = """
-                        SELECT Improvement, Road_Multiplier, Build_Points,
-                        Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation,
-                        Cavernous, Coastline, Desert, Forest, Hill, Jungle, Marsh, Mountain, Plains, Swamp, Tundra, Water
-                        FROM kb_Hexes_Improvements Limit ? Offset ?
-                    """
+            SELECT 
+                Improvement, Road_Multiplier, Build_Points,
+                Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation,
+                Cavernous, Coastline, Desert, Forest, Hill, Jungle, Marsh, Mountain, 
+                Plains, Swamp, Tundra, Water
+            FROM kb_Hexes_Improvements
+            LIMIT ? OFFSET ?
+        """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
             cursor = await db.execute(statement, (self.limit, self.offset))
             self.results = await cursor.fetchall()
 
     async def create_embed(self):
-        """Create the embed for the titles."""
+        """
+        Create the embed showing each improvement's stats.
+        """
         current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(
-            title=f"Improvements for kb_hexes",
-            description=f"Page {current_page} of {total_pages}")
+            title="Hex Improvements",
+            description=f"Page {current_page} of {total_pages}"
+        )
 
-        for item in self.results:
-            (improvement, road_multiplier, build_points, economy, loyalty, stability, unrest, consumption, defence,
-             taxation, cavernous, coastline, desert, forest, hill, jungle, marsh, mountain, plains, swamp, tundra,
-             water) = item
-            base_text = """**Road Multiplier**: {road_multiplier}, **Build Points**: {build_points}\n
-            **Economy**: {economy}, **Loyalty**: {loyalty}, **Stability**: {stability}\n
-            **Unrest**: {unrest}, **Consumption**: {consumption}\n
-            **Defence**: {defence}, **Taxation**: {taxation}\n 
-            __**Available Terrains***__\n"""
-            available_terrains = []
-            if cavernous:
-                available_terrains.append("Cavernous")
-            if coastline:
-                available_terrains.append("Coastline")
-            if desert:
-                available_terrains.append("Desert")
-            if forest:
-                available_terrains.append("Forest")
-            if hill:
-                available_terrains.append("Hill")
-            if jungle:
-                available_terrains.append("Jungle")
-            if marsh:
-                available_terrains.append("Marsh")
-            if mountain:
-                available_terrains.append("Mountain")
-            if plains:
-                available_terrains.append("Plains")
-            if swamp:
-                available_terrains.append("Swamp")
-            if tundra:
-                available_terrains.append("Tundra")
-            if water:
-                available_terrains.append("Water")
-            available_terrains = ", ".join(available_terrains)
-            base_text += f"{available_terrains}"
-            self.embed.add_field(name=f'**Improvement**: {improvement}', value=base_text)
+        for row in self.results:
+            (
+                improvement, road_multiplier, build_points,
+                economy, loyalty, stability, unrest, consumption, defence, taxation,
+                cavernous, coastline, desert, forest, hill, jungle, marsh, mountain,
+                plains, swamp, tundra, water
+            ) = row
+
+            # Gather all possible terrains
+            terrains = []
+            if cavernous: terrains.append("Cavernous")
+            if coastline: terrains.append("Coastline")
+            if desert: terrains.append("Desert")
+            if forest: terrains.append("Forest")
+            if hill: terrains.append("Hill")
+            if jungle: terrains.append("Jungle")
+            if marsh: terrains.append("Marsh")
+            if mountain: terrains.append("Mountain")
+            if plains: terrains.append("Plains")
+            if swamp: terrains.append("Swamp")
+            if tundra: terrains.append("Tundra")
+            if water: terrains.append("Water")
+            terrain_str = ", ".join(terrains)
+
+            desc = (
+                f"**Road Multiplier**: {road_multiplier}, **Build Points**: {build_points}\n"
+                f"**Economy**: {economy}, **Loyalty**: {loyalty}, **Stability**: {stability}\n"
+                f"**Unrest**: {unrest}, **Consumption**: {consumption}\n"
+                f"**Defence**: {defence}, **Taxation**: {taxation}\n\n"
+                f"__Available Terrains__:\n{terrain_str}"
+            )
+
+            self.embed.add_field(
+                name=f"Improvement: {improvement}",
+                value=desc,
+                inline=False
+            )
 
     async def get_max_items(self):
-        """Get the total number of titles."""
+        """
+        Return the total number of improvements in kb_Hexes_Improvements.
+        """
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
                 cursor = await db.execute("SELECT COUNT(*) FROM kb_Hexes_Improvements")
@@ -2391,50 +2756,74 @@ class ImprovementView(shared_functions.ShopView):
 
 
 class BlueprintView(shared_functions.ShopView):
+    """
+    A paginated view for displaying building blueprint data (kb_Buildings_Blueprints).
+    """
+
     def __init__(self, user_id: int, guild_id: int, offset: int, limit: int,
                  interaction: discord.Interaction):
         super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction,
                          content="")
-        self.max_items = None  # Cache total number of items
-        self.content = None
+        self.max_items = None
+        self.results = []
+        self.embed = None
 
     async def update_results(self):
-        """Fetch the history of prestige request  for the current page."""
-
+        """
+        Fetch building blueprint rows for the current page.
+        NOTE: We unify the table references to 'kb_Buildings_Blueprints'.
+        """
         statement = """
-                        SELECT 
-                        Building, Build_Points, Economy, Loyalty, Stability, Fame, Unrest,
-                        Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence,
-                        Base_Value, Spellcasting, Supply,
-                        Settlement_Limit, District_Limit, Description
-                        from Buildings Limit ? Offset ?
-                    """
+            SELECT 
+                Building, Build_Points, Economy, Loyalty, Stability, Fame, Unrest,
+                Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence,
+                Base_Value, Spellcasting, Supply,
+                Settlement_Limit, District_Limit, Description
+            FROM kb_Buildings_Blueprints
+            LIMIT ? OFFSET ?
+        """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
-            cursor = await db.execute(statement, (self.group_id, self.limit, self.offset))
+            cursor = await db.execute(statement, (self.limit, self.offset))
             self.results = await cursor.fetchall()
 
     async def create_embed(self):
-        """Create the embed for the titles."""
+        """
+        Create the embed showing building blueprint data for the current page.
+        """
         current_page = (self.offset // self.limit) + 1
         total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
         self.embed = discord.Embed(
-            title=f"Blueprints",
-            description=f"Page {current_page} of {total_pages}")
+            title="Building Blueprints",
+            description=f"Page {current_page} of {total_pages}"
+        )
 
-        for item in self.results:
-            (building, build_points, economy, loyalty, stability, fame, unrest, corruption, crime, productivity, law,
-             lore, society, danger, defence, base_value, spellcasting, supply, decay, settlement_limit, district_limit,
-             description) = item
-            self.embed.add_field(name=f'**Building**: {building}, Cost: {build_points}', value=f"""
-            **Economy**: {economy}, **Loyalty**: {loyalty}, **Stability**: {stability}, **Fame**: {fame}\n
-            **Unrest**: {unrest}, **Corruption**: {corruption}, **Crime**: {crime}, **Productivity**: {productivity}\n
-            **Law**: {law}, **Lore**: {lore}, **Society**: {society}, **Danger**: {danger}\n
-            **Defence**: {defence}, **Base Value**: {base_value}, **Spellcasting**: {spellcasting}, **Supply**: {supply}\n
-            **Settlement Limit**: {settlement_limit}, **District Limit**: {district_limit}\n
-            **Description**: {description}""", inline=False)
+        for row in self.results:
+            (
+                building, build_points, economy, loyalty, stability, fame, unrest,
+                corruption, crime, productivity, law, lore, society, danger, defence,
+                base_value, spellcasting, supply,
+                settlement_limit, district_limit, description
+            ) = row
+
+            desc = (
+                f"**Economy**: {economy}, **Loyalty**: {loyalty}, **Stability**: {stability}, **Fame**: {fame}\n"
+                f"**Unrest**: {unrest}, **Corruption**: {corruption}, **Crime**: {crime}, **Productivity**: {productivity}\n"
+                f"**Law**: {law}, **Lore**: {lore}, **Society**: {society}, **Danger**: {danger}\n"
+                f"**Defence**: {defence}, **Base Value**: {base_value}, **Spellcasting**: {spellcasting}, **Supply**: {supply}\n"
+                f"**Settlement Limit**: {settlement_limit}, **District Limit**: {district_limit}\n"
+                f"**Description**: {description}"
+            )
+
+            self.embed.add_field(
+                name=f"{building} (Cost: {build_points} BP)",
+                value=desc,
+                inline=False
+            )
 
     async def get_max_items(self):
-        """Get the total number of titles."""
+        """
+        Return the total number of building blueprints in kb_Buildings_Blueprints.
+        """
         if self.max_items is None:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
                 cursor = await db.execute("SELECT COUNT(*) FROM kb_Buildings_Blueprints")
@@ -2593,7 +2982,6 @@ class KingdomEventView(discord.ui.View):
         else:
             await interaction.followup.send("You are on the last page.", ephemeral=True)
 
-
     async def send_initial_message(self):
         """Send the initial message with the view."""
         try:
@@ -2627,7 +3015,7 @@ class KingdomEventView(discord.ui.View):
                             Limit ? Offset ?
                         """
             event_statement = """
-                        SELECT Name, Kingdom, Settlement, Check_A, Check_B, Check_A_Status, Check_B_Status
+                        SELECT ID, Type, Kingdom, Settlement, Hex, Name, Effect, Duration, Check_A, Check_A_Status, Check_B, Check_B_Status
                         FROM KB_Events_Active 
                         WHERE Kingdom = ? AND Type = 'Problematic'  AND (Check_A IS NOT NULL OR Check_B IS NOT NULL)
                         Limit ? Offset ?
@@ -2640,7 +3028,7 @@ class KingdomEventView(discord.ui.View):
                         Limit ? Offset ?
                         """
             event_statement = """
-            SELECT Name, Kingdom, Settlement, Check_A, Check_B, Check_A_Status, Check_B_Status
+            SELECT ID, Type, Kingdom, Settlement, Hex, Name, Effect, Duration, Check_A, Check_A_Status, Check_B, Check_B_Status
             FROM KB_Events_Active 
             WHERE Kingdom = ?  AND (Check_A IS NOT NULL OR Check_B IS NOT NULL)
             Limit ? Offset ?
@@ -2684,12 +3072,12 @@ class KingdomEventView(discord.ui.View):
         for item in self.results:
             (id, type, kingdom, settlement, hex, name, effect, duration, check_a, check_a_status, check_b,
              check_b_status) = item
-            status_dict = {0: "Not Attempetd", 1: "Passed", 2: "Failed"}
+            status_dict = {0: "Not Attempted", 1: "Passed", -1: "Failed"}
             duration = f"{duration} turns" if duration > 0 else "Ongoing"
             field_content = f"**Type**: {type}, Duration: {duration}"
             field_content += f", **Settlement**: {settlement}" if settlement else ""
             field_content += f", **Hex**: {hex}" if hex else ""
-            field_content += F"\r\n{effect}"
+            field_content += f"\r\n{effect}"
             field_content += f"\r\n**{check_b}**: {status_dict[check_a_status]}" if check_a else ""
             field_content += f"\r\n**{check_b}**: {status_dict[check_b_status]}" if check_b else ""
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
@@ -2781,6 +3169,7 @@ class CheckButton(discord.ui.View):
     def create_button_callback(self, check: str, version: str):
         async def button_callback(interaction: discord.Interaction):
             await self.handle_button_check(interaction, check=check, version=version)
+
         return button_callback
 
     async def handle_button_check(self, interaction: discord.Interaction, check: str, version: str):
@@ -2840,7 +3229,7 @@ class CheckButton(discord.ui.View):
                 final_response = f"Rolling for {check} with a result of {check_result}."
                 final_result = 1 if check_result >= result[0] else -1
                 final_response += f"\n{check} check {'passed' if final_result == 1 else 'failed'}"
-                if check == "A":
+                if version == "A":
                     statement = "UPDATE KB_Events_Active Set Check_A_Status = ? where ID = ?"
                 else:
                     statement = "UPDATE KB_Events_Active Set Check_B_Status = ? where ID = ?"
@@ -2854,6 +3243,119 @@ class CheckButton(discord.ui.View):
                 "An error occurred while finalizing your availability.", ephemeral=True
             )
 
+
+class TradeView(shared_functions.RecipientAcknowledgementView):
+    def __init__(
+            self,
+            allowed_user_id: int,
+            requester_name: str,
+            requester_id: int,
+            character_name: str,
+            recipient_name: str,
+            requesting_kingdom: str,
+            sending_kingdom: str,
+            seafood: int,
+            husbandry: int,
+            grain: int,
+            produce: int,
+            textiles: int,
+            metallurgy: int,
+            woodworking: int,
+            stoneworking: int,
+            magical_consumables: int,
+            magical_items: int,
+            mundane_exotic: int,
+            mundane_complex: int,
+            lumber: int,
+            stone: int,
+            ore: int,
+            raw_textiles: int,
+            bot: commands.Bot,
+            guild_id: int,
+            interaction: discord.Interaction
+    ):
+        super().__init__(allowed_user_id=allowed_user_id, interaction=interaction,
+                         content=f"<@{allowed_user_id}>, please accept or request this transaction.")
+        self.guild_id = guild_id
+        self.requester_name = requester_name
+        self.requester_id = requester_id
+        self.character_name = character_name
+        self.recipient_name = recipient_name  # Name of the recipient
+        self.bot = bot
+        self.embed = None
+        self.requesting_kingdom = requesting_kingdom
+        self.sending_kingdom = sending_kingdom
+        self.seafood = seafood
+        self.husbandry = husbandry
+        self.grain = grain
+        self.produce = produce
+        self.textiles = textiles
+        self.metallurgy = metallurgy
+        self.woodworking = woodworking
+        self.stoneworking = stoneworking
+        self.magical_consumables = magical_consumables
+        self.magical_items = magical_items
+        self.mundane_exotic = mundane_exotic
+        self.mundane_complex = mundane_complex
+        self.lumber = lumber
+        self.stone = stone
+        self.ore = ore
+        self.raw_textiles = raw_textiles
+
+    async def accepted(self, interaction: discord.Interaction):
+        """Handle the approval logic."""
+        # Update the database to mark the proposition as accepted
+        # Adjust prestige, log the transaction, notify the requester, etc.
+
+        self.embed = discord.Embed(
+            title=f"<@{self.requester_id}>'s Kingdom of {self.requesting_kingdom} has opened trade with <@{self.allowed_user_id}>'s kingdom of {self.sending_kingdom}",
+            description=f"The request of trade has been accepted by <@{self.allowed_user_id}>'s {self.sending_kingdom}.",
+            color=discord.Color.green()
+        )
+        # Additional logic such as notifying the requester
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            await cursor.execute(
+                """INSERT INTO KB_Trade (Source_Kingdom, End_Kingdom, Seafood, Husbandry, Grain, Produce, Lumber, Stone, Metal, Raw_Textiles, Textiles, Metallurgy, Woodworking, Stoneworking, Magical_Consumables, Magical_Items, Mundane_Exotic, Mundane_Complex) "
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (self.sending_kingdom, self.requesting_kingdom, self.seafood, self.husbandry, self.grain, self.produce,
+                 self.lumber, self.stone, self.metal, self.raw_textiles, self.textiles, self.metallurgy,
+                 self.woodworking, self.stoneworking, self.magical_consumables, self.magical_items, self.mundane_exotic,
+                 self.mundane_complex))
+            await conn.commit()
+
+    async def rejected(self, interaction: discord.Interaction):
+        """Handle the rejection logic."""
+        # Update the database to mark the proposition as rejected
+        self.embed = discord.Embed(
+            title=f"{self.character_name}'s Transaction Rejected",
+            description=f"The request of \r\n {self.reason} \r\n has been rejected by <@{self.allowed_user_id}>'s {self.recipient_name}.",
+            color=discord.Color.red()
+        )
+        # Additional logic such as notifying the requester
+
+    async def create_embed(self):
+        """Create the initial embed for the proposition."""
+        self.embed = discord.Embed(
+            title=f"{self.character_name}'s Trade Request",
+            description=f"{self.character_name} has requested to trade with {self.recipient_name}.\n"
+                        f"Please accept or reject this transaction.",
+            color=discord.Color.blurple()
+        )
+        if any((self.seafood, self.produce, self.grain, self.husbandry)):
+            self.embed.add_field(name="Food",
+                                 value=f"Seafood: {self.seafood}\nProduce: {self.produce}\nGrain: {self.grain}\nHusbandry: {self.husbandry}")
+        if any((self.ore, self.stone, self.lumber, self.raw_textiles)):
+            self.embed.add_field(name="Raw Materials",
+                                 value=f"Ore: {self.ore}\nStone: {self.stone}\nLumber: {self.lumber}\nRaw Textiles: {self.raw_textiles}")
+        if any((self.textiles, self.metallurgy, self.woodworking, self.stoneworking)):
+            self.embed.add_field(name="Crafts",
+                                 value=f"Textiles: {self.textiles}\nMetallurgy: {self.metallurgy}\nWoodworking: {self.woodworking}\nStoneworking: {self.stoneworking}")
+        if any((self.magical_consumables, self.magical_items, self.mundane_exotic, self.mundane_complex)):
+            self.embed.add_field(name="Specialty",
+                                 value=f"Magical Consumables: {self.magical_consumables}\nMagical Items: {self.magical_items}\nMundane Exotic: {self.mundane_exotic}\nMundane Complex: {self.mundane_complex}")
+        self.embed.set_author(name=self.requester_name)
+        self.embed.set_footer(text="Please accept or reject this transaction before it expires.")
 
 
 logging.basicConfig(

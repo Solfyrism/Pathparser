@@ -735,6 +735,18 @@ class OverseerCommands(commands.Cog, name='overseer'):
         parent=overseer_group
     )
 
+    leadership_group = discord.app_commands.Group(
+        name='leadership',
+        description='Commands related to event management',
+        parent=overseer_group
+    )
+
+    event_group = discord.app_commands.Group(
+        name='event',
+        description='Commands related to event management',
+        parent=overseer_group
+    )
+
     @overseer_group.command()
     async def help(self, interaction: discord.Interaction):
         """Help commands for the associated tree"""
@@ -795,6 +807,25 @@ class OverseerCommands(commands.Cog, name='overseer'):
         except (TypeError, ValueError) as e:
             logging.exception(f"Error in kingdom_rebalance: {e}")
             await interaction.followup.send("An error occurred while balancing kingdom buildings.")
+
+    @kingdom_group.command(name='overpower', description='Overpower a kingdom and assume direct control.')
+    @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
+    async def kingdom_overpower(self, interaction: discord.Interaction, kingdom: str, password: str, character_name: str):
+        """Overpower a kingdom and assume direct control."""
+        await interaction.response.defer(thinking=True)
+        try:
+            new_password = await kingdom_commands.encrypt_password(password)
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("Update KB_Kingdoms SET Password = ? WHERE Kingdom = ?", (new_password, kingdom))
+                await cursor.execute("Update KB_Leadership SET Character_Name = ?, Player_ID = ? where kingdom = ?", (character_name, interaction.user.id, kingdom))
+                await db.commit()
+                await interaction.followup.send("You have successfully overpowered the kingdom, assigning yourself as King and setting all leaders to be you.")
+
+        except (TypeError, ValueError) as e:
+            logging.exception(f"Error in kingdom_overpower: {e}")
+            await interaction.followup.send("An error occurred while overpowering a kingdom.")
+
 
     @kingdom_group.command(name="build_points", description="Adjust the build points of a kingdom.")
     @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
@@ -1206,6 +1237,115 @@ class OverseerCommands(commands.Cog, name='overseer'):
         except (TypeError, ValueError) as e:
             logging.exception(f"Error in modify_blueprint: {e}")
             await interaction.followup.send("An error occurred while modifying a blueprint.")
+
+
+
+    @leadership_group.command(name="modify",
+                              description="Modify a leader, by changing their ability score or who is in charge")
+    @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
+    @app_commands.autocomplete(title=kingdom_commands.leadership_autocomplete)
+    async def modify_leadership(self, interaction: discord.Interaction, kingdom: str, password: str,
+                                character_name: str, title: str,
+                                modifier: int):
+        """This command is used to modify a leader's ability score or who is in charge of a kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password, Size FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+
+                await cursor.execute(
+                    "SELECT Ability, Economy, Loyalty, Stability FROM AA_Leadership_Roles WHERE Title = ?",
+                    (title,))
+                leadership_info = await cursor.fetchone()
+                (ability, economy, loyalty, stability) = leadership_info
+                abilities = ability.split(" / ")
+                options = [
+                    discord.SelectOption(label=ability) for ability in abilities
+                ]
+
+                additional = 1 if title != "Ruler" and kingdom_results[1] < 26 else 2
+                additional = 3 if title == "Ruler" and kingdom_results[1] < 101 else additional
+                view = kingdom_commands.LeadershipView(
+                    options, interaction.guild_id, interaction.user.id, kingdom, title, character_name,
+                    additional, economy, loyalty, stability, kingdom_results[1], modifier=modifier,
+                    recipient_id=interaction.user.id)
+
+                await interaction.followup.send("Please select an attribute:", view=view)
+            # Store the message object
+            view.message = await interaction.original_response()
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error modifying  Leadership: {e}")
+            await interaction.followup.send(content="An error occurred while modifying  Leadership.")
+
+    @leadership_group.command(name="remove", description="Remove a leader from a kingdom")
+    @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
+    @app_commands.autocomplete(title=kingdom_commands.leadership_autocomplete)
+    async def remove(self, interaction: discord.Interaction, kingdom: str, password: str, title: str):
+        """This command is used to remove a leader and make it a vacant position"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                status = await kingdom_commands.remove_leader(interaction.guild_id, interaction.user.id, kingdom, title)
+                await interaction.followup.send(content=status)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error removing leader: {e}")
+            await interaction.followup.send(content="An error occurred while removing the leader.")
+
+
+    @event_group.command(name="create", description="Create a new event for the kingdom")
+    @app_commands.choices(
+        scale=[discord.app_commands.Choice(name='Kingdom Event', value=1),
+             discord.app_commands.Choice(name='Settlement Event', value=0)])
+    @app_commands.choices(
+        hex=[discord.app_commands.Choice(name='affects a hex', value=1),
+                  discord.app_commands.Choice(name='does not affect hexes', value=0)])
+    @app_commands.choices(
+        requirements=[discord.app_commands.Choice(name='succeed at one check', value=1),
+                  discord.app_commands.Choice(name='succeed at both checks', value=2)])
+    @app_commands.choices(
+        type=[discord.app_commands.Choice(name='beneficial', value=1),
+                  discord.app_commands.Choice(name='problematic', value=2)])
+    @app_commands.choices(
+        first_check=[discord.app_commands.Choice(name='Loyalty', value=1),
+                     discord.app_commands.Choice(name='Stability', value=2),
+                     discord.app_commands.Choice(name='Economy', value=3)])
+    @app_commands.choices(
+        second_check=[discord.app_commands.Choice(name='Loyalty', value=1),
+                     discord.app_commands.Choice(name='Stability', value=2),
+                     discord.app_commands.Choice(name='Economy', value=3),
+                     discord.app_commands.Choice(name='Demand Building', value=4),
+                     discord.app_commands.Choice(name='Demand Improvement', value=5)])
+    @app_commands.autocomplete(shared_functions.region_autocomplete)
+    async def create_event(
+            self, interaction: discord.Interaction, scale: discord.app_commands[int], likelihood: int, name: str, description: str, special: typing.Optional[str],
+            type: discord.app_commands.Choice[int], first_check: typing.Optional[discord.app_commands.Choice[int]],
+            second_check: typing.Optional[discord.app_commands.Choice[int]], region: str = 'All',
+            hex: discord.app_commands.Choice[int] = 0, requirements: discord.app_commands.Choice[int] = 0):
+        """Create a new event for the kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Name from KB_Events where Name = ?", (name,))
+                event = await cursor.fetchone()
+                if event:
+                    await interaction.followup.send("An event with that name already exists.")
+                    return
+                await cursor.execute("INSERT INTO KB_Events (scale, likelihood, Region, Name, Description, Special, Type, First_Check, Second_Check, Hex, Success_Requirements) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                     (scale, likelihood, region, name, description, special, type.value, first_check.value, second_check.value, hex, requirements.value))
+        except (TypeError, ValueError) as e:
+            logging.exception(f"Error in create_event: {e}")
+            await interaction.followup.send("An error occurred while creating an event.")
+
+
 
 
 logging.basicConfig(
