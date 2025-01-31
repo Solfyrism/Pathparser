@@ -2895,7 +2895,7 @@ class AdminCommands(commands.Cog, name='admin'):
                 ephemeral=True)
 
     @roleplay_group.command(name='adjust_rp', description='Adjust the RP amount for a player')
-    async def adjust_rp(self, interaction: discord.Interaction, player: typing.Optiona[discord.Member], role: typing.Optional[discord.Role], amount: int):
+    async def adjust_rp(self, interaction: discord.Interaction, player: typing.Optional[discord.Member], role: typing.Optional[discord.Role], amount: int):
         """Adjust the RP amount for a player."""
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:

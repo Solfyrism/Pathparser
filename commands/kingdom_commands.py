@@ -179,7 +179,7 @@ async def blueprint_autocomplete(interaction: discord.Interaction, current: str
 
 
 async def improvement_subtype_autocomplete(interaction: discord.Interaction, current: str
-                                 ) -> typing.List[app_commands.Choice[str]]:
+                                           ) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
@@ -194,8 +194,9 @@ async def improvement_subtype_autocomplete(interaction: discord.Interaction, cur
                 data.append(app_commands.Choice(name=f"{blueprint[0]} produces {blueprint[1]}", value=blueprint[0]))
     return data
 
+
 async def blueprint_repurpose_autocomplete(interaction: discord.Interaction, current: str
-                                 ) -> typing.List[app_commands.Choice[str]]:
+                                           ) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
@@ -212,7 +213,7 @@ async def blueprint_repurpose_autocomplete(interaction: discord.Interaction, cur
 
 
 async def blueprint_upgrade_autocomplete(interaction: discord.Interaction, current: str
-                                 ) -> typing.List[app_commands.Choice[str]]:
+                                         ) -> typing.List[app_commands.Choice[str]]:
     data = []
     guild_id = interaction.guild_id
     async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
@@ -571,13 +572,16 @@ async def generate_leadership(
         INSERT INTO kb_Leadership (Kingdom, Title, Character_Name, Stat, Modifier, Economy,  Loyalty, Stability, Unrest)
         SELECT ?, Title, 'Vacant', 0, Null, VPEconomy, VPLoyalty, VPStability, VPUnrest FROM AA_Leadership_Roles
         """, (kingdom,))
-        await cursor.execute("""SELECT SUM(VPEconomy), SUM(VPLoyalty), SUM(VPStability), SUM(VPUnrest) FROM AA_Leadership_Roles""")
+        await cursor.execute(
+            """SELECT SUM(VPEconomy), SUM(VPLoyalty), SUM(VPStability), SUM(VPUnrest) FROM AA_Leadership_Roles""")
         vp_info = await cursor.fetchone()
-        await cursor.execute("""UPDATE kb_Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ? WHERE Kingdom = ?""",
-                             (vp_info[0], vp_info[1], vp_info[2], vp_info[3], kingdom))
+        await cursor.execute(
+            """UPDATE kb_Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ? WHERE Kingdom = ?""",
+            (vp_info[0], vp_info[1], vp_info[2], vp_info[3], kingdom))
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error generating leadership: {e}")
         return f"An error occurred while generating leadership. {e}"
+
 
 async def generate_permissions(
         db: aiosqlite.Connection,
@@ -591,7 +595,6 @@ async def generate_permissions(
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error generating permissions: {e}")
         return f"An error occurred while generating permissions. {e}"
-
 
 
 async def edit_a_kingdom(
@@ -718,6 +721,7 @@ async def adjust_bp(
         logging.exception(f"Error increasing build points: {e}")
         return "An error occurred while increasing build points."
 
+
 """
 async def adjust_sp(
         guild_id: int,
@@ -752,6 +756,7 @@ async def adjust_sp(
         logging.exception(f"Error increasing stabilization points: {e}")
         return "An error occurred while increasing stabilization points."
 """
+
 
 async def fetch_kingdom(
         guild_id: int,
@@ -900,8 +905,9 @@ async def claim_hex(
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute("Update KB_Hexes set Kingdom = ? WHERE Hex_ID = ?", (kingdom, hex_id))
-            await cursor.execute("UPDATE kb_Kingdoms SET Size = Size + 1, Control_DC = Control_DC + 1 WHERE Kingdom = ?",
-                                 (kingdom,))
+            await cursor.execute(
+                "UPDATE kb_Kingdoms SET Size = Size + 1, Control_DC = Control_DC + 1 WHERE Kingdom = ?",
+                (kingdom,))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
                 (author, datetime.datetime.now(), "Hexes", "Claim", f"Claimed the hex of {hex_id}"))
@@ -920,9 +926,11 @@ async def relinquish_hex(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("Update kb_hexes set Kingdom = Null WHERE Hex_ID = ? and Kingdom = ?", (hex_id, kingdom))
-            await cursor.execute("UPDATE kb_Kingdoms SET Size = Size - 1, Control_DC = Control_DC - 1 WHERE Kingdom = ?",
-                                 (kingdom,))
+            await cursor.execute("Update kb_hexes set Kingdom = Null WHERE Hex_ID = ? and Kingdom = ?",
+                                 (hex_id, kingdom))
+            await cursor.execute(
+                "UPDATE kb_Kingdoms SET Size = Size - 1, Control_DC = Control_DC - 1 WHERE Kingdom = ?",
+                (kingdom,))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
                 (author, datetime.datetime.now(), "Hexes", "relinquish", f"Unclaimed the hex of {hex_id}"))
@@ -970,23 +978,29 @@ async def add_an_improvement(
             if constructed >= base_hex_info['Type']:
                 return f"The improvement of {improvement} has reached its maximum amount. \r\nIf it is a farm You may want to convert an existing improvement to a different type."
             await cursor.execute("SELECT Amount FROM kb_hexes_constructed WHERE full_name = ? and Improvement = ?",
-                                    (improvement, hex_id))
+                                 (improvement, hex_id))
             availability = await cursor.fetchone()
             if iscost:
                 cost_modifier = improvement_info['Build_Points'] * improvement_info[f'{base_hex_info["Hex_Terrain"]}']
-                max_amount = min(base_hex_info[f'{improvement_info["Type"]}'] - constructed, amount, build_points // cost_modifier)
+                max_amount = min(base_hex_info[f'{improvement_info["Type"]}'] - constructed, amount,
+                                 build_points // cost_modifier)
                 build_cost = max_amount * cost_modifier
             else:
                 max_amount = min(base_hex_info[f'{improvement_info["Type"]}'] - constructed, amount)
                 build_cost = 0
-            await cursor.execute("Update Kingdoms Set Build_Points = Build_Points - ?, economy = economy + ?, Loyalty = loyalty + ?, Stability = stability + ?, Unrest = unrest + ? WHERE Kingdom = ?",
-                                 (build_cost, improvement_info['Economy'] * max_amount, improvement_info['Loyalty'] * max_amount, improvement_info['Stability'] * max_amount, improvement_info['Unrest'] * max_amount,  kingdom))
+            await cursor.execute(
+                "Update Kingdoms Set Build_Points = Build_Points - ?, economy = economy + ?, Loyalty = loyalty + ?, Stability = stability + ?, Unrest = unrest + ? WHERE Kingdom = ?",
+                (build_cost, improvement_info['Economy'] * max_amount, improvement_info['Loyalty'] * max_amount,
+                 improvement_info['Stability'] * max_amount, improvement_info['Unrest'] * max_amount, kingdom))
             if not availability:
                 await cursor.execute("""
                 INSERT into KB_Hexes_Constructed(ID, Full_Name, Type, Subtype, Quality, Amount, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation) 
                 VALUES 
                 (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (hex_id, improvement_info['Full_name'], improvement_info['Type'], improvement_info['Subtype'], improvement_info['Quality'], max_amount, improvement_info['Economy'], improvement_info['Loyalty'], improvement_info['Stability'], improvement_info['Unrest'], improvement_info['Consumption'], improvement_info['Defence'], improvement_info['Taxation']))
+                """, (hex_id, improvement_info['Full_name'], improvement_info['Type'], improvement_info['Subtype'],
+                      improvement_info['Quality'], max_amount, improvement_info['Economy'], improvement_info['Loyalty'],
+                      improvement_info['Stability'], improvement_info['Unrest'], improvement_info['Consumption'],
+                      improvement_info['Defence'], improvement_info['Taxation']))
             else:
                 await cursor.execute(
                     "UPDATE kb_hexes_constructed SET Amount = Amount + ? WHERE Full_Name = ? and ID = ?",
@@ -1025,7 +1039,8 @@ async def remove_improvement(
                     (amount, hex_id, hex_information.full_name))
             await cursor.execute(
                 "Update kb_Kingdoms SET size = size - ?, Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ? WHERE Kingdom = ?",
-                (amount, amount * hex_information.economy, amount * hex_information.loyalty, amount * hex_information.stability, amount * hex_information.unrest,
+                (amount, amount * hex_information.economy, amount * hex_information.loyalty,
+                 amount * hex_information.stability, amount * hex_information.unrest,
                  hex_information.consumption, kingdom))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
@@ -1037,6 +1052,7 @@ async def remove_improvement(
         logging.exception(f"Error removing improvement: {e}")
         return "An error occurred while removing the improvement."
 
+
 async def repurpose_an_improvement(
         guild_id: int,
         hex_id: int,
@@ -1046,29 +1062,42 @@ async def repurpose_an_improvement(
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
-            await cursor.execute("Select Amount from KB_Hexes_Constructed where Full_Name = ? and id = ?", (old_full_name, hex_Id))
+            await cursor.execute("Select Amount from KB_Hexes_Constructed where Full_Name = ? and id = ?",
+                                 (old_full_name, hex_id))
             availability = await cursor.fetchone()
             if not availability:
                 return f"No improvements of {old_full_name} are present."
             amount = min(amount, availability[0])
-            await cursor.execute("Select Full_Name from KB_Hexes_Improvements where Full_Name = ? and id = ?", (new_full_name,hex_id))
+            await cursor.execute("Select Full_Name from KB_Hexes_Improvements where Full_Name = ? and id = ?",
+                                 (new_full_name, hex_id))
             new_improvement = await cursor.fetchone()
             if not new_improvement:
                 return f"No improvements of {new_full_name} are present."
             await cursor.execute("Select Amount from KB_Hexes_Constructed where Full_Name = ?", (new_full_name,))
             new_availability = await cursor.fetchone()
             if availability[0] == amount and not new_availability:
-                await cursor.execute("UPDATE KB_Hexes_Constructed set Full_Name = ? where Full_Name = ? and id = ?", (new_full_name, old_full_name, hex_id))
+                await cursor.execute("UPDATE KB_Hexes_Constructed set Full_Name = ? where Full_Name = ? and id = ?",
+                                     (new_full_name, old_full_name, hex_id))
             elif availability[0] == amount and new_availability:
-                await cursor.execute("UPDATE KB_Hexes_Constructed set Amount = Amount + ? where Full_Name = ? and id = ?", (amount, new_full_name, hex_id))
-                await cursor.execute("DELETE from KB_Hexes_Constructed where Full_Name = ? and id = ?", (old_full_name,hex_id))
+                await cursor.execute(
+                    "UPDATE KB_Hexes_Constructed set Amount = Amount + ? where Full_Name = ? and id = ?",
+                    (amount, new_full_name, hex_id))
+                await cursor.execute("DELETE from KB_Hexes_Constructed where Full_Name = ? and id = ?",
+                                     (old_full_name, hex_id))
             elif availability[0] != amount and not new_availability:
-                await cursor.execute("UPDATE KB_Hexes_Constructed set Amount = Amount - ? where Full_Name = ? and id = ?", (amount, old_full_name, hex_id))
+                await cursor.execute(
+                    "UPDATE KB_Hexes_Constructed set Amount = Amount - ? where Full_Name = ? and id = ?",
+                    (amount, old_full_name, hex_id))
                 await cursor.execute("""INSERT into KB_Hexes_Constructed (ID, Full_Name, Type, Subtype, Quality, Amount, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation)
-                SELECT ?, full_name, Type, Subtype, Quality, ?, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation FROM KB_Hexes_Improvements where Full_Name = ?""", (hex_id, amount, new_full_name))
+                SELECT ?, full_name, Type, Subtype, Quality, ?, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation FROM KB_Hexes_Improvements where Full_Name = ?""",
+                                     (hex_id, amount, new_full_name))
             else:
-                await cursor.execute("UPDATE KB_Hexes_Constructed set Amount = Amount + ? where Full_Name = ? and id = ?", (amount, new_full_name, hex_id))
-                await cursor.execute("UPDATE KB_Hexes_Constructed set Amount = Amount - ? where Full_Name = ? and id = ?", (amount, old_full_name, hex_id))
+                await cursor.execute(
+                    "UPDATE KB_Hexes_Constructed set Amount = Amount + ? where Full_Name = ? and id = ?",
+                    (amount, new_full_name, hex_id))
+                await cursor.execute(
+                    "UPDATE KB_Hexes_Constructed set Amount = Amount - ? where Full_Name = ? and id = ?",
+                    (amount, old_full_name, hex_id))
             await db.commit()
             return f"{amount} improvements of {old_full_name} have been repurposed to {new_full_name}."
     except (aiosqlite.Error, TypeError, ValueError) as e:
@@ -1319,7 +1348,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("""select Kingdom, Password FROM kb_Kingdoms where Kingdom = ?""",(kingdom,))
+                await cursor.execute("""select Kingdom, Password FROM kb_Kingdoms where Kingdom = ?""", (kingdom,))
                 result = await cursor.fetchone()
                 if result is None:
                     status = f"the kingdom which you have elected to make a war crime out of couldn't be found."
@@ -1517,7 +1546,8 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
     @app_commands.autocomplete(title=leadership_autocomplete)
     @app_commands.autocomplete(character_name=shared_functions.character_select_autocompletion)
-    async def modify_leadership(self, interaction: discord.Interaction, kingdom: str, password: str, character_name: str, title: str,
+    async def modify_leadership(self, interaction: discord.Interaction, kingdom: str, password: str,
+                                character_name: str, title: str,
                                 modifier: int):
         """This command is used to modify a leader's ability score or who is in charge of a kingdom"""
         await interaction.response.defer(thinking=True)
@@ -1535,7 +1565,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                     return
                 await cursor.execute(
                     "SELECT Ability, Economy, Loyalty, Stability FROM AA_Leadership_Roles WHERE Title = ?",
-                    (title, ))
+                    (title,))
                 leadership_info = await cursor.fetchone()
                 (ability, economy, loyalty, stability) = leadership_info
                 abilities = ability.split(" / ")
@@ -1581,7 +1611,6 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
 
     @hex_group.command(name="claim", description="Claim a hex for a kingdom")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
-    @app_commands.autocomplete(hex_terrain=hex_terrain_autocomplete)
     async def claim(self, interaction: discord.Interaction, kingdom: str, password: str, hex_id: int):
         """This command is used to claim a hex for a kingdom"""
         await interaction.response.defer(thinking=True)
@@ -1603,10 +1632,12 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                     await interaction.followup.send(content=f"The hex of {hex_id} does not exist.")
                     return
                 elif hex_results[0]:
-                    await interaction.followup.send(content=f"The hex of {hex_id} is already claimed by {hex_results[0]}.")
+                    await interaction.followup.send(
+                        content=f"The hex of {hex_id} is already claimed by {hex_results[0]}.")
                     return
                 elif hex_results[1] != kingdom_results[1]:
-                    await interaction.followup.send(content=f"The hex of {hex_id} is not in the kingdom's region of {kingdom_results[1]}.")
+                    await interaction.followup.send(
+                        content=f"The hex of {hex_id} is not in the kingdom's region of {kingdom_results[1]}.")
                     return
                 status = await claim_hex(guild_id=interaction.guild_id, author=interaction.user.id, kingdom=kingdom,
                                          hex_id=hex_id)
@@ -1617,7 +1648,6 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
 
     @hex_group.command(name="relinquish", description="relinquish a hex for a kingdom")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
-    @app_commands.autocomplete(hex_terrain=hex_terrain_autocomplete)
     async def relinquish_hex(self, interaction: discord.Interaction, kingdom: str, password: str, hex_id: int):
         """This command is used to relinquish a hex for a kingdom"""
         await interaction.response.defer(thinking=True)
@@ -1646,7 +1676,6 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
 
     @hex_group.command(name="improve", description="Add an improvement to a hex")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
-    @app_commands.autocomplete(hex_terrain=hex_terrain_autocomplete)
     @app_commands.autocomplete(improvement=hex_improvement_autocomplete)
     async def add_improvement(
             self,
@@ -1662,7 +1691,8 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 db.row_factory = aiosqlite.Row
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Password, Build_Points, Size FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                await cursor.execute("SELECT Password, Build_Points, Size FROM kb_Kingdoms WHERE Kingdom = ?",
+                                     (kingdom,))
                 kingdom_results = await cursor.fetchone()
                 if not kingdom_results:
                     await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
@@ -1761,11 +1791,10 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
             logging.exception(f"Error repurposing improvement: {e}")
             await interaction.followup.send(content="An error occurred while repurposing an improvement.")
 
-
-
     @settlement_group.command(name="claim", description="Claim a settlement for a kingdom")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
-    async def claim_settlement(self, interaction: discord.Interaction, kingdom: str, password: str, settlement: str, hex_id: int):
+    async def claim_settlement(self, interaction: discord.Interaction, kingdom: str, password: str, settlement: str,
+                               hex_id: int):
         """This command is used to claim a settlement for a kingdom"""
         await interaction.response.defer(thinking=True)
         try:
@@ -1796,9 +1825,11 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 await cursor.execute("Select Count(Full_Name) from KB_Hexes_Constructed Where ID = ?", (hex_id,))
                 improvements = await cursor.fetchone()
                 if improvements[0] > 0:
-                    await interaction.followup.send(content="The hex has improvements built upon it and cannot share them with a settlement!")
+                    await interaction.followup.send(
+                        content="The hex has improvements built upon it and cannot share them with a settlement!")
                     return
-                status = await claim_a_settlement(interaction.guild_id, interaction.user.id, kingdom, settlement, hex_id)
+                status = await claim_a_settlement(interaction.guild_id, interaction.user.id, kingdom, settlement,
+                                                  hex_id)
                 await interaction.followup.send(content=status)
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"Error claiming settlement: {e}")
@@ -1855,14 +1886,17 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                     await interaction.followup.send(content="The settlement is not claimed.")
                     return
 
-                await cursor.execute("SELECT Kingdom from KB_Buildings_Permits where Kingdom = ? AND Building_Name = ?", (kingdom, building))
+                await cursor.execute("SELECT Kingdom from KB_Buildings_Permits where Kingdom = ? AND Building_Name = ?",
+                                     (kingdom, building))
                 permits = await cursor.fetchone()
                 if permits is None:
                     await interaction.followup.send(content="The kingdom does not have a permit for this building.")
                     return
                 building_info = await fetch_building(interaction.guild_id, building)
                 cost = building_info.build_points * amount
-                await cursor.execute("SELECT SUM(Amount * Quality) from KB_Buildings where Kingdom = ? and Settlement = ? and Subtype = 'Housing'", (kingdom, settlement))
+                await cursor.execute(
+                    "SELECT SUM(Amount * Quality) from KB_Buildings where Kingdom = ? and Settlement = ? and Subtype = 'Housing'",
+                    (kingdom, settlement))
                 supply = await cursor.fetchone()
                 if settlement_info[0] + (amount * building_info.supply) > supply[0]:
                     await interaction.followup.send(
@@ -1880,7 +1914,9 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                     discountable = amount_built - discounted
                     discounted_change = min(discountable, discount_count)
                     discount_count -= min(discountable, discount_count)
-                    await cursor.execute("UPDATE KB_Buildings SET Discounted = Discounted + ? WHERE Kingdom = ? and Settlement = ? and Full_Name = ?", (discounted_change, kingdom, settlement, full_name))
+                    await cursor.execute(
+                        "UPDATE KB_Buildings SET Discounted = Discounted + ? WHERE Kingdom = ? and Settlement = ? and Full_Name = ?",
+                        (discounted_change, kingdom, settlement, full_name))
                     if discount_count == 0:
                         break
                 cost -= building_info.build_points * .5 * (amount - discount_count)
@@ -1935,7 +1971,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
             logging.exception(f"Error destroying building: {e}")
             await interaction.followup.send(content="An error occurred while destroying a building.")
 
-    @settlement_group.command(name="Upgrade", description="upgrade a building in a settlement")
+    @settlement_group.command(name="upgrade", description="upgrade a building in a settlement")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
     @app_commands.autocomplete(settlement=settlement_autocomplete)
     @app_commands.autocomplete(building=blueprint_upgrade_autocomplete)
@@ -1956,7 +1992,9 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 if not valid_password:
                     await interaction.followup.send(content="The password provided is incorrect.")
                     return
-                await cursor.execute("Select Amount from KB_Buildings where Kingdom = ? and Settlement = ? and Full_Name = ?", (kingdom, settlement, building))
+                await cursor.execute(
+                    "Select Amount from KB_Buildings where Kingdom = ? and Settlement = ? and Full_Name = ?",
+                    (kingdom, settlement, building))
                 settlement_info = await cursor.fetchone()
                 if not settlement_info:
                     await interaction.followup.send(content=f"Settlement of {settlement} has no {building}s built!")
@@ -1980,9 +2018,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
             logging.exception(f"Error upgrading building: {e}")
             await interaction.followup.send(content="An error occurred while upgrading a building.")
 
-
-
-    @settlement_group.command(name="Repurpose", description="Change the behavior of a building")
+    @settlement_group.command(name="repurpose", description="Change the behavior of a building")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
     @app_commands.autocomplete(settlement=settlement_autocomplete)
     @app_commands.autocomplete(old_purpose=blueprint_repurpose_autocomplete)
@@ -2004,13 +2040,18 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 if not valid_password:
                     await interaction.followup.send(content="The password provided is incorrect.")
                     return
-                await cursor.execute("Select Amount from KB_Buildings where Kingdom = ? and Settlement = ? and Full_Name = ?", (kingdom, settlement, old_purpose))
+                await cursor.execute(
+                    "Select Amount from KB_Buildings where Kingdom = ? and Settlement = ? and Full_Name = ?",
+                    (kingdom, settlement, old_purpose))
                 settlement_info = await cursor.fetchone()
                 if not settlement_info:
-                    await interaction.followup.send(content=f"Settlement of {settlement} has no {old_purpose} buildings built!")
+                    await interaction.followup.send(
+                        content=f"Settlement of {settlement} has no {old_purpose} buildings built!")
                     return
                 amount = min(amount, settlement_info[0])
-                await cursor.execute("Select Amount from KB_Buildings where Kingdom = ? and Settlement = ? and Full_Name = ?", (kingdom, settlement, new_purpose))
+                await cursor.execute(
+                    "Select Amount from KB_Buildings where Kingdom = ? and Settlement = ? and Full_Name = ?",
+                    (kingdom, settlement, new_purpose))
                 new_building_count = await cursor.fetchone()
                 old_building_info = await fetch_building(interaction.guild_id, old_purpose)
                 new_building_info = await fetch_building(interaction.guild_id, new_purpose)
@@ -2018,24 +2059,33 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                     await interaction.followup.send(content=f"Building types do not match!")
                     return
                 if not new_building_count and amount == settlement_info[0]:
-                    await cursor.execute("UPDATE KB_Buildings Set Full_Name = ?, Subtype = ? where Kingdom = ? and Settlement = ? and Full_Name = ?", (new_purpose, new_building_info.subtype, kingdom, settlement, old_purpose))
+                    await cursor.execute(
+                        "UPDATE KB_Buildings Set Full_Name = ?, Subtype = ? where Kingdom = ? and Settlement = ? and Full_Name = ?",
+                        (new_purpose, new_building_info.subtype, kingdom, settlement, old_purpose))
                 elif new_building_count and amount == settlement_info[0]:
-                    await cursor.execute("UPDATE KB_Buildings Set Amount = Amount + ? where Kingdom = ? and Settlement = ? and Full_Name = ?", (amount, kingdom, settlement, new_purpose))
-                    await cursor.execute("DELETE FROM KB_Buildings where Kingdom = ? and Settlement = ? and Full_Name = ?", (kingdom, settlement, old_purpose))
+                    await cursor.execute(
+                        "UPDATE KB_Buildings Set Amount = Amount + ? where Kingdom = ? and Settlement = ? and Full_Name = ?",
+                        (amount, kingdom, settlement, new_purpose))
+                    await cursor.execute(
+                        "DELETE FROM KB_Buildings where Kingdom = ? and Settlement = ? and Full_Name = ?",
+                        (kingdom, settlement, old_purpose))
                 else:
-                    await cursor.execute("UPDATE KB_Buildings Set Amount = Amount + ? where Kingdom = ? and Settlement = ? and Full_Name = ?", (amount, kingdom, settlement, new_purpose))
-                    await cursor.execute("UPDATE KB_Buildings Set Amount = Amount - ? where Kingdom = ? and Settlement = ? and Full_Name = ?", (amount, kingdom, settlement, old_purpose))
-                await interaction.followup.send(content=f"{amount} {old_purpose} buildings have been repurposed into {new_purpose}!")
+                    await cursor.execute(
+                        "UPDATE KB_Buildings Set Amount = Amount + ? where Kingdom = ? and Settlement = ? and Full_Name = ?",
+                        (amount, kingdom, settlement, new_purpose))
+                    await cursor.execute(
+                        "UPDATE KB_Buildings Set Amount = Amount - ? where Kingdom = ? and Settlement = ? and Full_Name = ?",
+                        (amount, kingdom, settlement, old_purpose))
+                await interaction.followup.send(
+                    content=f"{amount} {old_purpose} buildings have been repurposed into {new_purpose}!")
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"Error repurposing building: {e}")
             await interaction.followup.send(content="An error occurred while repurposing a building.")
 
-
-
     @kingdom_group.command(name="event", description="display and handle kingdom events")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
     @app_commands.choices(
-        change=[discord.app_commands.Choice(name='Problematic', value=1),
+        intent=[discord.app_commands.Choice(name='Problematic', value=1),
                 discord.app_commands.Choice(name='Ongoing', value=2),
                 discord.app_commands.Choice(name='Temporary', value=3)]
     )
@@ -2054,14 +2104,14 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
                 if not valid_password:
                     await interaction.followup.send(content="The password provided is incorrect.")
                     return
-                view = KingdomEventView(user_id=interaction.user.id, guild_id=interaction.guild_id, intent=intent, kingdom=kingdom)
+                view = KingdomEventView(user_id=interaction.user.id, guild_id=interaction.guild_id, intent=intent,
+                                        kingdom=kingdom)
                 await view.update_results()
                 await view.create_embed()
                 await view.send()
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"Error displaying kingdom events: {e}")
             await interaction.followup.send(content="An error occurred while displaying kingdom events.")
-
 
 
 class KingdomView(shared_functions.ShopView):
@@ -2122,7 +2172,8 @@ class KingdomView(shared_functions.ShopView):
 
 
 class SettlementView(shared_functions.ShopView):
-    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, interaction: discord.Interaction, kingdom: str):
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, interaction: discord.Interaction,
+                 kingdom: str):
         super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction,
                          content="")
         self.max_items = None  # Cache total number of items
@@ -2167,10 +2218,13 @@ class SettlementView(shared_functions.ShopView):
         for item in self.results:
             (group_id, player_name) = item
             self.embed.add_field(name=f'**Player**: {player_name}', value=f'**Group**: {group_id}', inline=False)
-            (kingdom, settlement, size, population, corruption, crime, productivity, law, lore, society, danger, defence,
-             base_value, spellcasting, supply, decay, custom_corruption, custom_crime, custom_productivity, custom_law,
-             custom_lore, custom_society, custom_danger, custom_defence, custom_base_value, custom_spellcasting,
-             custom_supply) = item
+            (
+                kingdom, settlement, size, population, corruption, crime, productivity, law, lore, society, danger,
+                defence,
+                base_value, spellcasting, supply, decay, custom_corruption, custom_crime, custom_productivity,
+                custom_law,
+                custom_lore, custom_society, custom_danger, custom_defence, custom_base_value, custom_spellcasting,
+                custom_supply) = item
             self.embed.add_field(name=f'**Kingdom**: {kingdom} **Settlement**: {settlement}', value=f"""
             **Size**: {size}, **Population**: {population}\n
             **Corruption**: {corruption}, **Crime**: {crime}, **Productivity**: {productivity}\n
@@ -2189,6 +2243,7 @@ class SettlementView(shared_functions.ShopView):
             **Danger**: {custom_danger}, **Defence**: {custom_defence}\n
             **Base Value**: {custom_base_value}, **Spellcasting**: {custom_spellcasting}, **Supply**: {custom_supply}
             """, inline=False)'''
+
     async def get_max_items(self):
         """Get the total number of titles."""
         if self.max_items is None:
@@ -2241,6 +2296,7 @@ class HexView(shared_functions.ShopView):
             **Economy**: {economy}, **Loyalty**: {loyalty}, **Stability**: {stability}\n
             **Unrest**: {unrest}, **Consumption**: {consumption}\n
             **Defence**: {defence}, **Taxation**: {taxation}""", inline=False)
+
     async def get_max_items(self):
         """Get the total number of titles."""
         if self.max_items is None:
@@ -2377,7 +2433,6 @@ class BlueprintView(shared_functions.ShopView):
             **Settlement Limit**: {settlement_limit}, **District Limit**: {district_limit}\n
             **Description**: {description}""", inline=False)
 
-
     async def get_max_items(self):
         """Get the total number of titles."""
         if self.max_items is None:
@@ -2402,27 +2457,52 @@ class KingdomEventView(discord.ui.View):
         self.intent = intent
         self.offset = 0
         self.limit = 10
+        self.event_list = []
+        self.max = None
         self.embed = None
         self.message = None
         self.results = None
         # Initialize buttons
-        self.first_page_button = discord.ui.Button(label='First Page', style=discord.ButtonStyle.primary, row=1)
-        self.previous_page_button = discord.ui.Button(label='Previous Page', style=discord.ButtonStyle.primary, row=1)
-        self.change_page_button = discord.ui.Button(label='Change View', style=discord.ButtonStyle.primary, row=1)
-        self.next_page_button = discord.ui.Button(label='Next Page', style=discord.ButtonStyle.primary, row=1)
-        self.last_page_button = discord.ui.Button(label='Last Page', style=discord.ButtonStyle.primary, row=1)
 
-        self.first_page_button.callback = self.first_page
-        self.previous_page_button.callback = self.previous_page
-        self.change_page_button.callback = self.change_page
-        self.next_page_button.callback = self.next_page
-        self.last_page_button.callback = self.last_page
+    async def update_buttons(self):
+        self.clear_items()
+        await self.update_results()
+        max_items = await self.get_max_items()
+        first_page = self.offset <= 0
+        last_page = self.offset + self.limit >= max_items
 
-        self.add_item(self.first_page_button)
-        self.add_item(self.previous_page_button)
-        self.add_item(self.change_page_button)
-        self.add_item(self.next_page_button)
-        self.add_item(self.last_page_button)
+        first_page_button = discord.ui.Button(label='First Page', style=discord.ButtonStyle.primary, row=1)
+        first_page_button.disabled = first_page
+        previous_page_button = discord.ui.Button(label='Previous Page', style=discord.ButtonStyle.primary, row=1)
+        previous_page_button.disabled = first_page
+        change_page_button = discord.ui.Button(label='Change View', style=discord.ButtonStyle.primary, row=1)
+        next_page_button = discord.ui.Button(label='Next Page', style=discord.ButtonStyle.primary, row=1)
+        next_page_button.disabled = last_page
+        last_page_button = discord.ui.Button(label='Last Page', style=discord.ButtonStyle.primary, row=1)
+        last_page_button.disabled = last_page
+
+        first_page_button.callback = self.first_page
+        previous_page_button.callback = self.previous_page
+        change_page_button.callback = self.change_page
+        next_page_button.callback = self.next_page
+        last_page_button.callback = self.last_page
+
+        self.add_item(first_page_button)
+        self.add_item(previous_page_button)
+        self.add_item(change_page_button)
+        self.add_item(next_page_button)
+        self.add_item(last_page_button)
+
+        for idx, event in enumerate(self.event_list):
+            button = discord.ui.Button(label=event[0], style=discord.ButtonStyle.primary, row=2 + idx // 5)
+            button.callback = self.create_button_callback(event)
+            self.add_item(button)
+
+    def create_button_callback(self, event):
+        async def button_callback(interaction: discord.Interaction):
+            await self.roll_check(interaction, event)
+
+        return button_callback
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Ensure that only the user who initiated the view can interact with the buttons."""
@@ -2441,9 +2521,8 @@ class KingdomEventView(discord.ui.View):
             await interaction.response.send_message("You are already on the first page.", ephemeral=True)
             return
         self.offset = 0
-        await self.update_results()
-        await self.create_embed()
         await self.update_buttons()
+        await self.create_embed()
         await interaction.edit_original_response(
             embed=self.embed,
             view=self
@@ -2456,9 +2535,9 @@ class KingdomEventView(discord.ui.View):
             self.offset -= self.limit
             if self.offset < 0:
                 self.offset = 0
-            await self.update_results()
-            await self.create_embed()
+
             await self.update_buttons()
+            await self.create_embed()
             await interaction.edit_original_response(
                 embed=self.embed,
                 view=self
@@ -2476,9 +2555,8 @@ class KingdomEventView(discord.ui.View):
             self.intent = 3
         elif self.intent == 3:
             self.intent = 1
-        await self.update_results()
-        await self.create_embed()
         await self.update_buttons()
+        await self.create_embed()
         await interaction.edit_original_response(
             embed=self.embed,
             view=self
@@ -2490,9 +2568,8 @@ class KingdomEventView(discord.ui.View):
         max_items = await self.get_max_items()
         if self.offset + self.limit < max_items:
             self.offset += self.limit
-            await self.update_results()
-            await self.create_embed()
             await self.update_buttons()
+            await self.create_embed()
             await interaction.edit_original_response(
                 embed=self.embed,
                 view=self
@@ -2507,9 +2584,8 @@ class KingdomEventView(discord.ui.View):
         last_page_offset = (max_items // self.limit) * self.limit
         if self.offset != last_page_offset:
             self.offset = last_page_offset
-            await self.update_results()
-            await self.create_embed()
             await self.update_buttons()
+            await self.create_embed()
             await interaction.edit_original_response(
                 embed=self.embed,
                 view=self
@@ -2517,23 +2593,12 @@ class KingdomEventView(discord.ui.View):
         else:
             await interaction.followup.send("You are on the last page.", ephemeral=True)
 
-    async def update_buttons(self):
-        """Update the enabled/disabled state of buttons based on the current page."""
-        max_items = await self.get_max_items()
-        first_page = self.offset == 1
-        last_page = self.offset + self.limit - 1 >= max_items
-
-        self.first_page_button.disabled = first_page
-        self.previous_page_button.disabled = first_page
-        self.next_page_button.disabled = last_page
-        self.last_page_button.disabled = last_page
 
     async def send_initial_message(self):
         """Send the initial message with the view."""
         try:
-            await self.update_results()
-            await self.create_embed()
             await self.update_buttons()
+            await self.create_embed()
             await self.interaction.followup.send(
                 embed=self.embed,
                 view=self
@@ -2561,23 +2626,44 @@ class KingdomEventView(discord.ui.View):
                             WHERE Kingdom = ? AND Type = 'Problematic' 
                             Limit ? Offset ?
                         """
+            event_statement = """
+                        SELECT Name, Kingdom, Settlement, Check_A, Check_B, Check_A_Status, Check_B_Status
+                        FROM KB_Events_Active 
+                        WHERE Kingdom = ? AND Type = 'Problematic'  AND (Check_A IS NOT NULL OR Check_B IS NOT NULL)
+                        Limit ? Offset ?
+                        """
         elif self.intent == 2:
             statement = """
-                            SELECT ID, Type, Kingdom, Settlement, Hex, Name, Effect, Duration, Check_A, Check_A_Status, Check_B, Check_B_Status
-                            FROM KB_Events_Active 
-                            WHERE Kingdom = ? 
-                            Limit ? Offset ?
+                        SELECT ID, Type, Kingdom, Settlement, Hex, Name, Effect, Duration, Check_A, Check_A_Status, Check_B, Check_B_Status
+                        FROM KB_Events_Active 
+                        WHERE Kingdom = ? 
+                        Limit ? Offset ?
                         """
-        elif self.intent == 3:
+            event_statement = """
+            SELECT Name, Kingdom, Settlement, Check_A, Check_B, Check_A_Status, Check_B_Status
+            FROM KB_Events_Active 
+            WHERE Kingdom = ?  AND (Check_A IS NOT NULL OR Check_B IS NOT NULL)
+            Limit ? Offset ?
+            """
+        else:
             statement = """
                             SELECT ID, Type, Kingdom, Settlement, Hex, Name, Effect, Duration, Check_A, Check_A_Status, Check_B, Check_B_Status
                             FROM KB_Events_Active 
                             WHERE Kingdom = ? AND Duration > 0 
                             Limit ? Offset ?
                         """
+            event_statement = """
+                                SELECT Name, Kingdom, Settlement, Check_A, Check_B, Check_A_Status, Check_B_Status
+                                FROM KB_Events_Active 
+                                WHERE Kingdom = ? AND Duration > 0 AND (Check_A IS NOT NULL OR Check_B IS NOT NULL)
+                                Limit ? Offset ?
+                        """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
-            cursor = await db.execute(statement, (self.kingdom, self.limit, self.offset))
+            cursor = await db.cursor()
+            await cursor.execute(statement, (self.kingdom, self.limit, self.offset))
             self.results = await cursor.fetchall()
+            await cursor.execute(event_statement, (self.kingdom, self.limit, self.offset))
+            self.event_list = await cursor.fetchall()
 
     async def create_embed(self):
         """Create the embed for the current page. To be implemented in subclasses."""
@@ -2595,13 +2681,9 @@ class KingdomEventView(discord.ui.View):
             self.embed = discord.Embed(
                 title=f"Temporary Events for {self.kingdom}",
                 description=f"Page {current_page} of {total_pages}")
-
-        for idx, item in enumerate(self.results):
-            (id, type, kingdom, settlement, hex, name, effect, duration, check_a, check_a_status, check_b, check_b_status) = item
-            if check_a or check_b:
-                button = discord.ui.Button(label=f"Roll: {name} (ID: {id})", style=discord.ButtonStyle.secondary, row=idx // 5 + 1)
-                button.callback = lambda interaction, event_id=id, event_name=name, check_a=check_a, check_b=check_b: self.roll_check(interaction, event_id, event_name, check_a, check_b)
-                self.add_item(button)
+        for item in self.results:
+            (id, type, kingdom, settlement, hex, name, effect, duration, check_a, check_a_status, check_b,
+             check_b_status) = item
             status_dict = {0: "Not Attempetd", 1: "Passed", 2: "Failed"}
             duration = f"{duration} turns" if duration > 0 else "Ongoing"
             field_content = f"**Type**: {type}, Duration: {duration}"
@@ -2611,18 +2693,22 @@ class KingdomEventView(discord.ui.View):
             field_content += f"\r\n**{check_b}**: {status_dict[check_a_status]}" if check_a else ""
             field_content += f"\r\n**{check_b}**: {status_dict[check_b_status]}" if check_b else ""
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
-                cursor = await db.execute("SELECT Name, Severity, Type, Value, Reroll FROM KB_Events_Consequence where Name = ? Order BY Severity asc", (name,))
+                cursor = await db.execute(
+                    "SELECT Name, Severity, Type, Value, Reroll FROM KB_Events_Consequence where Name = ? Order BY Severity asc",
+                    (name,))
                 unforeseen_consequences = await cursor.fetchall()
-                consequence_rolltype_dict = {0: "Set", 1: "Randomized", 2: "Per building sharing this trait", 3: "Percentile Effect", 4: "Randomized with 'exploding' reroll on max", 5: "Singular Effect that explodes on Max"}
+                consequence_rolltype_dict = {0: "Set", 1: "Randomized", 2: "Per building sharing this trait",
+                                             3: "Percentile Effect", 4: "Randomized with 'exploding' reroll on max",
+                                             5: "Singular Effect that explodes on Max"}
                 if type == "Problematic":
-                    consequence_severity_dict = {0: "No Action or failed rolls", 1: "Passed 1 Check", 2: "passed 2 checks"}
+                    consequence_severity_dict = {0: "No Action or failed rolls", 1: "Passed 1 Check",
+                                                 2: "passed 2 checks"}
                 else:
                     consequence_severity_dict = {0: "No Action Required"}
                 for consequence in unforeseen_consequences:
                     (name, severity, type, value, reroll) = consequence
                     field_content += f"\r\n**Consequence**: {name}, **Severity**: {consequence_severity_dict[severity]}, **Effects**: {type}, **Value**: {value}, **Reroll**: {consequence_rolltype_dict[reroll]}"
             self.embed.add_field(name=f'**Event**: {name} ID: {id}', value=field_content, inline=False)
-
 
     async def get_max_items(self):
         """Get the total number of items. To be implemented in subclasses."""
@@ -2649,10 +2735,11 @@ class KingdomEventView(discord.ui.View):
             count = await cursor.fetchone()
             return count[0]
 
-    async def roll_check(self, interaction: discord.Interaction, event_id: int, event_name: str, check_a: str, check_b: str):
+    async def roll_check(self, interaction: discord.Interaction, event: aiosqlite.Row):
         """Prompt the user to roll Check_A and Check_B if available."""
         await interaction.response.defer()
-
+        (event_id, event_name, kingdom, settlement, hex, name, effect, duration, check_a, check_a_status, check_b,
+         check_b_status) = event
         check_prompts = []
         if check_a:
             check_prompts.append(f"**Roll for {check_a}**")
@@ -2666,41 +2753,57 @@ class KingdomEventView(discord.ui.View):
             description=check_prompt_text,
             color=discord.Color.blue()
         )
+        view = CheckButton(check_a=check_a, check_b=check_b, kingdom=self.kingdom, settlement=None,
+                           guild_id=self.guild_id, event_id=event_id)
+
+        await interaction.followup.send(embed=embed, ephemeral=True, view=view)
 
 
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
-
-
-class CheckButton(discord.ui.Button):
-    def __init__(self, check: str, version: str, kingdom: str, settlement: typing.Optional[str], guild_id: int, event_id):
-        super().__init__(label=check, style=discord.ButtonStyle.success)
-        self.check = check
-        self.version = version
+class CheckButton(discord.ui.View):
+    def __init__(self, check_a: str, check_b: str, kingdom: str, settlement: typing.Optional[str], guild_id: int,
+                 event_id):
+        super().__init__(timeout=9000)
+        self.check_a = check_a
+        self.check_b = check_b
         self.kingdom = kingdom
         self.guild_id = guild_id
         self.event_id = event_id
         self.settlement = settlement
+        if check_a:
+            button = discord.ui.Button(label=check_a, style=discord.ButtonStyle.primary, row=1)
+            button.callback = self.create_button_callback(check=check_a, version="A")
+            self.add_item(button)
+        if check_b:
+            button = discord.ui.Button(label=check_b, style=discord.ButtonStyle.primary, row=1)
+            button.callback = self.create_button_callback(check=check_b, version="B")
+            self.add_item(button)
 
-    async def callback(self, interaction: discord.Interaction):
+    def create_button_callback(self, check: str, version: str):
+        async def button_callback(interaction: discord.Interaction):
+            await self.handle_button_check(interaction, check=check, version=version)
+        return button_callback
+
+    async def handle_button_check(self, interaction: discord.Interaction, check: str, version: str):
         try:
             async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                if self.version == "A":
-                    await cursor.execute("SELECT Check_A_Status, Name from KB_Events_Active where ID = ?", (self.event_id,))
-                elif self.version == "B":
-                    await cursor.execute("SELECT Check_B_Status, Name from KB_Events_Active where ID = ?", (self.event_id,))
+                if version == "A":
+                    await cursor.execute("SELECT Check_A_Status, Name from KB_Events_Active where ID = ?",
+                                         (self.event_id,))
+                elif version == "B":
+                    await cursor.execute("SELECT Check_B_Status, Name from KB_Events_Active where ID = ?",
+                                         (self.event_id,))
                 check_status = await cursor.fetchone()
                 if check_status[0] != 0:
                     await interaction.response.send_message(
-                        f"{self.check} has already been rolled for.", ephemeral=True
+                        f"{check} has already been rolled for.", ephemeral=True
                     )
                     return
-                if self.check == "Loyalty":
+                if check == "Loyalty":
                     statement = "SELECT Control_DC, Loyalty From KB_Kingdoms where Kingdom = ?"
-                elif self.check == "Stability":
+                elif check == "Stability":
                     statement = "SELECT  Control_DC, Stability From KB_Kingdoms where Kingdom = ?"
-                elif self.check == "Economy":
+                elif check == "Economy":
                     statement = "SELECT  Control_DC, Economy From KB_Kingdoms where Kingdom = ?"
                 await cursor.execute(statement, (self.kingdom,))
                 result = await cursor.fetchone()
@@ -2711,41 +2814,45 @@ class CheckButton(discord.ui.Button):
                     check_bonus = kingdom_dict.get(bonus_penalty[0], None)
                     check_bonus = settlement_dict.get(bonus_penalty[0], None) if not check_bonus else check_bonus
                     if check_bonus:
-                        await cursor.execute(f"SELECT Sum(Amount) from KB_Buildings Where Kingdom = ? and Settlement = ? AND {check_bonus} > 0",
-                                             (self.kingdom, self.settlement))
+                        await cursor.execute(
+                            f"SELECT Sum(Amount) from KB_Buildings Where Kingdom = ? and Settlement = ? AND {check_bonus} > 0",
+                            (self.kingdom, self.settlement))
                     else:
-                            await cursor.execute(
-                                "SELECT Sum(Amount) from KB_Buildings Where Kingdom = ? and Settlement = ? AND Type = ?",
-                                (self.kingdom, self.settlement, bonus_penalty[1]))
+                        await cursor.execute(
+                            "SELECT Sum(Amount) from KB_Buildings Where Kingdom = ? and Settlement = ? AND Type = ?",
+                            (self.kingdom, self.settlement, bonus_penalty[1]))
                     check_bonus = await cursor.fetchone()
                     check_result += check_bonus[0]
                 elif bonus_penalty[1]:
                     check_penalty = kingdom_dict.get(bonus_penalty[1], None)
-                    check_penalty = settlement_dict.get(bonus_penalty[1], None) if not check_penalty else check_penalty
+                    check_penalty = settlement_dict.get(bonus_penalty[1],
+                                                        None) if not check_penalty else check_penalty
                     if check_penalty:
-                        await cursor.execute(f"SELECT Sum(Amount) from KB_Buildings Where Kingdom = ? and Settlement = ? AND {check_penalty} > 0",
-                                             (self.kingdom, self.settlement))
+                        await cursor.execute(
+                            f"SELECT Sum(Amount) from KB_Buildings Where Kingdom = ? and Settlement = ? AND {check_penalty} > 0",
+                            (self.kingdom, self.settlement))
                     else:
-                        await cursor.execute("SELECT Sum(Amount) from KB_Buildings Where Kingdom = ? and Settlement = ? AND Type = ?",
-                                             (self.kingdom, self.settlement, bonus_penalty[1]))
+                        await cursor.execute(
+                            "SELECT Sum(Amount) from KB_Buildings Where Kingdom = ? and Settlement = ? AND Type = ?",
+                            (self.kingdom, self.settlement, bonus_penalty[1]))
                     check_penalty = await cursor.fetchone()
                     check_result -= check_penalty[0]
-                final_response = f"Rolling for {self.check} with a result of {check_result}."
+                final_response = f"Rolling for {check} with a result of {check_result}."
                 final_result = 1 if check_result >= result[0] else -1
-                final_response += f"\n{self.check} check {'passed' if final_result == 1 else 'failed'}"
-                if self.version == "A":
+                final_response += f"\n{check} check {'passed' if final_result == 1 else 'failed'}"
+                if check == "A":
                     statement = "UPDATE KB_Events_Active Set Check_A_Status = ? where ID = ?"
                 else:
                     statement = "UPDATE KB_Events_Active Set Check_B_Status = ? where ID = ?"
                 await cursor.execute(statement, (final_result, self.event_id))
                 await db.commit()
                 await interaction.response.send_message(content=final_response, ephemeral=True)
+                self.view.stop()
         except Exception as e:
             logging.exception(f"Error in Checkbutton callback: {e}")
             await interaction.response.send_message(
                 "An error occurred while finalizing your availability.", ephemeral=True
             )
-            self.view.stop()
 
 
 
