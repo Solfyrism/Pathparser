@@ -912,7 +912,8 @@ class RPCommands(commands.Cog, name='RP'):
                 usable = "Yes" if usable == 1 else "No"
                 sellable = "Yes" if sellable == 1 else "No"
                 embed.set_thumbnail(url=image_link)
-                content = f'**Price**: {price} {reward_name} {reward_emoji}, **Stock Remaining**: {stock_remaining}, \r\n**Inventory**: {inventory}\r\n' \
+                formatted_price = "{:,}".format(price)
+                content = f'**Price**: {formatted_price} {reward_name} {reward_emoji}, **Stock Remaining**: {stock_remaining}, \r\n**Inventory**: {inventory}\r\n' \
                           f'**Usable**: {usable}, **Sellable**: {sellable}\r\n'
 
                 embed.add_field(name=f'**Item Name**: {name}: **ID**: {item_ID}',

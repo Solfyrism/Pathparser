@@ -621,9 +621,10 @@ async def delete_session(
         raise e
 
 
-async def validate_overflow(guild: discord.Guild,
-                            session_range_id: int,
-                            overflow: int) -> Union[discord.Role, None]:
+async def validate_milestone_system_overflow(
+        guild: discord.Guild,
+        session_range_id: int,
+        overflow: int) -> Union[tuple[discord.Role, int, int], None]:
     try:
         async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
             cursor = await db.cursor()
@@ -643,11 +644,13 @@ async def validate_overflow(guild: discord.Guild,
                         "SELECT Role_ID FROM Level_Range WHERE level = ?",
                         (session_range_info[1] + 1,))
                     overflow_range_id = await cursor.fetchone()
-
+                    await cursor.execute(
+                        "SELECT Min(level), Max(level) FROM Level_Range WHERE Role_ID = ?", (overflow_range_id[0],))
+                    overflow_range_info = await cursor.fetchone()
                     session_range = guild.get_role(overflow_range_id[0])
 
                     if session_range is not None:
-                        return session_range
+                        return session_range, min(overflow_range_info[0], session_range_info[0]) , max(overflow_range_info[1], session_range_info[1])
 
                     else:
                         return None
@@ -666,11 +669,13 @@ async def validate_overflow(guild: discord.Guild,
                         "SELECT Role_ID FROM Level_Range WHERE level = ?",
                         (session_range_info[0] - 1,))
                     overflow_range_id = await cursor.fetchone()
-
+                    await cursor.execute(
+                        "SELECT Min(level), Max(level) FROM Level_Range WHERE Role_ID = ?", (overflow_range_id[0],))
+                    overflow_range_info = await cursor.fetchone()
                     session_range = guild.get_role(overflow_range_id[0])
 
                     if session_range is not None:
-                        return session_range
+                        return session_range, min(overflow_range_info[0], session_range_info[0]) , max(overflow_range_info[1], session_range_info[1])
 
                     else:
                         return None
@@ -687,6 +692,76 @@ async def validate_overflow(guild: discord.Guild,
 
     except discord.DiscordException as e:
         logging.exception(f"An error occurred whilst attempting to fetch the level range: {e}")
+
+async def validate_region_system_overflow(
+        guild: discord.Guild,
+        session_range_id: int,
+        overflow: int) -> Union[tuple[discord.Role, int, int], None]:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as db:
+            cursor = await db.cursor()
+            # overflow 1 is current range only, 2 includes next level bracket, 3 includes lower level bracket, 4 ignores role requirements
+
+            if overflow == 1:
+                return None
+
+            elif overflow == 2:
+                await cursor.execute(
+                    "SELECT Min_level, Max_Level, Region FROM Regions_Level_Range WHERE Role_ID = ?",
+                    (session_range_id,))
+                session_range_info = await cursor.fetchone()
+
+                if session_range_info is not None:
+                    (min_level, max_level, region) = session_range_info
+                    await cursor.execute(
+                        "SELECT Role_ID, min_level, max_level FROM Level_Range WHERE Min_Level <= ? And Region = ?",
+                        (max_level + 1, region))
+                    overflow_range_id = await cursor.fetchone()
+
+                    session_range = guild.get_role(overflow_range_id[0])
+
+                    if session_range is not None:
+                        return session_range, min(min_level, overflow_range_id[1]), max(max_level, overflow_range_id[2])
+
+                    else:
+                        return None
+
+                else:
+                    return None
+
+            elif overflow == 3:
+                await cursor.execute(
+                    "SELECT min_level, max_level, region FROM Level_Range WHERE Role_ID = ?",
+                    (session_range_id,))
+                session_range_info = await cursor.fetchone()
+
+                if session_range_info is not None:
+                    (min_level, max_level, region) = session_range_info
+                    await cursor.execute(
+                        "SELECT Role_ID, Min_level, Max_Level FROM Level_Range WHERE max_level >= ? and region = ?", (min_level - 1, region))
+                    overflow_range_id = await cursor.fetchone()
+
+                    session_range = guild.get_role(overflow_range_id[0])
+
+                    if session_range is not None:
+                        return session_range, min(min_level, overflow_range_id[1]), max(max_level, overflow_range_id[2])
+
+                    else:
+                        return None
+
+                else:
+                    return None
+
+            else:
+                return None
+
+    except (TypeError, ValueError) as e:
+        logging.exception(f"An error occurred whilst validating a level range: {e}")
+        return None
+
+    except discord.DiscordException as e:
+        logging.exception(f"An error occurred whilst attempting to fetch the level range: {e}")
+
 
 
 @dataclass
@@ -1031,15 +1106,22 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
             session_name, _ = name_fix(session_name)
             overflow_value = overflow if overflow == 1 else overflow.value
             level_range_text = f"{session_range.mention}"
-            if overflow_value != 1:
-                evaluated_session_range = await validate_overflow(
+            if overflow_value == 2 or overflow_value == 3:
+                evaluated_session_range = await validate_milestone_system_overflow(
                     guild=interaction.guild,
                     session_range_id=session_range.id,
                     overflow=overflow_value)
                 if evaluated_session_range is not None:
-                    level_range_text += f" and {evaluated_session_range.mention}"
-                elif overflow_value == 4:
-                    level_range_text += "\r\n Any level can join."
+                    level_range_text += f" and {evaluated_session_range[0].mention}"
+                else:
+                    evaluated_region_range = await validate_region_system_overflow(
+                        guild=interaction.guild,
+                        session_range_id=session_range.id,
+                        overflow=overflow_value)
+                    if evaluated_region_range is not None:
+                        level_range_text += f" and {evaluated_region_range[0].mention}"
+            elif overflow_value == 4:
+                level_range_text += "\r\n Any level can join."
             if game_link:
                 game_link_valid = shared_functions.validate_vtt(game_link)
                 if not game_link_valid[0]:
@@ -1244,12 +1326,19 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                 build_info_base.region = region.id if region is not None else build_info_base.region
                 if overflow:
                     if build_info_base.overflow != 1:
-                        evaluated_session_range = await validate_overflow(
+                        evaluated_session_range = await validate_milestone_system_overflow(
                             guild=interaction.guild,
                             session_range_id=build_info_base.session_range_id,
                             overflow=build_info_base.overflow)
                         if evaluated_session_range is not None:
-                            build_info_base.session_range += f" and {evaluated_session_range.mention}"
+                            build_info_base.session_range += f" and {evaluated_session_range[0].mention}"
+                        elif evaluated_session_range is None:
+                            evaluated_region_range = await validate_region_system_overflow(
+                                guild=interaction.guild,
+                                session_range_id=build_info_base.session_range_id,
+                                overflow=build_info_base.overflow)
+                            if evaluated_region_range is not None:
+                                build_info_base.session_range += f" and {evaluated_region_range[0].mention}"
                         elif build_info_base.overflow == 4:
                             build_info_base.session_range += "\r\n Any level can join."
                 if game_link:
@@ -2604,18 +2693,22 @@ class JoinOrLeaveSessionView(discord.ui.View):
                         level_range = await cursor.fetchone()
 
                         if level_range[0]:
-                            overflow_validation = await validate_overflow(guild=interaction.guild, overflow=overflow,
-                                                                          session_range_id=session_range_id)  # Overflow is typing.Optional[discord.Role]
+                            overflow_validation = await validate_milestone_system_overflow(
+                                guild=interaction.guild,
+                                overflow=overflow,
+                                session_range_id=session_range_id)  # Overflow is typing.Optional[discord.Role]
                             if overflow_validation:  # Overflow is a role
-                                await cursor.execute(
-                                    "Select Min(Level), Max(Level) from Milestone_System where Level_Range_ID = ?",
-                                    (overflow_validation.id,))
-                                overflow_level_range = await cursor.fetchone()
-                                minimum_level = min(overflow_level_range[0], level_range[0])
-                                maximum_level = max(overflow_level_range[1], level_range[1])
+                                range_results = overflow_validation
+                            else:
+                                overflow_validation = await validate_milestone_system_overflow(
+                                    guild=interaction.guild,
+                                    overflow=overflow,
+                                    session_range_id=session_range_id)  # Overflow is typing.Optional[discord.Role]
+                                range_results = overflow_validation
+                            if range_results:
                                 await cursor.execute(
                                     "SELECT Character_Name FROM Player_Characters WHERE Player_ID = ? AND Level >= ? AND Level <= ?",
-                                    (interaction.user.id, minimum_level, maximum_level))
+                                    (interaction.user.id, range_results[1], range_results[2]))
                                 character_names = await cursor.fetchall()
                                 return [character_name[0] for character_name in character_names]
                             else:  # Overflow is not a role
@@ -2625,6 +2718,7 @@ class JoinOrLeaveSessionView(discord.ui.View):
                                 character_names = await cursor.fetchall()
                                 return [character_name[0] for character_name in character_names]
                         else:  # No level range found in milestone system. Matching Role to user permissions.
+
 
                             user_valid = interaction.user.get_role(int(session_range_id))
 

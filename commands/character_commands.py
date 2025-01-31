@@ -211,7 +211,8 @@ async def level_calculation(
             f"Unexpected error in level calculation for character '{character_name}': {e}")
 
 
-async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: int, new_level: int, region: str) -> None:
+async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: int, new_level: int,
+                       region: str) -> None:
     try:
         await cursor.execute("SELECT Level, Level_Range_Name, Level_Range_ID FROM Milestone_System WHERE level = ?",
                              (new_level,))
@@ -259,8 +260,9 @@ async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: i
                         if level < min_level or level > max_level:
                             region_role = guild.get_role(int(new_role_id))
                             await member.add_roles(region_role)
-                            await cursor.execute("SELECT Min_level, Max_Level, Role_ID FROM Regions_Level_Range WHERE Name = ? and Min_Level <= ? and Max_Level >= ?",
-                                                 (region, level, level))
+                            await cursor.execute(
+                                "SELECT Min_level, Max_Level, Role_ID FROM Regions_Level_Range WHERE Name = ? and Min_Level <= ? and Max_Level >= ?",
+                                (region, level, level))
                             old_region_role = await cursor.fetchone()
                             if old_region_role:
                                 (min_level_old, max_level_old, old_region_role) = old_region_role
@@ -439,7 +441,8 @@ async def gold_calculation(
 ) -> Tuple[Decimal, Decimal, Decimal, Decimal, int]:
     time = datetime.datetime.now()
     try:
-        gold_value_calc = gold_value + gold_value_change if isinstance(gold_value_change, Decimal) else Decimal(gold_value) + Decimal(gold_change)
+        gold_value_calc = gold_value + gold_value_change if isinstance(gold_value_change, Decimal) else Decimal(
+            gold_value) + Decimal(gold_change)
 
         if gold_change > Decimal(0):
             if oath == 'Offerings' and not ignore_limitations:
@@ -458,7 +461,8 @@ async def gold_calculation(
                     print(oath, gold_value, gold_value_change, gold, max_gold)
                     if gold_value + gold_value_change >= gold + max_gold:
                         # Cannot gain more gold
-                        raise ValueError(f"Gold Value cannot exceed max of {max_gold}, you have {gold_value - gold}, this gives you {gold_value + gold_value_change - gold}")
+                        raise ValueError(
+                            f"Gold Value cannot exceed max of {max_gold}, you have {gold_value - gold}, this gives you {gold_value + gold_value_change - gold}")
 
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
             cursor = await conn.cursor()
@@ -474,17 +478,19 @@ async def gold_calculation(
                 adjusted_gold_change.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             )
 
-            gold_total = (Decimal(gold) + Decimal(adjusted_gold_change)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            gold_total = (Decimal(gold) + Decimal(adjusted_gold_change)).quantize(Decimal('0.01'),
+                                                                                  rounding=ROUND_HALF_UP)
             new_effective_gold = (
-                    Decimal(gold_value) + Decimal(final_gold_value_change).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+                    Decimal(gold_value) + Decimal(final_gold_value_change).quantize(Decimal('0.01'),
+                                                                                    rounding=ROUND_HALF_UP))
             gold_value_max_total = (
-                    Decimal(gold_value_max) + Decimal(final_gold_max_value_change)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    Decimal(gold_value_max) + Decimal(final_gold_max_value_change)).quantize(Decimal('0.01'),
+                                                                                             rounding=ROUND_HALF_UP)
 
             # Ensure gold values are not negative
             if gold_total < 0 or new_effective_gold < 0:
                 raise ValueError(
                     f"Gold cannot be negative: Gold of {gold_total}, effective gold of {new_effective_gold}.")
-
 
             # Before inserting into the database, convert Decimal to string after rounding
             adjusted_gold_change_str = str(adjusted_gold_change.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
@@ -801,7 +807,9 @@ class CharacterCommands(commands.Cog, name='character'):
         try:
             async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
                 cursor = await conn.cursor()
-                await cursor.execute("SELECT Player_ID, Character_Name, Level, Region FROM Player_Characters WHERE Character_Name = ? and Player_ID = ?", (character, author_id))
+                await cursor.execute(
+                    "SELECT Player_ID, Character_Name, Level, Region FROM Player_Characters WHERE Character_Name = ? and Player_ID = ?",
+                    (character, author_id))
                 character_info = await cursor.fetchone()
                 if character_info is None:
                     await interaction.followup.send(f"Character {character} not found")
@@ -810,50 +818,61 @@ class CharacterCommands(commands.Cog, name='character'):
                 if old_region == region:
                     await interaction.followup.send(f"Character {character} is already in {region}")
                     return
-                await cursor.execute("SELECT Role_ID, Channel_id FROM Regions WHERE Name = ?", (region,))
+                await cursor.execute("SELECT Role_ID, Channel_id, Coming FROM Regions WHERE Name = ?", (region,))
                 region_role = await cursor.fetchone()
+
                 if region_role is None:
                     await interaction.followup.send(f"Region {region} not found")
                     return
-                await cursor.execute("SELECT Role_ID, Channel_id FROM Regions WHERE Name = ?", (old_region,))
+                if not region_role[2]:
+                    await interaction.followup.send(f"Region {region} is not accepting characters")
+                    return
+
+                await cursor.execute("SELECT Role_ID, Channel_id, Going FROM Regions WHERE Name = ?", (old_region,))
                 old_region_role = await cursor.fetchone()
                 if old_region_role is not None:
-                    (old_role_id, old_channel) = old_region_role
+                    (old_role_id, old_channel, going) = old_region_role
+                    if not going:
+                        await interaction.followup.send(
+                            f"Region {old_region} cannot be escaped.\r\nYou will never leave.\r\nNo one will save you.\r\nEven The gods will abandon you.")
+                        return
+
                     if old_channel is not None:
                         old_text_channel = interaction.guild.get_channel(old_channel)
                         if not old_text_channel:
                             await interaction.guild.fetch_channel(old_channel)
-                        await old_text_channel.send(f"{datetime.date.today()}\r\nCharacter {character} moved to {region} by {author_name}\r\n{reason}")
+                        await old_text_channel.send(
+                            f"{datetime.date.today()}\r\nCharacter {character} moved to {region} by {author_name}\r\n{reason}")
                     await cursor.execute(
                         "SELECT Role_ID, Min_Level, Max_Level from Regions_Level_Range where Name = ? AND min_level <= ? AND max_level >= ?",
                         (old_region, level, level))
                     old_level_range = await cursor.fetchone()
-                    print(old_level_range)
+
                     if old_level_range:
                         (role_id, min_level_old, max_level_old) = old_level_range
                     else:
                         min_level_old = 0
                         max_level_old = 0
-                    await cursor.execute("UPDATE Player_Characters SET Region = ? WHERE Character_Name = ?",
-                                         (region, character))
+
                     await interaction.user.add_roles(interaction.guild.get_role(region_role[0]))
                     await cursor.execute("""
                     SELECT COUNT(*) AS Total_Characters,
                     SUM(CASE WHEN level BETWEEN ? AND ? THEN 1 ELSE 0 END) AS Characters_In_Range
                     FROM Player_Characters
                     WHERE Player_ID = ? and Region = ?;""",
-                    (min_level_old, max_level_old, author_id, old_region))
+                                         (min_level_old, max_level_old, author_id, old_region))
                     character_in_old_range = await cursor.fetchone()
-                    print(character_in_old_range)
-                    if character_in_old_range:
+                    if character_in_old_range and old_region:
                         (total_characters, characters_in_range) = character_in_old_range
                         if not total_characters:
                             await interaction.user.remove_roles(interaction.guild.get_role(old_region_role[0]))
                         if not characters_in_range:
                             await interaction.user.remove_roles(interaction.guild.get_role(old_level_range[0]))
-
-
-                await cursor.execute("SELECT Role_ID FROM Regions_Level_Range WHERE Name = ? AND Min_Level <= ? AND Max_Level >= ?", (region, level, level))
+                await cursor.execute("UPDATE Player_Characters SET Region = ? WHERE Character_Name = ?",
+                                     (region, character))
+                await cursor.execute(
+                    "SELECT Role_ID FROM Regions_Level_Range WHERE Name = ? AND Min_Level <= ? AND Max_Level >= ?",
+                    (region, level, level))
                 new_level_range = await cursor.fetchone()
                 if new_level_range:
                     await interaction.user.add_roles(interaction.guild.get_role(new_level_range[0]))
@@ -861,7 +880,8 @@ class CharacterCommands(commands.Cog, name='character'):
                 new_text_channel = interaction.guild.get_channel(region_role[1])
                 if not new_text_channel:
                     await interaction.guild.fetch_channel(region_role[1])
-                await new_text_channel.send(f"{datetime.date.today()}\r\nCharacter {character} moved from {old_region} to {region} by {interaction.user}\r\n{reason}")
+                await new_text_channel.send(
+                    f"{datetime.date.today()}\r\nCharacter {character} moved from {old_region} to {region} by {interaction.user}\r\n{reason}")
                 await interaction.followup.send(f"Character {character} moved from {old_region} to {region}")
         except aiosqlite.Error as e:
             logging.exception(f"Error in character move for {character}: {e}")
@@ -2382,7 +2402,8 @@ class CharacterCommands(commands.Cog, name='character'):
 
     @display_group.command(name='character',
                            description='display all character information or specific character information.')
-    @app_commands.describe(character_name="the character you are looking for. If you provide a character name, the command will display information for that character only prioritizing the character over the player.")
+    @app_commands.describe(
+        character_name="the character you are looking for. If you provide a character name, the command will display information for that character only prioritizing the character over the player.")
     @app_commands.autocomplete(character_name=shared_functions.character_select_autocompletion)
     async def display_info(self, interaction: discord.Interaction, player_name: typing.Optional[discord.Member],
                            character_name: typing.Optional[str],
@@ -2408,8 +2429,9 @@ class CharacterCommands(commands.Cog, name='character'):
                 (character_count,) = character_count
                 if character_name:
                     view_type = 2
-                    await cursor.execute("SELECT character_name, player_name from Player_Characters where Character_Name = ?",
-                                         (character_name,))
+                    await cursor.execute(
+                        "SELECT character_name, player_name from Player_Characters where Character_Name = ?",
+                        (character_name,))
                     character = await cursor.fetchone()
 
                     if not character:
@@ -2437,7 +2459,6 @@ class CharacterCommands(commands.Cog, name='character'):
                 page_number = min(max(page_number, 1), math.ceil(character_count / 20))
                 items_per_page = 5 if view_type == 1 else 1
                 offset = (page_number - 1) * items_per_page if view_type == 1 else offset
-
 
                 # Create and send the view with the results
                 view = CharacterDisplayView(
@@ -2651,7 +2672,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                 gold_value=Decimal(gold_value),
                                 gold_value_max=Decimal(gold_value_max),
                                 gold_value_change=change_gold_value,
-                                gold_value_max_change=change_gold_value-abs(Decimal(expenditure)),
+                                gold_value_max_change=change_gold_value - abs(Decimal(expenditure)),
                                 reason=reason,
                                 source='Character Gold Buy Command',
                                 author_name=interaction.user.name,
@@ -3562,7 +3583,6 @@ class GoldHistoryView(shared_functions.ShopView):
                         ORDER BY Transaction_ID DESC LIMIT ? OFFSET ? 
                     """
         async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
-
             cursor = await db.execute(statement, (self.character_name, self.limit, self.offset - 1))
             self.results = await cursor.fetchall()
 

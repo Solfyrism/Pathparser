@@ -427,6 +427,18 @@ class AdminCommands(commands.Cog, name='admin'):
         finally:
             return
 
+    @admin_group.command(name='announce', description='Announce a message to a channel')
+    async def announce(self, interaction: discord.Interaction, role: discord.Role, message: str):
+        """Announce a message to a channel."""
+        await interaction.response.defer(thinking=True, ephemeral=False)
+        try:
+            await interaction.followup.send(f"Announcing to {role.mention}:\n{message}")
+        except discord.errors.HTTPException:
+            logging.exception(f"Error in announce command")
+        finally:
+            return
+
+
     character_group = discord.app_commands.Group(
         name='character',
         description='Event settings commands',
@@ -2883,26 +2895,42 @@ class AdminCommands(commands.Cog, name='admin'):
                 ephemeral=True)
 
     @roleplay_group.command(name='adjust_rp', description='Adjust the RP amount for a player')
-    async def adjust_rp(self, interaction: discord.Interaction, player: discord.Member, amount: int):
+    async def adjust_rp(self, interaction: discord.Interaction, player: typing.Optiona[discord.Member], role: typing.Optional[discord.Role], amount: int):
         """Adjust the RP amount for a player."""
         await interaction.response.defer(thinking=True, ephemeral=False)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT balance from RP_Players WHERE user_id = ?", (player.id,))
-                rp_balance = await cursor.fetchone()
+                if player:
+                    await cursor.execute("SELECT balance from RP_Players WHERE user_id = ?", (player.id,))
+                    rp_balance = await cursor.fetchone()
 
-                if not rp_balance:
-                    await interaction.followup.send(f"{player.mention} does not have an RP balance.", ephemeral=True)
-                    return
+                    if not rp_balance:
+                        await db.execute(
+                            "INSERT INTO RP_Players (user_id, user_name, balance) "
+                            "VALUES (?, ?, ?)",
+                            (player.id, player.name, amount))
 
-                else:
                     await cursor.execute("UPDATE RP_Players SET balance = balance + ? WHERE user_id = ?",
                                          (amount, player.id))
                     await db.commit()
                     await interaction.followup.send(
                         f"RP balance for {player.mention} has been adjusted by {amount} they now have {rp_balance[0] + amount}.",
                         ephemeral=True)
+                if role:
+                    for player in role.members:
+                        await cursor.execute("SELECT balance from RP_Players WHERE user_id = ?", (player.id,))
+                        rp_balance = await cursor.fetchone()
+                        if not rp_balance:
+                            await db.execute(
+                                "INSERT INTO RP_Players (user_id, user_name, balance) "
+                                "VALUES (?, ?, ?)",
+                                (player.id, player.name, amount))
+                        await cursor.execute("UPDATE RP_Players SET balance = balance + ? WHERE user_id = ?",
+                                             (amount, player.id))
+                        await db.commit()
+                    await interaction.followup.send(
+                        f"RP balance for all members of {role.name} has been adjusted by {amount}.", ephemeral=True)
 
         except (aiosqlite.Error, ValueError) as e:
             logging.exception(

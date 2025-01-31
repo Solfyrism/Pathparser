@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import logging
 import math
+import random
 import typing
 from dataclasses import dataclass
 from decimal import Decimal
@@ -14,6 +15,31 @@ from discord.ext import commands
 from unidecode import unidecode
 import shared_functions
 from commands import character_commands
+
+settlement_dict = {
+    "Corruption": "Corruption",
+    "Crime": "Crime",
+    "Productivity": "Productivity",
+    "Law": "Law",
+    "Lore": "Lore",
+    "Society": "Society",
+    "Danger": "Danger",
+    "Defence": "Defence",
+    "Base Value": "Base_Value",
+    "Spellcasting": "Spellcasting",
+    "Supply": "Supply",
+}
+kingdom_dict = {
+    "Size": "Size",
+    "Population": "Population",
+    "Unallocated Population": "Unallocated_Population",
+    "Economy": "Economy",
+    "Loyalty": "Loyalty",
+    "Stability": "Stability",
+    "Fame": "Fame",
+    "Unrest": "Unrest",
+    "Consumption": "Consumption",
+}
 
 
 # Dataclasses
@@ -2006,6 +2032,36 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
 
 
 
+    @kingdom_group.command(name="event", description="display and handle kingdom events")
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    @app_commands.choices(
+        change=[discord.app_commands.Choice(name='Problematic', value=1),
+                discord.app_commands.Choice(name='Ongoing', value=2),
+                discord.app_commands.Choice(name='Temporary', value=3)]
+    )
+    async def kingdom_event(self, interaction: discord.Interaction, kingdom: str, password: str, intent: int):
+        """This command is used to display and handle kingdom events"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                view = KingdomEventView(user_id=interaction.user.id, guild_id=interaction.guild_id, intent=intent, kingdom=kingdom)
+                await view.update_results()
+                await view.create_embed()
+                await view.send()
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error displaying kingdom events: {e}")
+            await interaction.followup.send(content="An error occurred while displaying kingdom events.")
+
 
 
 class KingdomView(shared_functions.ShopView):
@@ -2330,6 +2386,366 @@ class BlueprintView(shared_functions.ShopView):
                 count = await cursor.fetchone()
                 self.max_items = count[0]
         return self.max_items
+
+
+class KingdomEventView(discord.ui.View):
+    """Base class for shop views with pagination."""
+
+    def __init__(self, user_id: int, guild_id: int, interaction: discord.Interaction,
+                 kingdom: str,
+                 intent: int):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.interaction = interaction
+        self.kingdom = kingdom
+        self.intent = intent
+        self.offset = 0
+        self.limit = 10
+        self.embed = None
+        self.message = None
+        self.results = None
+        # Initialize buttons
+        self.first_page_button = discord.ui.Button(label='First Page', style=discord.ButtonStyle.primary, row=1)
+        self.previous_page_button = discord.ui.Button(label='Previous Page', style=discord.ButtonStyle.primary, row=1)
+        self.change_page_button = discord.ui.Button(label='Change View', style=discord.ButtonStyle.primary, row=1)
+        self.next_page_button = discord.ui.Button(label='Next Page', style=discord.ButtonStyle.primary, row=1)
+        self.last_page_button = discord.ui.Button(label='Last Page', style=discord.ButtonStyle.primary, row=1)
+
+        self.first_page_button.callback = self.first_page
+        self.previous_page_button.callback = self.previous_page
+        self.change_page_button.callback = self.change_page
+        self.next_page_button.callback = self.next_page
+        self.last_page_button.callback = self.last_page
+
+        self.add_item(self.first_page_button)
+        self.add_item(self.previous_page_button)
+        self.add_item(self.change_page_button)
+        self.add_item(self.next_page_button)
+        self.add_item(self.last_page_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Ensure that only the user who initiated the view can interact with the buttons."""
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "You cannot interact with this button.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    async def first_page(self, interaction: discord.Interaction):
+        """Handle moving to the first page."""
+        await interaction.response.defer()
+        if self.offset == 0:
+            await interaction.response.send_message("You are already on the first page.", ephemeral=True)
+            return
+        self.offset = 0
+        await self.update_results()
+        await self.create_embed()
+        await self.update_buttons()
+        await interaction.edit_original_response(
+            embed=self.embed,
+            view=self
+        )
+
+    async def previous_page(self, interaction: discord.Interaction):
+        """Handle moving to the previous page."""
+        await interaction.response.defer()
+        if self.offset > 0:
+            self.offset -= self.limit
+            if self.offset < 0:
+                self.offset = 0
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.edit_original_response(
+                embed=self.embed,
+                view=self
+            )
+        else:
+            await interaction.followup.send("You are on the first page.", ephemeral=True)
+
+    async def change_page(self, interaction: discord.Interaction):
+        """Handle changing the view."""
+        await interaction.response.defer()
+        self.offset = 0
+        if self.intent == 1:
+            self.intent = 2
+        elif self.intent == 2:
+            self.intent = 3
+        elif self.intent == 3:
+            self.intent = 1
+        await self.update_results()
+        await self.create_embed()
+        await self.update_buttons()
+        await interaction.edit_original_response(
+            embed=self.embed,
+            view=self
+        )
+
+    async def next_page(self, interaction: discord.Interaction):
+        """Handle moving to the next page."""
+        await interaction.response.defer()
+        max_items = await self.get_max_items()
+        if self.offset + self.limit < max_items:
+            self.offset += self.limit
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.edit_original_response(
+                embed=self.embed,
+                view=self
+            )
+        else:
+            await interaction.followup.send("You are on the last page.", ephemeral=True)
+
+    async def last_page(self, interaction: discord.Interaction):
+        """Handle moving to the last page."""
+        await interaction.response.defer()
+        max_items = await self.get_max_items()
+        last_page_offset = (max_items // self.limit) * self.limit
+        if self.offset != last_page_offset:
+            self.offset = last_page_offset
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await interaction.edit_original_response(
+                embed=self.embed,
+                view=self
+            )
+        else:
+            await interaction.followup.send("You are on the last page.", ephemeral=True)
+
+    async def update_buttons(self):
+        """Update the enabled/disabled state of buttons based on the current page."""
+        max_items = await self.get_max_items()
+        first_page = self.offset == 1
+        last_page = self.offset + self.limit - 1 >= max_items
+
+        self.first_page_button.disabled = first_page
+        self.previous_page_button.disabled = first_page
+        self.next_page_button.disabled = last_page
+        self.last_page_button.disabled = last_page
+
+    async def send_initial_message(self):
+        """Send the initial message with the view."""
+        try:
+            await self.update_results()
+            await self.create_embed()
+            await self.update_buttons()
+            await self.interaction.followup.send(
+                embed=self.embed,
+                view=self
+            )
+            self.message = self.interaction.original_response()
+        except (discord.HTTPException, AttributeError) as e:
+            logging.error(f"Failed to send message: {e} in guild {self.interaction.guild.id} for {self.user_id}")
+
+    async def on_timeout(self):
+        """Disable buttons when the view times out."""
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                await self.message.edit(embed=self.embed, view=self)
+            except discord.HTTPException as e:
+                logging.error(f"Failed to edit message on timeout: {e}")
+
+    async def update_results(self):
+        """Fetch the results for the current page. To be implemented in subclasses."""
+        if self.intent == 1:
+            statement = """
+                            SELECT ID, Type, Kingdom, Settlement, Hex, Name, Effect, Duration, Check_A, Check_A_Status, Check_B, Check_B_Status
+                            FROM KB_Events_Active 
+                            WHERE Kingdom = ? AND Type = 'Problematic' 
+                            Limit ? Offset ?
+                        """
+        elif self.intent == 2:
+            statement = """
+                            SELECT ID, Type, Kingdom, Settlement, Hex, Name, Effect, Duration, Check_A, Check_A_Status, Check_B, Check_B_Status
+                            FROM KB_Events_Active 
+                            WHERE Kingdom = ? 
+                            Limit ? Offset ?
+                        """
+        elif self.intent == 3:
+            statement = """
+                            SELECT ID, Type, Kingdom, Settlement, Hex, Name, Effect, Duration, Check_A, Check_A_Status, Check_B, Check_B_Status
+                            FROM KB_Events_Active 
+                            WHERE Kingdom = ? AND Duration > 0 
+                            Limit ? Offset ?
+                        """
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.execute(statement, (self.kingdom, self.limit, self.offset))
+            self.results = await cursor.fetchall()
+
+    async def create_embed(self):
+        """Create the embed for the current page. To be implemented in subclasses."""
+        current_page = (self.offset // self.limit) + 1
+        total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+        if self.intent == 1:
+            self.embed = discord.Embed(
+                title=f"Problematic Events for {self.kingdom}",
+                description=f"Page {current_page} of {total_pages}")
+        elif self.intent == 2:
+            self.embed = discord.Embed(
+                title=f"Ongoing Events for {self.kingdom}",
+                description=f"Page {current_page} of {total_pages}")
+        elif self.intent == 3:
+            self.embed = discord.Embed(
+                title=f"Temporary Events for {self.kingdom}",
+                description=f"Page {current_page} of {total_pages}")
+
+        for idx, item in enumerate(self.results):
+            (id, type, kingdom, settlement, hex, name, effect, duration, check_a, check_a_status, check_b, check_b_status) = item
+            if check_a or check_b:
+                button = discord.ui.Button(label=f"Roll: {name} (ID: {id})", style=discord.ButtonStyle.secondary, row=idx // 5 + 1)
+                button.callback = lambda interaction, event_id=id, event_name=name, check_a=check_a, check_b=check_b: self.roll_check(interaction, event_id, event_name, check_a, check_b)
+                self.add_item(button)
+            status_dict = {0: "Not Attempetd", 1: "Passed", 2: "Failed"}
+            duration = f"{duration} turns" if duration > 0 else "Ongoing"
+            field_content = f"**Type**: {type}, Duration: {duration}"
+            field_content += f", **Settlement**: {settlement}" if settlement else ""
+            field_content += f", **Hex**: {hex}" if hex else ""
+            field_content += F"\r\n{effect}"
+            field_content += f"\r\n**{check_b}**: {status_dict[check_a_status]}" if check_a else ""
+            field_content += f"\r\n**{check_b}**: {status_dict[check_b_status]}" if check_b else ""
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                cursor = await db.execute("SELECT Name, Severity, Type, Value, Reroll FROM KB_Events_Consequence where Name = ? Order BY Severity asc", (name,))
+                unforeseen_consequences = await cursor.fetchall()
+                consequence_rolltype_dict = {0: "Set", 1: "Randomized", 2: "Per building sharing this trait", 3: "Percentile Effect", 4: "Randomized with 'exploding' reroll on max", 5: "Singular Effect that explodes on Max"}
+                if type == "Problematic":
+                    consequence_severity_dict = {0: "No Action or failed rolls", 1: "Passed 1 Check", 2: "passed 2 checks"}
+                else:
+                    consequence_severity_dict = {0: "No Action Required"}
+                for consequence in unforeseen_consequences:
+                    (name, severity, type, value, reroll) = consequence
+                    field_content += f"\r\n**Consequence**: {name}, **Severity**: {consequence_severity_dict[severity]}, **Effects**: {type}, **Value**: {value}, **Reroll**: {consequence_rolltype_dict[reroll]}"
+            self.embed.add_field(name=f'**Event**: {name} ID: {id}', value=field_content, inline=False)
+
+
+    async def get_max_items(self):
+        """Get the total number of items. To be implemented in subclasses."""
+        if self.intent == 1:
+            statement = """
+                            SELECT COUNT(*) 
+                            FROM KB_Events_Active 
+                            WHERE Kingdom = ? AND Type = 'Problematic'
+                        """
+        elif self.intent == 2:
+            statement = """
+                            SELECT COUNT(*) 
+                            FROM KB_Events_Active 
+                            WHERE Kingdom = ?
+                        """
+        elif self.intent == 3:
+            statement = """
+                            SELECT COUNT(*) 
+                            FROM KB_Events_Active 
+                            WHERE Kingdom = ? AND Duration > 0
+                        """
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.execute(statement, (self.kingdom,))
+            count = await cursor.fetchone()
+            return count[0]
+
+    async def roll_check(self, interaction: discord.Interaction, event_id: int, event_name: str, check_a: str, check_b: str):
+        """Prompt the user to roll Check_A and Check_B if available."""
+        await interaction.response.defer()
+
+        check_prompts = []
+        if check_a:
+            check_prompts.append(f"**Roll for {check_a}**")
+        if check_b:
+            check_prompts.append(f"**Roll for {check_b}**")
+
+        check_prompt_text = "\n".join(check_prompts) if check_prompts else "No checks required."
+
+        embed = discord.Embed(
+            title=f"Event Roll: {event_name} (ID: {event_id})",
+            description=check_prompt_text,
+            color=discord.Color.blue()
+        )
+
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+
+class CheckButton(discord.ui.Button):
+    def __init__(self, check: str, version: str, kingdom: str, settlement: typing.Optional[str], guild_id: int, event_id):
+        super().__init__(label=check, style=discord.ButtonStyle.success)
+        self.check = check
+        self.version = version
+        self.kingdom = kingdom
+        self.guild_id = guild_id
+        self.event_id = event_id
+        self.settlement = settlement
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                if self.version == "A":
+                    await cursor.execute("SELECT Check_A_Status, Name from KB_Events_Active where ID = ?", (self.event_id,))
+                elif self.version == "B":
+                    await cursor.execute("SELECT Check_B_Status, Name from KB_Events_Active where ID = ?", (self.event_id,))
+                check_status = await cursor.fetchone()
+                if check_status[0] != 0:
+                    await interaction.response.send_message(
+                        f"{self.check} has already been rolled for.", ephemeral=True
+                    )
+                    return
+                if self.check == "Loyalty":
+                    statement = "SELECT Control_DC, Loyalty From KB_Kingdoms where Kingdom = ?"
+                elif self.check == "Stability":
+                    statement = "SELECT  Control_DC, Stability From KB_Kingdoms where Kingdom = ?"
+                elif self.check == "Economy":
+                    statement = "SELECT  Control_DC, Economy From KB_Kingdoms where Kingdom = ?"
+                await cursor.execute(statement, (self.kingdom,))
+                result = await cursor.fetchone()
+                await cursor.execute("Select Bonus, Penalty FROM KB_Events WHERE Name = ?", (check_status[1],))
+                bonus_penalty = await cursor.fetchone()
+                check_result = random.randint(1, 20) + result[1]
+                if bonus_penalty[0]:
+                    check_bonus = kingdom_dict.get(bonus_penalty[0], None)
+                    check_bonus = settlement_dict.get(bonus_penalty[0], None) if not check_bonus else check_bonus
+                    if check_bonus:
+                        await cursor.execute(f"SELECT Sum(Amount) from KB_Buildings Where Kingdom = ? and Settlement = ? AND {check_bonus} > 0",
+                                             (self.kingdom, self.settlement))
+                    else:
+                            await cursor.execute(
+                                "SELECT Sum(Amount) from KB_Buildings Where Kingdom = ? and Settlement = ? AND Type = ?",
+                                (self.kingdom, self.settlement, bonus_penalty[1]))
+                    check_bonus = await cursor.fetchone()
+                    check_result += check_bonus[0]
+                elif bonus_penalty[1]:
+                    check_penalty = kingdom_dict.get(bonus_penalty[1], None)
+                    check_penalty = settlement_dict.get(bonus_penalty[1], None) if not check_penalty else check_penalty
+                    if check_penalty:
+                        await cursor.execute(f"SELECT Sum(Amount) from KB_Buildings Where Kingdom = ? and Settlement = ? AND {check_penalty} > 0",
+                                             (self.kingdom, self.settlement))
+                    else:
+                        await cursor.execute("SELECT Sum(Amount) from KB_Buildings Where Kingdom = ? and Settlement = ? AND Type = ?",
+                                             (self.kingdom, self.settlement, bonus_penalty[1]))
+                    check_penalty = await cursor.fetchone()
+                    check_result -= check_penalty[0]
+                final_response = f"Rolling for {self.check} with a result of {check_result}."
+                final_result = 1 if check_result >= result[0] else -1
+                final_response += f"\n{self.check} check {'passed' if final_result == 1 else 'failed'}"
+                if self.version == "A":
+                    statement = "UPDATE KB_Events_Active Set Check_A_Status = ? where ID = ?"
+                else:
+                    statement = "UPDATE KB_Events_Active Set Check_B_Status = ? where ID = ?"
+                await cursor.execute(statement, (final_result, self.event_id))
+                await db.commit()
+                await interaction.response.send_message(content=final_response, ephemeral=True)
+        except Exception as e:
+            logging.exception(f"Error in Checkbutton callback: {e}")
+            await interaction.response.send_message(
+                "An error occurred while finalizing your availability.", ephemeral=True
+            )
+            self.view.stop()
 
 
 

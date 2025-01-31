@@ -2025,7 +2025,7 @@ async def player_signup(
             cursor = await db.cursor()
             await cursor.execute(
                 """Select 
-                player_name, True_Character_Name, title, 
+                player_name, True_Character_Name, titlfe, 
                 level, tier, 
                 gold, gold_value, 
                 tradition_name, tradition_link, template_name, template_link, 
@@ -2426,20 +2426,29 @@ class PlayerCommands(commands.Cog, name='Player'):
                             if not quest_thread:
                                 raise ValueError(f"Thread {session_thread} not found in guild {interaction.guild_id}")
 
-                            if overflow == 2 or overflow == 3:
-                                secondary_role = await gamemaster_commands.validate_overflow(guild=interaction.guild,
-                                                                                             overflow=overflow,
-                                                                                             session_range_id=session_range_id)
-                                await cursor.execute(
-                                    "Select min(level), max(level) FROM Milestone_System WHERE  Level_Range_ID in (? , ?)",
-                                    (secondary_role.id, session_range_id))
-                            elif overflow == 1:
-                                await cursor.execute(
-                                    "Select min(level), max(level) Role_Name from Milestone_System WHERE Level_Range_ID = ?",
-                                    (session_range_id,))
-                            level_range_info = await cursor.fetchone()
-
-                            if overflow == 4:
+                            if overflow != 4:
+                                secondary_role = await gamemaster_commands.validate_milestone_system_overflow(
+                                    guild=interaction.guild,
+                                    overflow=overflow,
+                                    session_range_id=session_range_id)
+                                if not secondary_role:
+                                    secondary_role = await gamemaster_commands.validate_region_system_overflow(
+                                        guild=interaction.guild,
+                                        overflow=overflow,
+                                        session_range_id=session_range_id)
+                                else:
+                                    (secondary_role, min_level, max_level) = secondary_role
+                                if overflow == 1 or not secondary_role:
+                                    await cursor.execute(
+                                        "Select min(level), max(level) Role_Name from Milestone_System WHERE Level_Range_ID = ?",
+                                        (session_range_id,))
+                                    level_range_info = await cursor.fetchone()
+                                    (min_level, max_level, role_name) = level_range_info
+                                else:
+                                    (role_name, min_level, max_level) = secondary_role
+                            else:
+                                min_level = 0
+                                max_level = 999
                                 join_session = await player_signup(
                                     guild=interaction.guild,
                                     thread_id=session_thread,
@@ -2456,8 +2465,7 @@ class PlayerCommands(commands.Cog, name='Player'):
                                     await interaction.followup.send(
                                         f"Failed to sign up player {interaction.user.name} for session {session_name} ({session_id})",
                                         ephemeral=True)
-                            elif not level_range_info[0]:
-
+                            if not min_level or not max_level:
                                 role = interaction.guild.get_role(session_range_id)
                                 if not role:
                                     await interaction.followup.send(
@@ -2484,9 +2492,8 @@ class PlayerCommands(commands.Cog, name='Player'):
                                 else:
                                     await interaction.followup.send(
                                         f"You do not have the required role to join this session.", ephemeral=True)
-                            elif level_range_info[0]:
-                                print(level_range_info[0], level_range_info[1])
-                                if level_range_info[0] <= level <= level_range_info[1]:
+                            else:
+                                if min_level <= level <= max_level:
                                     join_session = await player_signup(
                                         guild=interaction.guild,
                                         thread_id=session_thread,
@@ -2736,9 +2743,10 @@ class PlayerCommands(commands.Cog, name='Player'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("Select Group_ID, Role_ID from Sessions_Group where Group_ID = ?", (group_id,))
+                await cursor.execute("Select Group_Name Group_ID, Role_ID, Player_Name from Sessions_Group where Group_ID = ?", (group_id,))
                 group = await cursor.fetchone()
                 if group:
+                    (group_name, role_id, player_name) = group
                     await cursor.execute(
                         "Select Group_ID, player_name from Sessions_Group_Presign where Group_ID = ? and Player_Name = ?",
                         (group_id, interaction.user.name))
@@ -2746,13 +2754,20 @@ class PlayerCommands(commands.Cog, name='Player'):
                     if previous_group:
                         await interaction.followup.send(f"You have already joined group {group_id}!")
                     else:
-                        try_to_join = await join_group(interaction.guild, interaction.user.name, interaction.user.id,
-                                                       group_id, group[1])
-                    if try_to_join:
-                        await interaction.followup.send(
-                            f"You have joined group {group_id}! with the role <@&{group[1]}>")
-                    else:
-                        await interaction.followup.send(f"Failed to join group {group_id}!")
+                        await cursor.execute("SELECT Player_ID from Player_Characters WHERE Player_Name = ?",)
+                        player_id_info = await cursor.fetchone()
+                        player_id = player_id_info[0]
+                        view = GroupJoinView(
+                            allowed_user_id=player_id,
+                            guild_id=interaction.guild.id,
+                            group_id=group_id,
+                            interaction=interaction,
+                            bot=self.bot,
+                            content=f"<@{player_id}> has requested to join group {group_name}! Do you accept?",
+                            group_name = group_name,
+                            requester_name=interaction.user.name,
+                            group_role_id=role_id
+                        )
                 else:
                     await interaction.followup.send(f"Group {group_id} could not be found!")
         except (aiosqlite.Error, TypeError) as e:
@@ -3456,3 +3471,69 @@ class DisplayGroupTimesheet(discord.ui.View):
             return self.max_range_id
 
 
+
+
+class GroupJoinView(shared_functions.RecipientAcknowledgementView):
+    def __init__(
+            self,
+            allowed_user_id: int,
+            requester_name: str,
+            bot: commands.Bot,
+            guild_id: int,
+            interaction: discord.Interaction,
+            group_id: int,
+            group_name: str,
+            group_role_id: int,
+            content: str
+    ):
+        super().__init__(allowed_user_id=allowed_user_id, interaction=interaction, content=content)
+        self.guild_id = guild_id
+        self.requester_name = requester_name
+        self.allowed_user_id = allowed_user_id
+        self.bot = bot
+        self.group_id = group_id
+        self.group_name = group_name
+        self.group_role_id = group_role_id
+        self.interaction = interaction
+
+
+    async def accepted(self, interaction: discord.Interaction):
+        """Handle the approval logic."""
+        # Update the database to mark the proposition as accepted
+        # Adjust prestige, log the transaction, notify the requester, etc.
+        self.embed = discord.Embed(
+            title="Group Join Accepted!",
+            description=f"<@{self.allowed_user_id}> has allowed <@{self.interaction.user.id}> to join their session!.",
+            color=discord.Color.green()
+        )
+        # Additional logic such as notifying the requester
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            await cursor.execute(
+                "INSERT INTO Sessions_Group_Presign (Group_ID, Player_Name) VALUES (?, ?)",
+                (self.group_id, self.interaction.user.name)
+            )
+            await conn.commit()
+            group_role = interaction.guild.get_role(self.group_role_id)
+            await self.interaction.user.add_roles(group_role)
+
+    async def rejected(self, interaction: discord.Interaction):
+        """Handle the rejection logic."""
+        # Update the database to mark the proposition as rejected
+
+        self.embed = discord.Embed(
+            title="Group Application Rejected",
+            description=f"The owner of this group did not desire you in their cohort.",
+            color=discord.Color.red()
+        )
+        # Additional logic such as notifying the requester
+
+    async def create_embed(self):
+        """Create the initial embed for the proposition."""
+        self.embed = discord.Embed(
+            title=f"Group Join Request \r\n: Group Name: {self.group_name}",
+            description=(
+                f"**Requester:** {self.requester_name}\n"
+            ),
+            color=discord.Color.blue()
+        )
