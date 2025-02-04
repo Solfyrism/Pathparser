@@ -9,6 +9,8 @@ import aiosqlite
 import discord
 from discord import app_commands
 from discord.ext import commands
+from unidecode import unidecode
+
 import shared_functions
 from commands import kingdom_commands
 
@@ -74,6 +76,394 @@ async def add_blueprint(
         return "An error occurred while adding a blueprint."
 
 
+async def general_kingdom_event(
+        db: aiosqlite.Connection,
+        kingdom: str, region: str) -> None:
+    try:
+        cursor = await db.cursor()
+        await cursor.execute("Select Likelihood, Type, Subtype FROM KB_Events_General")
+        event_list = await cursor.fetchall()
+        event = random.choices(event_list, weights=[event[0] for event in event_list])
+        if event[1] == "Kingdom" or event[1] == "Settlement":
+            await randomize_event_trigger(db=db, kingdom=kingdom, region=region, scale=event[1], type=event[2])
+        else:
+            await kingdom_event(db=db, kingdom=kingdom, region=region, event=event[1])
+    except (TypeError, ValueError, aiosqlite.Error) as error:
+        logging.exception(f"Error in general_kingdom_event: {error}")
+
+
+async def randomize_event_trigger(
+        db: aiosqlite.Connection,
+        kingdom: str, region: str,
+        type: typing.Optional[str], scale: str) -> None:
+    try:
+        cursor = await db.cursor()
+        if type:
+            await cursor.execute(
+                "Select Likelihood, Name FROM KB_Events WHERE Type = ? AND Scale = ? AND (Region = ? OR Region = 'All')",
+                (type, scale, region))
+        else:
+            await cursor.execute(
+                "Select Likelihood, Name FROM KB_Events WHERE Scale = ? AND (Region = ? OR Region = 'All')",
+                (scale, region))
+        event_list = await cursor.fetchall()
+        event = random.choices(event_list, weights=[event[0] for event in event_list])
+        if scale == "Settlement":
+            await cursor.execute("Select Kingdom, Settlement FROM KB_Settlements WHERE Kingdom = ? order by Random() limit 1", (kingdom,))
+            settlement = await cursor.fetchone()
+            if not settlement:
+                return
+        else:
+            settlement = None
+        await kingdom_event(db=db, kingdom=kingdom, region=region, event=event[1], settlement=settlement)
+    except (TypeError, ValueError, aiosqlite.Error) as error:
+        logging.exception(f"Error in beneficial_kingdom_event: {error}")
+
+
+async def kingdom_event(
+        db: aiosqlite.Connection,
+        kingdom: str,
+        region: typing.Optional[str],
+        event: str,
+        settlement: typing.Optional[str],
+        specified_hex: typing.Optional[str] = None) -> None:
+    try:
+        cursor = await db.cursor()
+        await cursor.execute("SELECT Name, Type, Value, Reroll FROM KB_Events_Consequence WHERE Event = ? AND Severity = -1", (event,))
+        respawn_list = await cursor.fetchall()
+        spawns = 0
+        spawn_building = 0
+        despawn_building = 0
+        spawn_improvement = 0
+        despawn_improvement = 0
+        for respawn in respawn_list:
+            (name, type, value, reroll) = respawn
+            if reroll == 4 and type == 'Respawn':
+                spawns += exploding_roll(value)
+            elif reroll == 5 and type == 'Respawn':
+                spawns += exploding_instance(value)
+            elif reroll == 1 and type == 'Respawn':
+                spawns += random.randint(1, value)
+            elif reroll == 0 and type == 'Respawn':
+                spawns += value
+            spawn_improvement += value if type == 'Build Random Improvement' else 0
+            despawn_improvement += value if type == 'Destroy Random Improvement' else 0
+            spawn_building += value if type == 'Build Random Building' else 0
+            despawn_building += value if type == 'Destroy Random Building' else 0
+
+        for x in range(spawns):
+            await cursor.execute(
+                "SELECT Type, Name, Effect, Special, Check_A, Check_B, Success_Requirement, Duration, Bonus, Penalty, Hex")
+            event_info = await cursor.fetchone()
+            if not event_info:
+                raise ValueError("No event found.")
+            event_type, event_name, effect, special, check_a, check_b, success_requirement, duration, bonus, penalty, hex_affect = event_info
+            if specified_hex:
+                hex_result = specified_hex
+                specified_hex = None
+            elif hex_affect == 1:
+                await cursor.execute("""
+                SELECT KH.ID
+                FROM KB_Hexes KH LEFT OUTER Join KB_events_active KEA ON KEA.Hex = KH.ID
+                WHERE KH.Kingdom = ? AND KEA.Name = ? AND KH.IsTown = 0
+                order by Random() LIMIT 1""", (kingdom, event_name))
+                hex_id = await cursor.fetchone()
+                if hex_id:
+                    hex_result = hex_id[0]
+                else:
+                    return
+            elif hex_affect == 2:
+                await cursor.execute("""
+                SELECT KH.ID
+                FROM KB_Hexes KH LEFT OUTER Join KB_events_active KEA ON KEA.Hex = KH.ID
+                WHERE KH.Kingdom != ? AND KEA.Name = ? AND KH.IsTown = 0
+                order by Random() LIMIT 1""", (kingdom, region, event_name))
+                hex_id = await cursor.fetchone()
+                if hex_id:
+                    hex_result = hex_id[0]
+                else:
+                    return
+            else:
+                hex_result = None
+            await cursor.execute("""INSERT into KB_Events_Active Kingdom, Settlement, Hex, Name, Effect, Duration, Check_A, Check_A_Status, Check_B, Check_B_Status, Active 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
+            kingdom, settlement, hex_result, event_name, effect, duration, check_a, False, check_b, False, True))
+            await cursor.execute(
+                """INSERT into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)""",
+                (0, datetime.datetime.now(), "KB_Events_Active", "Create", f"Created the event of {event_name}"))
+            for y in range(spawn_improvement):
+                await improvement_event(db=db, hex_id=hex_result, type='Spawn')
+            for z in range(despawn_improvement):
+                await improvement_event(db=db, hex_id=hex_result, type='Despawn')
+            for a in range(spawn_building):
+                await building_event(db=db, settlement=settlement, type='Spawn')
+            for b in range(despawn_building):
+                await building_event(db=db, settlement=settlement, type='Despawn')
+        await db.commit()
+    except (TypeError, ValueError, aiosqlite.Error) as error:
+        logging.exception(f"Error in kingdom_event: {error}")
+
+def exploding_roll(value):
+    respawns = 0
+    number_respawns = random.randint(1, abs(value))
+    respawns += number_respawns
+    while number_respawns == value:  # This will allow for the event to respawn multiple times.
+        number_respawns = random.randint(1, abs(value))
+        respawns += number_respawns
+    respawns = respawns if value > 0 else -respawns
+    return respawns
+
+def exploding_instance(value):
+    respawns = 1
+    number_respawns = random.randint(1, abs(value))
+    while number_respawns == value:  # This will allow for the event to respawn multiple times.
+        number_respawns = random.randint(1, abs(value))
+        respawns += number_respawns
+    respawns = respawns if value > 0 else -respawns
+    return respawns
+
+async def improvement_event(
+        db: aiosqlite.Connection,
+        hex_id: int,
+        type: str) -> None:
+    try:
+        cursor = await db.cursor()
+        if type == 'Spawn':
+            await cursor.execute("SELECT Kingdom, Hex_Terrain, Farm, Ore, Stone, Wood, Water, IsTown from KB_Hexes where ID = ?", (hex_id,))
+            hex_info = await cursor.fetchone()
+            if not hex_info:
+                raise ValueError("No hex found.")
+            (kingdom, terrain, farm, ore, stone, wood, water, is_town) = hex_info
+            if is_town:
+                raise ValueError("Cannot spawn improvements in towns.")
+            await cursor.execute("""
+                SELECT 
+                    SUM(CASE WHEN  name = 'Farm' THEN amount * quality ELSE 0 END) AS farm_total,
+                    SUM(CASE WHEN subtype = 'Ore' THEN amount * quality ELSE 0 END) AS ore_total,
+                    SUM(CASE WHEN subtype = 'Stone' THEN amount * quality ELSE 0 END) AS stone_total,
+                    SUM(CASE WHEN subtype = 'Wood' THEN amount * quality ELSE 0 END) AS wood_total,
+                    SUM(CASE WHEN subtype = 'Seafood' THEN amount * quality ELSE 0 END) AS seafood_total
+                FROM KB_Hexes_Constructed 
+                WHERE ID = ?;""",
+                (hex_id,))
+            resource_totals = await cursor.fetchone()
+            (resource_farm, resource_ore, resource_stone, resource_wood, resource_seafood) = resource_totals
+            select_statement = "SELECT Full_Name, Name, Subtype, Quality, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation FROM KB_Hexes_Improvements WHERE "
+            select_statement += terrain + " > 0"
+            select_statement += " name != 'Farm'" if farm <= resource_farm else ""
+            select_statement += " subtype != 'Ore'" if ore <= resource_ore else ""
+            select_statement += " subtype != 'Stone'" if stone <= resource_stone else ""
+            select_statement += " subtype != 'Wood'" if wood <= resource_wood else ""
+            select_statement += " subtype != 'Seafood'" if water <= resource_seafood else ""
+            select_statement += " ORDER BY Random() LIMIT 1"
+            await cursor.execute(select_statement)
+            improvement = await cursor.fetchone()
+            if not improvement:
+                return
+            (full_name, name, subtype, quality, economy, loyalty, stability, unrest, consumption, defence, taxation) = improvement
+            await cursor.execute("select amount from KB_Hexes_Construction where ID = ? and Full_Name = ?", (hex_id, full_name))
+            existing = await cursor.fetchone()
+            if not existing:
+                await cursor.execute(
+                    "INSERT INTO KB_Hexes_Constructed (ID, Name, Subtype, Quality, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (hex_id, full_name, name, subtype, quality, economy, loyalty, stability, unrest, consumption, defence,
+                     taxation))
+            else:
+                await cursor.execute(
+                    "UPDATE KB_Hexes_Constructed SET Amount = Amount + 1 WHERE ID = ? AND Full_Name = ?",
+                    (hex_id, full_name))
+            await cursor.execute(
+                "INSERT INTO A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
+                (0, datetime.datetime.now(), "KB_Hexes_Constructed", "Create",
+                 f"Created the improvement of {full_name}"))
+            if kingdom:
+                await cursor.execute("UPDATE KB_Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ?, Consumption = Consumption + ?, Defence = Defence + ?, Taxation = Taxation + ? WHERE Kingdom = ?", (economy, loyalty, stability, unrest, consumption, defence, taxation, kingdom))
+            await db.commit()
+        if type == 'Despawn':
+            await cursor.execute("SELECT kingdom, Full_Name, Economy, Loyalty, Stability, Unrest, Consumption, Defence, Taxation FROM KB_Hexes_Constructed WHERE ID = ? ORDER BY Random() LIMIT 1", (hex_id,))
+            improvement = await cursor.fetchone()
+            if not improvement:
+                return
+            (kingdom, full_name, economy, loyalty, stability, unrest, consumption, defence, taxation) = improvement
+            await cursor.execute("SELECT Amount FROM KB_Hexes_Constructed WHERE ID = ? AND Full_Name = ?", (hex_id, full_name))
+            amount = await cursor.fetchone()
+            if amount[0] == 1:
+                await cursor.execute("DELETE FROM KB_Hexes_Constructed WHERE ID = ? AND Full_Name = ?", (hex_id, full_name))
+            else:
+                await cursor.execute("UPDATE KB_Hexes_Constructed SET Amount = Amount - 1 WHERE ID = ? AND Full_Name = ?", (hex_id, full_name))
+            await cursor.execute(
+                "INSERT INTO A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
+                (0, datetime.datetime.now(), "KB_Hexes_Constructed", "Delete",
+                 f"Deleted the improvement of {full_name}"))
+            if kingdom:
+                await cursor.execute("UPDATE KB_Kingdoms SET Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Unrest = Unrest - ?, Consumption = Consumption - ?, Defence = Defence - ?, Taxation = Taxation - ? WHERE Kingdom = ?", (economy, loyalty, stability, unrest, consumption, defence, taxation, kingdom))
+            await db.commit()
+    except (TypeError, ValueError, aiosqlite.Error) as error:
+        logging.exception(f"Error in improvement_event: {error}")
+
+async def building_event(
+        db:aiosqlite.Connection,
+        settlement: str,
+        kingdom: str,
+        type: str) -> None:
+    try:
+        cursor = await db.cursor()
+        if type == 'Spawn':
+            await cursor.execute("SELECT Full_Name, Type, Subtype, Quality, Lots, Economy, Loyalty, Stability, Fame, Unrest, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply from KB_Buildings_Blueprints order by Random() LIMIT 1")
+            building_info = await cursor.fetchone()
+            if not building_info:
+                return
+            (full_name, type, subtype, quality, lots, economy, loyalty, stability, fame, unrest, corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting, supply) = building_info
+            await cursor.execute("SELECT Building, Constructed FROM KB_Buildings WHERE Kingdom = ? AND Settlement = ?", (kingdom, settlement))
+            settlement_info = await cursor.fetchone()
+            if not settlement_info:
+                await cursor.execute("""
+                INSERT INTO KB_Buildings (Kingdom, Settlement, Building, Constructed, Lots, 
+                Economy, Loyalty, Stability, Fame, Unrest, 
+                Corruption, Crime, Productivity, Law, Lore, Society, 
+                Danger, Defence, Base_Value, Spellcasting, 
+                Supply) VALUES(
+                ?, ?, ?, ?, ?, ?, 
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, 
+                ?""",( kingdom, settlement, full_name, 1, lots, economy, loyalty, stability, fame, unrest, corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting, supply))
+            else:
+                (building, constructed) = settlement_info
+                await cursor.execute("UPDATE KB_Buildings SET Constructed = Constructed + 1 WHERE Kingdom = ? AND Settlement = ? AND Building = ?", (kingdom, settlement, building))
+            await cursor.execute("INSERT INTO A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)", (0, datetime.datetime.now(), "KB_Buildings", "Create", f"Created the building of {full_name}"))
+            await cursor.execute("UPDATE KB_Settlements SET Corruption = Corruption + ?, Crime = Crime + ?, Productivity = Productivity + ?, Law = Law + ?, Lore = Lore + ?, Society = Society + ?, Danger = Danger + ?, Defence = Defence + ?, Base_Value = Base_Value + ?, Spellcasting = Spellcasting + ?, Supply = Supply + ? WHERE Kingdom = ? AND Settlement = ?", (economy, loyalty, stability, fame, unrest, corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting, supply, kingdom, settlement))
+            await cursor.execute("UPDATE KB_Kingdoms SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Fame = Fame + ?, Unrest = Unrest + ?, WHERE Kingdom = ?", (economy, loyalty, stability, fame, unrest, kingdom))
+            await db.commit()
+        if type == 'Despawn':
+            await cursor.execute("SELECT Building, Constructed, Lots, Economy, Loyalty, Stability, Fame, Unrest, Corruption, Crime, Productivity, Law, Lore, Society, Danger, Defence, Base_Value, Spellcasting, Supply FROM KB_Buildings WHERE Kingdom = ? AND Settlement = ? ORDER BY Random() LIMIT 1", (kingdom, settlement))
+            building_info = await cursor.fetchone()
+            if not building_info:
+                return
+            (building, constructed, lots, economy, loyalty, stability, fame, unrest, corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting, supply) = building_info
+            if constructed == 1:
+                await cursor.execute("DELETE FROM KB_Buildings WHERE Kingdom = ? AND Settlement = ? AND Building = ?", (kingdom, settlement, building))
+            else:
+                await cursor.execute("UPDATE KB_Buildings SET Constructed = Constructed - 1 WHERE Kingdom = ? AND Settlement = ? AND Building = ?", (kingdom, settlement, building))
+            await cursor.execute("INSERT INTO A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)", (0, datetime.datetime.now(), "KB_Buildings", "Delete", f"Deleted the building of {building}"))
+            await cursor.execute("UPDATE KB_Settlements SET Corruption = Corruption - ?, Crime = Crime - ?, Productivity = Productivity - ?, Law = Law - ?, Lore = Lore - ?, Society = Society - ?, Danger = Danger - ?, Defence = Defence - ?, Base_Value = Base_Value - ?, Spellcasting = Spellcasting - ?, Supply = Supply - ? WHERE Kingdom = ? AND Settlement = ?", (economy, loyalty, stability, fame, unrest, corruption, crime, productivity, law, lore, society, danger, defence, base_value, spellcasting, supply, kingdom, settlement))
+            await cursor.execute("UPDATE KB_Kingdoms SET Economy = Economy - ?, Loyalty = Loyalty - ?, Stability = Stability - ?, Fame = Fame - ?, Unrest = Unrest - ?, WHERE Kingdom = ?", (economy, loyalty, stability, fame, unrest, kingdom))
+            await db.commit()
+    except (TypeError, ValueError, aiosqlite.Error) as error:
+        logging.exception(f"Error in building_event: {error}")
+
+async def handle_severity(
+        db: aiosqlite.Connection,
+        severity: int,
+        kingdom: str,
+        region: str,
+        settlement: str,
+        hex_id: int,
+        event: str,
+        success_requirement: typing.Optional[int] = None,
+        duration: typing.Optional[int] = None,
+        event_id: typing.Optional[int] = None
+) -> None:
+    try:
+        cursor = db.cursor
+        await cursor.execute("SELECT Name, Type, Value, Reroll FROM KB_Events_Consequence WHERE Event = ? AND Severity = ?", (event, severity))
+        consequence_list = await cursor.fetchall()
+        if not consequence_list:
+            return
+        kingdom_status_dict = {"Build Points": "Build Points",
+                               "Fame": "Fame",
+                               "Unrest": "Unrest",
+                               "Population": "Population",}
+        for consequence in consequence_list:
+            (name, type, value, reroll) = consequence
+            if type == 'Respawn':
+                spawns = 0
+                if reroll == 4:
+                    spawns += exploding_roll(value)
+                elif reroll == 5:
+                    spawns += exploding_instance(value)
+                elif reroll == 1:
+                    spawns += random.randint(1, value)
+                elif reroll == 0:
+                    spawns += value
+                for x in range(spawns):
+                    await kingdom_event(db=db, kingdom=kingdom, region=region, event=name, settlement=settlement)
+            elif type == 'Build Random Improvement':
+                for x in range(value):
+                    await improvement_event(db=db, hex_id=hex_id, type='Spawn')
+            elif type == 'Destroy Random Improvement':
+                for x in range(value):
+                    await improvement_event(db=db, hex_id=hex_id, type='Despawn')
+            elif type == 'Build Random Building':
+                for x in range(value):
+                    await building_event(db=db, settlement=settlement, kingdom=kingdom, type='Spawn')
+            elif type == 'Destroy Random Building':
+                for x in range(value):
+                    await building_event(db=db, settlement=settlement, kingdom=kingdom, type='Despawn')
+            elif type in kingdom_status_dict:
+                await cursor.execute(f"UPDATE KB_Kingdoms SET {kingdom_status_dict[type]} = {kingdom_status_dict[type]} + ? WHERE Kingdom = ?", (value, kingdom))
+        if all([success_requirement, event_id]) and severity == success_requirement:
+            duration -= 1 if duration > 0 else duration
+            duration += 1 if duration < 0 else duration
+            if duration == 0:
+                await cursor.execute("DELETE FROM KB_Events_Active WHERE ID = ?", (event_id,))
+    except (TypeError, ValueError, aiosqlite.Error) as error:
+        logging.exception(f"Error in handle_severity: {error}")
+
+async def event_name_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[
+    app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild_id
+    async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        cursor = await db.cursor()
+        current = unidecode(str.title(current))
+        await cursor.execute(
+            "SELECT Name from KB_Events from KB_Events where Name like ? Limit 20",
+            (f"%{current}%",))
+        event_list = await cursor.fetchall()
+        for event in event_list:
+            if current in event[0]:
+                data.append(app_commands.Choice(name=event[0], value=event[0]))
+
+    return data
+
+
+async def type_value_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[
+    app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild_id
+    async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        cursor = await db.cursor()
+        current = unidecode(str.title(current))
+        await cursor.execute(
+            "SELECT DISTINCT(Type) from KB_Events_Consequence WHERE Type LIKE ? Limit 20",
+            (f"%{current}%",))
+        type_list = await cursor.fetchall()
+        for type in type_list:
+            if current in type[0]:
+                data.append(app_commands.Choice(name=type[0], value=type[0]))
+
+    return data
+
+
+async def modifier_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[
+    app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild_id
+    async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        cursor = await db.cursor()
+        current = unidecode(str.title(current))
+        await cursor.execute(
+            "SELECT DISTINCT(CASE WHEN Bonus is Null then Penalty else Bonus END) from kb_events WHERE penalty LIKE ? or bonus like ? Limit 20",
+            (f"%{current}%", f"%{current}%"))
+        modifier_list = await cursor.fetchall()
+        for modifier in modifier_list:
+            if current in modifier[0]:
+                data.append(app_commands.Choice(name=modifier[0], value=modifier[0]))
+
+    return data
+
+
 async def remove_blueprint(
         guild_id: int,
         author: int,
@@ -118,7 +508,8 @@ async def remove_blueprint(
                 await cursor.execute(
                     "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
                     (
-                    author, datetime.datetime.now(), "KB_Settlements", "Update", f"Removed the building of {building}"))
+                        author, datetime.datetime.now(), "KB_Settlements", "Update",
+                        f"Removed the building of {building}"))
                 await db.commit()
                 return status
     except (TypeError, ValueError, aiosqlite.Error) as error:
@@ -241,6 +632,78 @@ async def modify_blueprint(
         logging.exception(f"Error in modify_blueprint: {error}")
         return "An error occurred while modifying a blueprint."
 
+
+def allocate_food(required: int, available: dict[str, int]) -> dict[str, int]:
+    """
+    Given a required total food amount and a dictionary mapping resource names to
+    available amounts, return a dictionary showing how much of each resource should be consumed.
+
+    No single resource may contribute more than 50% (i.e. required/2), but each resource should
+    ideally contribute at least 15% of the required amount if possible.
+
+    The algorithm will always use the most abundant resource (up to the cap)
+    and then distribute the remaining requirement among the other resources
+    proportionally to their available amounts (each capped at required/2).
+
+    Parameters:
+      required: int -- The total food units needed.
+      available: dict -- Keys are resource names (e.g. 'meat', 'fish', etc.),
+                         and values are the available amounts.
+
+    Returns:
+      A dictionary with the same keys and the allocated consumption amounts.
+    """
+    cap = required / 2.0  # Maximum allowed per resource
+    min_contribution = required * 0.15  # Minimum contribution per resource
+    allocation = {}
+
+    # Determine the resource with the greatest available amount.
+    max_resource = max(available, key=available.get)
+
+    # First, allocate the minimum required amount to each resource if possible
+    initial_allocations = {
+        r: min(available[r], min_contribution) for r in available
+    }
+    total_initial = sum(initial_allocations.values())
+
+    # If the total allocated in this step exceeds the required amount, scale down proportionally
+    if total_initial > required:
+        scale_factor = required / total_initial
+        allocation = {r: int(initial_allocations[r] * scale_factor) for r in available}
+        return allocation  # Already allocated everything, return early
+
+    # Apply these guaranteed minimum allocations
+    allocation.update(initial_allocations)
+    remaining = required - total_initial
+
+    # Allocate the max resource, ensuring it does not exceed its cap
+    allocation[max_resource] += min(available[max_resource] - allocation[max_resource], cap - allocation[max_resource])
+    remaining -= allocation[max_resource]
+
+    # Distribute the remaining amount proportionally among other resources
+    others = [r for r in available if r != max_resource]
+    effective = {r: min(available[r] - allocation[r], cap - allocation[r]) for r in others}
+    total_effective = sum(effective.values())
+
+    if total_effective > 0 and remaining > 0:
+        distribution = {r: remaining * effective[r] / total_effective for r in others}
+        allocated_others = {r: int(distribution[r]) for r in others}
+        total_allocated = sum(allocated_others.values())
+        diff = int(round(remaining - total_allocated))
+
+        # Adjust for rounding errors, prioritizing resources with the largest remainder
+        remainders = {r: distribution[r] - allocated_others[r] for r in others}
+        for r in sorted(remainders, key=remainders.get, reverse=True):
+            if diff <= 0:
+                break
+            if allocated_others[r] < effective[r]:
+                allocated_others[r] += 1
+                diff -= 1
+
+        for r in others:
+            allocation[r] += allocated_others[r]
+
+    return allocation
 
 async def customize_kingdom_modifiers(
         guild_id: int,
@@ -702,6 +1165,275 @@ async def rebalance_buildings(
     return size, economy, loyalty, stability, fame, unrest
 
 
+
+async def resolve_turn(
+        guild_id: int,
+        kingdom: str) -> str:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+            await cursor.execute("Select Kingdom, Region, Build_Points, Control_DC, Economy, Loyalty, Stability, Unrest, Consumption, Population, Holiday, Promotion, Taxation FROM KB_Kingdoms WHERE Kingdom = ?", (kingdom,))
+            kingdom_check = await cursor.fetchone()
+            if not kingdom_check:
+                return "The kingdom could not be found."
+            (kingdom, region, build_points, control_dc, economy, loyalty, stability, unrest, consumption, population, holiday, promotion, taxation) = kingdom_check
+            await cursor.execute("SELECT Holiday_Loyalty, Holiday_Consumption FROM KB_Edicts Where Holiday = ?", (holiday,))
+            holiday_effects = await cursor.fetchone()
+            await cursor.execute("SELECT Promotion_Stability, Promotion_Consumption FROM KB_Edicts Where Promotion = ?", (promotion,))
+            promotion_effects = await cursor.fetchone()
+            await cursor.execute("SELECT Taxation_Economy, Taxation_Loyalty FROM KB_Edicts Where Taxation = ?", (taxation,))
+            taxation_effects = await cursor.fetchone()
+            await cursor.execute("""
+            SELECT 
+                SUM(
+                    CASE 
+                        WHEN KBEC.name = 'economy' 
+                        AND KBEC.severity = 
+                            (CASE WHEN KBE.check_a_status > 0 THEN 1 ELSE 0 END + 
+                             CASE WHEN KBE.check_b_status > 0 THEN 1 ELSE 0 END) 
+                        THEN KBEC.Value 
+                        ELSE 0 
+                    END
+                ) AS total_economy
+                SUM(
+                    CASE 
+                        WHEN KBEC.name = 'loyalty' 
+                        AND KBEC.severity = 
+                            (CASE WHEN KBE.check_a_status > 0 THEN 1 ELSE 0 END + 
+                             CASE WHEN KBE.check_b_status > 0 THEN 1 ELSE 0 END) 
+                        THEN KBEC.Value 
+                        ELSE 0 
+                    END
+                ) AS total_loyalty
+                SUM(
+                    CASE 
+                        WHEN KBEC.name = 'stability' 
+                        AND KBEC.severity = 
+                            (CASE WHEN KBE.check_a_status > 0 THEN 1 ELSE 0 END + 
+                             CASE WHEN KBE.check_b_status > 0 THEN 1 ELSE 0 END) 
+                        THEN KBEC.Value 
+                        ELSE 0 
+                    END
+                ) AS total_stability
+                
+            FROM KB_Events_Consequence KBEC
+            LEFT JOIN KB_Events_Active KBE ON KBEC.Name = KBE.Name
+            WHERE Kingdom = ?;""",(kingdom,))
+            event_consequences = await cursor.fetchone()
+            (total_economy, total_loyalty, total_stability) = event_consequences
+            await cursor.execute("SELECT id, Kingdom, Settlement, Hex, Name, Check_A_Status, Check_B_Status, Success_Requirement, Duration FROM KB_Events_Active WHERE Kingdom = ? And Active = 1", (kingdom,))
+            active_events = await cursor.fetchall()
+            await cursor.execute("SELECT SUM(Consumption_Size) FROM KB_Armies WHERE Kingdom = ?", (kingdom,))
+            army_consumption = await cursor.fetchone()
+            consumption_modifier = 0
+            farm_penalty = 0
+            for event in active_events:
+                (event_id, kingdom, settlement, hex_id, name, check_a_status, check_b_status, success_requirement, duration, holiday, promotion, taxation) = event
+                severity = 0
+                severity += check_a_status if check_a_status > 0 else 0
+                severity += check_b_status if check_b_status > 0 else 0
+                await handle_severity(
+                    db=db,
+                    severity=severity,
+                    kingdom=kingdom,
+                    region=region,
+                    settlement=settlement,
+                    hex_id=hex_id,
+                    event=name,
+                    success_requirement=success_requirement,
+                    duration=duration,
+                    event_id=event_id)
+                if name == "Food Shortage" and severity == 0:
+                    consumption_modifier += 1
+                elif name == "Food Shortage" and severity == 1:
+                    consumption_modifier += .5
+                elif name == "Food Surplus":
+                    consumption_modifier -= .5
+                elif name == "Crop Failure" and severity == 0:
+                    farm_penalty += 2
+                elif name == "Crop Failure" and severity == 1:
+                    farm_penalty += 1
+            economy += total_economy
+            economy += taxation_effects[0] if taxation_effects else 0
+            loyalty += total_loyalty
+            loyalty += holiday_effects[0] if holiday_effects else 0
+            loyalty += taxation_effects[1] if taxation_effects else 0
+            stability += total_stability
+            stability += promotion_effects[0] if promotion_effects else 0
+            stability_check = random.randint(1, 20) + stability - control_dc - unrest
+            if stability_check < -5:
+                unrest_modify = random.randint(1, 4)
+                await cursor.execute("UPDATE KB_Kingdoms SET Unrest = Unrest + ? WHERE Kingdom = ?", (unrest_modify, kingdom))
+            elif stability_check < 0:
+                await cursor.execute("UPDATE KB_Kingdoms SET Unrest = Unrest + 1 WHERE Kingdom = ?", (kingdom, ))
+            else:
+                await cursor.execute("UPDATE KB_Kingdoms SET Unrest = Unrest - 1 WHERE Kingdom = ?", (kingdom, ))
+            consumption += holiday_effects[1] if holiday_effects else 0
+            consumption += promotion_effects[1] if promotion_effects else 0
+            consumption = consumption + (consumption_modifier * consumption)
+            population = consumption + army_consumption[0] if army_consumption else consumption
+            await cursor.execute("""
+            SELECT 
+            SUM(CASE WHEN subtype = 'Grain' THEN amount * quality ELSE 0 END) AS Grain_total,
+            SUM(CASE WHEN subtype = 'Produce' THEN amount * quality ELSE 0 END) AS Produce_total
+            SUM(CASE WHEN subtype = 'Husbandry' THEN amount * quality ELSE 0 END) AS Husbandry_total
+            SUM(CASE WHEN subtype = 'Seafood' THEN amount * quality ELSE 0 END) AS Seafood_total
+            FROM KB_Hexes_Constructed WHERE Kingdom = ?""", (kingdom,))
+            food_results = await cursor.fetchone()
+            (produced_grain, produced_produce, produced_husbandry, produced_seafood) = food_results
+            if farm_penalty == 1:
+                produced_grain = produced_grain * .5 if produced_grain else 0
+                produced_husbandry = produced_husbandry * .5 if produced_husbandry else 0
+                produced_produce = produced_produce * .5 if produced_produce else 0
+            elif farm_penalty == 2:
+                produced_grain = 0
+                produced_husbandry = 0
+                produced_produce = 0
+            await cursor.execute("""SELECT 
+            SUM(Husbandry), SUM(Grain), SUM(Produce), SUM(Seafood),
+            SUM(Ore), SUM(Stone), Sum(Wood), Sum(Raw_Textiles),
+            SUM(Metallurgy), SUM(Woodworking), SUM(Textiles), Sum(Stoneworking),
+            SUM(Mundane_Complex), SUM(Mundane_Exotic), Sum(Magical_Consumable), SUM(Maxical_Items)
+            FROM KB_Trade where Source_Kingdom = ?
+            """, (kingdom,))
+            sending_trade_results = await cursor.fetchone()
+            (sending_husbandry, sending_grain, sending_produce, sending_seafood, sending_ore, sending_stone, sending_wood, sending_raw_textiles, sending_metallurgy, sending_woodworking, sending_textiles, sending_stoneworking, sending_mundane_complex, sending_mundane_exotic, sending_magical_consumable, sending_magical_items) = sending_trade_results
+            await cursor.execute("""SELECT
+            SUM(Husbandry), SUM(Grain), SUM(Produce), SUM(Seafood),
+            SUM(Ore), SUM(Stone), Sum(Wood), Sum(Raw_Textiles),
+            SUM(Metallurgy), SUM(Woodworking), SUM(Textiles), Sum(Stoneworking),
+            SUM(Mundane_Complex), SUM(Mundane_Exotic), Sum(Magical_Consumable), SUM(Maxical_Items)
+            FROM KB_Trade where end_Kingdom = ?
+            """, (kingdom,))
+            receiving_trade_results = await cursor.fetchone()
+            (receiving_husbandry, receiving_grain, receiving_produce, receiving_seafood, receiving_ore, receiving_stone, receiving_wood, receiving_raw_textiles, receiving_metallurgy, receiving_woodworking, receiving_textiles, receiving_stoneworking, receiving_mundane_complex, receiving_mundane_exotic, receiving_magical_consumable, receiving_magical_items) = receiving_trade_results
+            await cursor.execute("SELECT Stored_Grain, Stored_Produce, Stored_Husbandry, Stored_Seafood FROM KB_Kingdoms WHERE Kingdom = ?", (kingdom,))
+            stored_food_results = await cursor.fetchone()
+            (stored_grain, stored_produce, stored_husbandry, stored_seafood) = stored_food_results
+            grain = safe_int_complex(produced_grain, -sending_grain, receiving_grain, stored_grain)
+            produce = safe_int_complex(produced_produce, -sending_produce, receiving_produce, stored_produce)
+            husbandry = safe_int_complex(produced_husbandry - sending_husbandry + receiving_husbandry, stored_husbandry)
+            seafood = safe_int_complex(produced_seafood - sending_seafood + receiving_seafood, stored_seafood)
+            resource_utilization_dict = {"Grain": grain, "Produce": produce, "Husbandry": husbandry, "Seafood": seafood}
+            build_point_result = (random.randint(1, 20) + economy - unrest) // 3
+            await cursor.execute("""SELECT SUM(Amount) FROM KB_Hexes_Constructed WHERE Kingdom = ? AND Subtype in ('Husbandry', 'Seafood', 'Produce', 'Grain')""", (kingdom,))
+            food_building_results = await cursor.fetchone()
+            food_building = food_building_results[0] // 10 if food_building_results else 0
+            await cursor.execute("""SELECT SUM(Amount) FROM KB_Hexes_Constructed WHERE Kingdom = ? AND Subtype in ('Ore', 'Stone', 'Wood', 'Raw_Textiles')""", (kingdom,))
+            raw_building_results = await cursor.fetchone()
+            raw_building = raw_building_results[0] // 10 if raw_building_results else 0
+            await cursor.execute("""SELECT SUM(Amount) FROM KB_Buildings WHERE Kingdom = ? AND (Subtype in ('Metallurgy', 'Woodworking', 'Textiles', 'Stoneworking') OR Name in ('Guildhall', 'Tannery'))""", (kingdom,))
+            processed_building_results = await cursor.fetchone()
+            processed_building = processed_building_results[0] // 10 if processed_building_results else 0
+            await cursor.execute("""SELECT SUM(Amount) FROM KB_Buildings WHERE Kingdom = ? AND (Subtype in ('Mundane_Complex', 'Mundane_Exotic', 'Magical_Consumable', 'Magical_Items') OR Name in 
+            ('Alchemist', 'Casters Tower', 'Herbalist', 'Luxury Store', 'Magic Shop'))""", (kingdom,))
+            finished_building_results = await cursor.fetchone()
+            finished_building = finished_building_results[0] // 10 if finished_building_results else 0
+            await cursor.execute("""SELECT   
+            Seafood + Produce + Grain + Husbandry,
+            Ore + Stone + Raw_Textiles + Wood,
+            Metallurgy + Woodworking + Textiles + Stoneworking,
+            Mundane_Complex + Mundane_Exotic + Magical_Consumable + Magical_Items
+            FROM KB_Trade where Source_Kingdom = ?""", (kingdom,))
+            sending_trade_results = await cursor.fetchall()
+            trade_bp = 0
+            for trade in sending_trade_results:
+                (food, raw, processed, finished) = trade
+                trade_bp += food_building if food > 0 and sum(resource_utilization_dict.values()) > consumption else 0
+                trade_bp += raw_building if raw > 0 and sum(resource_utilization_dict.values()) > consumption else 0
+                trade_bp += processed_building if processed > 0 and sum(resource_utilization_dict.values()) > consumption else 0
+                trade_bp += finished_building if finished > 0 and sum(resource_utilization_dict.values()) > consumption else 0
+
+            if sum(resource_utilization_dict.values()) > consumption:
+                resource_allocation_dict = allocate_food(consumption, resource_utilization_dict)
+                await cursor.execute("""
+                SELECT 
+                SUM(CASE WHEN subtype = 'Grain' THEN amount * quality * 5 ELSE 0 END) AS Grain_total,
+                SUM(CASE WHEN subtype = 'Produce' THEN amount * quality * 5 ELSE 0 END) AS Produce_total
+                SUM(CASE WHEN subtype = 'Husbandry' THEN amount * quality * 5 ELSE 0 END) AS Husbandry_total
+                SUM(CASE WHEN subtype = 'Seafood' THEN amount * quality * 5 ELSE 0 END) AS Seafood_total
+                FROM KB_Buildings WHERE Kingdom = ?""", (kingdom,))
+                food_building_results = await cursor.fetchone()
+                (building_grain, building_produce, building_husbandry, building_seafood) = food_building_results
+                storable_grain = max(min(building_grain, resource_allocation_dict["Grain"]),0)
+                storable_produce = max(min(building_produce, resource_allocation_dict["Produce"]), 0)
+                storable_husbandry = max(min(building_husbandry, resource_allocation_dict["Husbandry"]), 0)
+                storable_seafood = max(min(building_seafood, resource_allocation_dict["Seafood"]), 0)
+                await cursor.execute("UPDATE KB_Kingdoms SET Stored_Grain = ?, Stored_Produce = ?, Stored_Husbandry = ?, Stored_Seafood = ? WHERE Kingdom = ?", (storable_grain, storable_produce, storable_husbandry, storable_seafood, kingdom))
+                proper_utilization_grain = (resource_utilization_dict["Grain"] - resource_allocation_dict["Gain"]) > 0 and (resource_utilization_dict["Grain"] - resource_allocation_dict["Gain"]) > math.floor(consumption * .15)
+                proper_utilization_produce = (resource_utilization_dict["Produce"] - resource_allocation_dict["Produce"]) > 0 and (resource_utilization_dict["Produce"] - resource_allocation_dict["Produce"]) > math.floor(consumption * .15)
+                proper_utilization_husbandry = (resource_utilization_dict["Husbandry"] - resource_allocation_dict["Husbandry"]) > 0 and (resource_utilization_dict["Husbandry"] - resource_allocation_dict["Husbandry"]) > math.floor(consumption * .15)
+                proper_utilization_seafood = (resource_utilization_dict["Seafood"] - resource_allocation_dict["Seafood"]) > 0 and (resource_utilization_dict["Seafood"] - resource_allocation_dict["Seafood"]) > math.floor(consumption * .15)
+                if all([proper_utilization_grain, proper_utilization_produce, proper_utilization_husbandry, proper_utilization_seafood]):
+                    await kingdom_event(db=db, kingdom=kingdom, event="Well Fed!", region=region, settlement=None)
+                elif proper_utilization_seafood + proper_utilization_produce + proper_utilization_husbandry + proper_utilization_grain < 2:
+                    await cursor.execute("SELECT Sum(Lots * Amount) from KB_Buildings WHERE Kingdom = ?", (kingdom,))
+                    building_lots = await cursor.fetchone()
+                    size = building_lots[0] // 36 if building_lots else 1
+                    await cursor.execute("UPDATE KB_Kingdoms SET unrest = unrest + ? WHERE Kingdom = ?", (size, kingdom))
+            else:
+                build_point_result -= consumption - sum(resource_utilization_dict.values())
+                if consumption - sum(resource_utilization_dict.values()) > 8:
+                    await kingdom_event(db=db, kingdom=kingdom, event="Starving", region=region, settlement=None)
+            if consumption - sum(resource_utilization_dict.values()) < 10:
+                await cursor.execute(
+                    """SELECT SUM(CASE WHEN SUBTYPE = 'Housing' THEN Quality * Amount ELSE 0 END) AS Housing 
+                    SELECT SUM(CASE WHEN SUBTYPE != 'Housing' THEN Supply * Amount ELSE 0 END) AS Non_Housing
+                    FROM KB_Buildings WHERE Kingdom = ?""", (kingdom,))
+                building_results = await cursor.fetchone()
+                (housing, non_housing) = building_results
+                housing = housing if housing else 0
+                non_housing = non_housing if non_housing else 0
+                if housing < non_housing:
+                    if housing * 250 < population:
+                        await cursor.execute("UPDATE KB_Kingdoms SET Unrest = Unrest + 1 WHERE Kingdom = ?", (kingdom,))
+                    else:
+                        available_housing = housing - (population // 250)
+                        population_increase = 0
+                        for x in range(available_housing):
+                            population_increase += random.randint(1, 150)
+                            if consumption - sum(resource_utilization_dict.values()) < -10:
+                                population_increase += random.randint(1, 100)
+                        await cursor.execute("UPDATE KB_Kingdoms SET Population = Population + ? WHERE Kingdom = ?", (population_increase, kingdom))
+                else:
+                        await cursor.execute("UPDATE KB_Kingdoms SET Unrest = Unrest + 1 WHERE Kingdom = ?", (kingdom,))
+            await db.commit()
+            await cursor.execute("SELECT SUM(KB.Amount * KBB.Build_Points) FROM KB_Buildings KB LEFT JOIN KB_Buildings_Blueprints KBB ON KB.Building = KBB.Building WHERE KB.Kingdom = ?", (kingdom,))
+            building_points = await cursor.fetchone()
+            building_points_mass = building_points[0] if building_points else 0
+            build_point_result = min(build_point_result, building_points_mass // 10) + trade_bp
+            await cursor.execute("UPDATE KB_Kingdoms SET Build_Points = Build_Points + ? WHERE Kingdom = ?", (build_point_result, kingdom))
+            if build_points + build_point_result < 0:
+                await cursor.execute("UPDATE KB_Kingdoms SET Unrest = Unrest + 2 WHERE Kingdom = ?", (kingdom,))
+
+            await cursor.execute(
+                "SELECT Build_Points, Control_DC, Economy, Loyalty, Stability, Unrest, Consumption, Population, Unrest FROM KB_Kingdoms WHERE Kingdom = ?",
+                (kingdom,))
+            updated_kingdom_status = await cursor.fetchone()
+            (updated_build_points, updated_control_dc, updated_economy, updated_loyalty, updated_stability, updated_unrest, updated_consumption, updated_population, updated_unrest) = updated_kingdom_status
+            if updated_unrest > 10:
+                await cursor.execute("SELECT ID FROM KB_Hexes where IsTown = 0 and Kingdom = ? Order by Random() Limit 1", (kingdom,))
+                random_hex = await cursor.fetchone()
+                await cursor.execute("UPDATE KB_Hexes SET Kingdom = Null WHERE ID = ?", (random_hex,))
+
+    except:
+        return "An error occurred while resolving the turn."
+def safe_int_complex(a, b, c, d):
+    """Safely add two values together, treating None as zero and converting to Decimal if necessary."""
+    # Treat None as zero
+    a = a if a is not None else 0
+    b = b if b is not None else 0
+    c = c if c is not None else 0
+    d = d if d is not None else 0
+
+    # If either value is a Decimal, convert both to Decimal
+    if isinstance(a, int) or isinstance(b, int) or isinstance(c, int):
+        a = int(a)
+        b = int(b)
+        c = int(c)
+        d = int(d)
+    return a + b + c
+
 class OverseerCommands(commands.Cog, name='overseer'):
     def __init__(self, bot):
         self.bot = bot
@@ -783,7 +1515,8 @@ class OverseerCommands(commands.Cog, name='overseer'):
     @kingdom_group.command(name='modifiers', description='Adjust the custom modifiers associated with a kingdom')
     @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
     @app_commands.autocomplete(region=shared_functions.region_autocomplete)
-    async def kingdom_modifiers(self, interaction: discord.Interaction, kingdom: str, region: typing.Optional[str], control_dc: typing.Optional[int],
+    async def kingdom_modifiers(self, interaction: discord.Interaction, kingdom: str, region: typing.Optional[str],
+                                control_dc: typing.Optional[int],
                                 economy: typing.Optional[int], loyalty: typing.Optional[int],
                                 stability: typing.Optional[int], fame: typing.Optional[int],
                                 unrest: typing.Optional[int], consumption: typing.Optional[int]):
@@ -810,7 +1543,8 @@ class OverseerCommands(commands.Cog, name='overseer'):
 
     @kingdom_group.command(name='overpower', description='Overpower a kingdom and assume direct control.')
     @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
-    async def kingdom_overpower(self, interaction: discord.Interaction, kingdom: str, password: str, character_name: str):
+    async def kingdom_overpower(self, interaction: discord.Interaction, kingdom: str, password: str,
+                                character_name: str):
         """Overpower a kingdom and assume direct control."""
         await interaction.response.defer(thinking=True)
         try:
@@ -818,14 +1552,15 @@ class OverseerCommands(commands.Cog, name='overseer'):
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute("Update KB_Kingdoms SET Password = ? WHERE Kingdom = ?", (new_password, kingdom))
-                await cursor.execute("Update KB_Leadership SET Character_Name = ?, Player_ID = ? where kingdom = ?", (character_name, interaction.user.id, kingdom))
+                await cursor.execute("Update KB_Leadership SET Character_Name = ?, Player_ID = ? where kingdom = ?",
+                                     (character_name, interaction.user.id, kingdom))
                 await db.commit()
-                await interaction.followup.send("You have successfully overpowered the kingdom, assigning yourself as King and setting all leaders to be you.")
+                await interaction.followup.send(
+                    "You have successfully overpowered the kingdom, assigning yourself as King and setting all leaders to be you.")
 
         except (TypeError, ValueError) as e:
             logging.exception(f"Error in kingdom_overpower: {e}")
             await interaction.followup.send("An error occurred while overpowering a kingdom.")
-
 
     @kingdom_group.command(name="build_points", description="Adjust the build points of a kingdom.")
     @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
@@ -833,7 +1568,7 @@ class OverseerCommands(commands.Cog, name='overseer'):
         """Adjust the build points of a kingdom."""
         await interaction.response.defer(thinking=True)
         try:
-            status = await kingdom_commands.adjust_bp(interaction.guild_id, interaction.user.id, kingdom, build_points)
+            status = await kingdom_commands.adjust_bp(interaction.guild_id, interaction.user.id, kingdom, build_points, False)
             await interaction.followup.send(status)
         except (TypeError, ValueError) as e:
             logging.exception(f"Error in kingdom_build_points: {e}")
@@ -852,9 +1587,10 @@ class OverseerCommands(commands.Cog, name='overseer'):
         """Adjust the custom modifiers associated with a settlement"""
         await interaction.response.defer(thinking=True)
         try:
-            status = await custom_settlement_modifiers(interaction.guild_id, interaction.user.id, kingdom, settlement,
-                                                       corruption, crime, productivity, law, lore, society, danger,
-                                                       defence, base_value, spellcasting, supply)
+            status = await custom_settlement_modifiers(
+                interaction.guild_id, interaction.user.id, kingdom, settlement,
+                corruption, crime, productivity, law, lore, society, danger,
+                defence, base_value, spellcasting, supply)
             await interaction.followup.send(status)
         except (TypeError, ValueError) as e:
             logging.exception(f"Error in settlement_modifiers: {e}")
@@ -893,8 +1629,9 @@ class OverseerCommands(commands.Cog, name='overseer'):
     @settlement_group.command(name='remove', description='Remove buildings from a specified KB_Settlements.')
     @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
     @app_commands.autocomplete(settlement=kingdom_commands.settlement_autocomplete)
-    async def remove_from_settlement(self, interaction: discord.Interaction, kingdom: str, settlement: str,
-                                     building: str, amount: int):
+    async def remove_from_settlement(
+            self, interaction: discord.Interaction, kingdom: str, settlement: str,
+            building: str, amount: int):
         """Remove buildings from a specified settlement."""
         await interaction.response.defer(thinking=True)
         try:
@@ -1021,12 +1758,14 @@ class OverseerCommands(commands.Cog, name='overseer'):
                 fish = random.randint(1, fish)
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("INSERT INTO KB_Hexes (Kingdom, Hex_Terrain, Region, Farm, Ore, Stone, wood, fish) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                                     (kingdom, terrain, region, farm, ore, stone, wood, fish))
+                await cursor.execute(
+                    "INSERT INTO KB_Hexes (Kingdom, Hex_Terrain, Region, Farm, Ore, Stone, wood, fish) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (kingdom, terrain, region, farm, ore, stone, wood, fish))
                 await cursor.execute("SELECT Max(ID) from KB_Hexes")
                 hex_id = await cursor.fetchone()
                 if kingdom:
-                    await cursor.execute("UPDATE KB_Kingdoms SET Control_DC = Control_DC + 1 WHERE Kingdom = ?", (kingdom,))
+                    await cursor.execute("UPDATE KB_Kingdoms SET Control_DC = Control_DC + 1 WHERE Kingdom = ?",
+                                         (kingdom,))
                     status = f"The hex with ID {hex_id[0]} has been created and added to the kingdom of {kingdom}!\r\nit can support {farm} farms, {ore} mines, {stone} quarries, {wood} woodcutters and {fish} fisheries."
                 else:
                     status = f"The hex with ID {hex_id[0]}has been created!\r\nit can support {farm} farms, {ore} mines, {stone} quarries, {wood} woodcutters and {fish} fisheries."
@@ -1044,13 +1783,17 @@ class OverseerCommands(commands.Cog, name='overseer'):
     @app_commands.choices(
         behavior=[discord.app_commands.Choice(name='set', value=1),
                   discord.app_commands.Choice(name='random', value=2)])
-    async def edit_hex(self, interaction: discord.Interaction, hex_id: int, kingdom: typing.Optional[str], terrain: typing.Optional[str], region: typing.Optional[str], farm: typing.Optional[int],
-                      ore: typing.Optional[int], stone: typing.Optional[int], wood: typing.Optional[int], fish: typing.Optional[int], behavior: discord.app_commands.Choice[int] = 1):
+    async def edit_hex(self, interaction: discord.Interaction, hex_id: int, kingdom: typing.Optional[str],
+                       terrain: typing.Optional[str], region: typing.Optional[str], farm: typing.Optional[int],
+                       ore: typing.Optional[int], stone: typing.Optional[int], wood: typing.Optional[int],
+                       fish: typing.Optional[int], behavior: discord.app_commands.Choice[int] = 1):
         await interaction.response.defer(thinking=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("SELECT Kingdom, Region, Hex_Terrain, Farm, Ore, Stone, Wood, Fish From KB_Hexes where ID = ?", (hex_id,))
+                await cursor.execute(
+                    "SELECT Kingdom, Region, Hex_Terrain, Farm, Ore, Stone, Wood, Fish From KB_Hexes where ID = ?",
+                    (hex_id,))
                 hex_info = await cursor.fetchone()
                 if not hex_info:
                     await interaction.followup.send("The hex with that ID does not exist.")
@@ -1081,7 +1824,8 @@ class OverseerCommands(commands.Cog, name='overseer'):
                 await cursor.execute("UPDATE KB_Kingdoms SET Control_DC = Control_DC - 1 WHERE Kingdom = ?",
                                      (hex_info[0],))
                 if kingdom:
-                    await cursor.exeucte("UPDATE KB_Kingdoms SET Control_DC = Control_DC + 1 WHERE Kingdom = ?", (kingdom,))
+                    await cursor.exeucte("UPDATE KB_Kingdoms SET Control_DC = Control_DC + 1 WHERE Kingdom = ?",
+                                         (kingdom,))
                     status = f"The hex with ID {hex_id} has been updated and added to the kingdom of {kingdom}!\r\nit can support {farm} farms, {ore} mines, {stone} quarries, {wood} woodcutters,and {fish} fisheries."
                 else:
                     status = f"The hex with ID {hex_id} has been updated and removed from the original kingdom!\r\nit can support {farm} farms, {ore} mines, {stone} quarries, {wood} woodcutters, and {fish} fisheries."
@@ -1108,7 +1852,8 @@ class OverseerCommands(commands.Cog, name='overseer'):
                 await cursor.execute("DELETE FROM KB_Hexes where ID = ?", (hex_id,))
                 await cursor.execute("DELETE FROM KB_Hexes_Constructed where ID = ?", (hex_id,))
 
-                await cursor.execute("UPDATE KB_Kingdoms SET Control_DC = Control_DC - 1 WHERE Kingdom = ?", (kingdom[0],))
+                await cursor.execute("UPDATE KB_Kingdoms SET Control_DC = Control_DC - 1 WHERE Kingdom = ?",
+                                     (kingdom[0],))
                 await db.commit()
                 await interaction.followup.send(f"The hex with ID {hex_id} has been deleted.")
         except(TypeError, ValueError) as e:
@@ -1176,6 +1921,8 @@ class OverseerCommands(commands.Cog, name='overseer'):
             logging.exception(f"Error in add_blueprint: {e}")
             await interaction.followup.send("An error occurred while adding a blueprint.")
 
+
+
     @blueprint_group.command(name='remove', description='This command removes blueprints from player usage.')
     async def remove_blueprint(self, interaction: discord.Interaction, name: str):
         """This command removes blueprints from player usage."""
@@ -1238,8 +1985,6 @@ class OverseerCommands(commands.Cog, name='overseer'):
             logging.exception(f"Error in modify_blueprint: {e}")
             await interaction.followup.send("An error occurred while modifying a blueprint.")
 
-
-
     @leadership_group.command(name="modify",
                               description="Modify a leader, by changing their ability score or who is in charge")
     @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
@@ -1299,34 +2044,36 @@ class OverseerCommands(commands.Cog, name='overseer'):
             logging.exception(f"Error removing leader: {e}")
             await interaction.followup.send(content="An error occurred while removing the leader.")
 
-
     @event_group.command(name="create", description="Create a new event for the kingdom")
     @app_commands.choices(
         scale=[discord.app_commands.Choice(name='Kingdom Event', value=1),
-             discord.app_commands.Choice(name='Settlement Event', value=0)])
+               discord.app_commands.Choice(name='Settlement Event', value=0)])
     @app_commands.choices(
         hex=[discord.app_commands.Choice(name='affects a hex', value=1),
-                  discord.app_commands.Choice(name='does not affect hexes', value=0)])
+             discord.app_commands.Choice(name='does not affect hexes', value=0)])
     @app_commands.choices(
         requirements=[discord.app_commands.Choice(name='succeed at one check', value=1),
-                  discord.app_commands.Choice(name='succeed at both checks', value=2)])
+                      discord.app_commands.Choice(name='succeed at both checks', value=2)])
     @app_commands.choices(
         type=[discord.app_commands.Choice(name='beneficial', value=1),
-                  discord.app_commands.Choice(name='problematic', value=2)])
+              discord.app_commands.Choice(name='problematic', value=2)])
     @app_commands.choices(
         first_check=[discord.app_commands.Choice(name='Loyalty', value=1),
                      discord.app_commands.Choice(name='Stability', value=2),
                      discord.app_commands.Choice(name='Economy', value=3)])
     @app_commands.choices(
         second_check=[discord.app_commands.Choice(name='Loyalty', value=1),
-                     discord.app_commands.Choice(name='Stability', value=2),
-                     discord.app_commands.Choice(name='Economy', value=3),
-                     discord.app_commands.Choice(name='Demand Building', value=4),
-                     discord.app_commands.Choice(name='Demand Improvement', value=5)])
-    @app_commands.autocomplete(shared_functions.region_autocomplete)
+                      discord.app_commands.Choice(name='Stability', value=2),
+                      discord.app_commands.Choice(name='Economy', value=3),
+                      discord.app_commands.Choice(name='Demand Building', value=4),
+                      discord.app_commands.Choice(name='Demand Improvement', value=5)])
+    @app_commands.autocomplete(region=shared_functions.region_autocomplete)
+    @app_commands.autocomplete(bonus=modifier_autocomplete)
+    @app_commands.autocomplete(penalty=modifier_autocomplete)
     async def create_event(
-            self, interaction: discord.Interaction, scale: discord.app_commands[int], likelihood: int, name: str, description: str, special: typing.Optional[str],
-            type: discord.app_commands.Choice[int], first_check: typing.Optional[discord.app_commands.Choice[int]],
+            self, interaction: discord.Interaction, scale: discord.app_commands.Choice[int], likelihood: int, name: str,
+            description: str, special: typing.Optional[str],
+            type: discord.app_commands.Choice[int], first_check: typing.Optional[discord.app_commands.Choice[int]], penalty: str, bonus: str,
             second_check: typing.Optional[discord.app_commands.Choice[int]], region: str = 'All',
             hex: discord.app_commands.Choice[int] = 0, requirements: discord.app_commands.Choice[int] = 0):
         """Create a new event for the kingdom"""
@@ -1339,13 +2086,400 @@ class OverseerCommands(commands.Cog, name='overseer'):
                 if event:
                     await interaction.followup.send("An event with that name already exists.")
                     return
-                await cursor.execute("INSERT INTO KB_Events (scale, likelihood, Region, Name, Description, Special, Type, First_Check, Second_Check, Hex, Success_Requirements) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                     (scale, likelihood, region, name, description, special, type.value, first_check.value, second_check.value, hex, requirements.value))
+                scale_value = scale.value if isinstance(scale, discord.app_commands.Choice) else scale
+                hex_value = hex.value if isinstance(hex, discord.app_commands.Choice) else hex
+                requirements_value = requirements.value if isinstance(requirements,
+                                                                      discord.app_commands.Choice) else requirements
+                type_value = type.value if isinstance(type, discord.app_commands.Choice) else type
+                first_check_value = first_check.value if isinstance(first_check,
+                                                                    discord.app_commands.Choice) else first_check
+                second_check_value = second_check.value if isinstance(second_check,
+                                                                      discord.app_commands.Choice) else second_check
+                if second_check_value and not first_check_value:
+                    if second_check_value == 4 or second_check_value == 5:
+                        await interaction.followup.send(
+                            "You must select a first check to demand a building or improvement.")
+                        return
+                    first_check_value = second_check_value
+                    second_check_value = None
+                await cursor.execute(
+                    "INSERT INTO KB_Events (scale, likelihood, Region, Name, Effect, Special, Type, Check_A, Check_b, Hex, Success_Requirements) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (scale_value, likelihood, region, name, description, special, type_value, first_check_value,
+                     second_check_value, hex_value, requirements_value))
+                await db.commit()
         except (TypeError, ValueError) as e:
             logging.exception(f"Error in create_event: {e}")
             await interaction.followup.send("An error occurred while creating an event.")
 
+    @event_group.command(name="modify", description="update an event for the kingdom building")
+    @app_commands.choices(
+        scale=[discord.app_commands.Choice(name='Kingdom Event', value=1),
+               discord.app_commands.Choice(name='Settlement Event', value=0)])
+    @app_commands.choices(
+        hex=[discord.app_commands.Choice(name='affects a hex', value=1),
+             discord.app_commands.Choice(name='does not affect hexes', value=0)])
+    @app_commands.choices(
+        requirements=[discord.app_commands.Choice(name='succeed at one check', value=1),
+                      discord.app_commands.Choice(name='succeed at both checks', value=2)])
+    @app_commands.choices(
+        type=[discord.app_commands.Choice(name='beneficial', value=1),
+              discord.app_commands.Choice(name='problematic', value=2)])
+    @app_commands.choices(
+        first_check=[discord.app_commands.Choice(name='Loyalty', value=1),
+                     discord.app_commands.Choice(name='Stability', value=2),
+                     discord.app_commands.Choice(name='Economy', value=3)])
+    @app_commands.choices(
+        second_check=[discord.app_commands.Choice(name='Loyalty', value=1),
+                      discord.app_commands.Choice(name='Stability', value=2),
+                      discord.app_commands.Choice(name='Economy', value=3),
+                      discord.app_commands.Choice(name='Demand Building', value=4),
+                      discord.app_commands.Choice(name='Demand Improvement', value=5)])
+    @app_commands.autocomplete(region=shared_functions.region_autocomplete)
+    @app_commands.autocomplete(bonus=modifier_autocomplete)
+    @app_commands.autocomplete(penalty=modifier_autocomplete)
+    @app_commands.autocomplete(old_name=event_name_autocomplete)
+    async def create_event(
+            self, interaction: discord.Interaction, old_name: str, scale: typing.Optional[discord.app_commands.Choice[int]],
+            likelihood: typing.Optional[int], new_name: typing.Optional[str], description: typing.Optional[str],
+            special: typing.Optional[str],
+            type: typing.Optional[discord.app_commands.Choice[int]],
+            first_check: typing.Optional[discord.app_commands.Choice[int]],
+            second_check: typing.Optional[discord.app_commands.Choice[int]], region: typing.Optional[str],
+            hex: typing.Optional[discord.app_commands.Choice[int]],
+            requirements: typing.Optional[discord.app_commands.Choice[int]],
+            bonus: typing.Optional[str], penalty: typing.Optional[str]):
+        """Create a new event for the kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute(
+                    "SELECT Scale, Likelihood, Region, Type, Name, Effect, Special, Check_A, Check_B, Success_Requirement, Duration, Bonus, Penalty, Hex from KB_Events where Name = ?",
+                    (old_name,))
+                event = await cursor.fetchone()
+                if not event:
+                    await interaction.followup.send("An event with that name does not exist.")
+                    return
+                (
+                    info_scale, info_likelihood, info_region, info_type, info_name, info_effect, info_special,
+                    info_check_a,
+                    info_check_b, info_requirements, info_duration, info_bonus, info_penalty, info_hex) = event
+                scale_value = scale.value if isinstance(scale, discord.app_commands.Choice) else info_scale
+                hex_value = hex.value if isinstance(hex, discord.app_commands.Choice) else info_hex
+                requirements_value = requirements.value if isinstance(requirements,
+                                                                      discord.app_commands.Choice) else info_requirements
+                type_value = type.value if isinstance(type, discord.app_commands.Choice) else info_type
+                first_check_value = first_check.value if isinstance(first_check,
+                                                                    discord.app_commands.Choice) else info_check_a
+                second_check_value = second_check.value if isinstance(second_check,
+                                                                      discord.app_commands.Choice) else info_check_b
+                scale_value = scale_value if scale_value else info_scale
+                likelihood = likelihood if likelihood else info_likelihood
+                region = region if region else info_region
+                name = new_name if new_name else info_name
+                description = description if description else info_effect
+                special = special if special else info_special
+                if second_check_value and not first_check_value:
+                    if second_check_value == 4 or second_check_value == 5:
+                        await interaction.followup.send(
+                            "You must select a first check to demand a building or improvement.")
+                        return
+                    first_check_value = second_check_value
+                    second_check_value = None
+                await cursor.execute(
+                    "UPDATE KB_Events SET name = ?, scale = ?, likelihood = ?, Region = ?, Name = ?, Effect = ?, Special = ?, Type = ?, Check_a = ?, Check_b = ?, Hex = ?, Success_Requirements = ? WHERE Name = ?",
+                    (name, scale_value, likelihood, region, name, description, special, type_value, first_check_value,
+                     second_check_value, hex_value, requirements_value, old_name))
+                if new_name:
+                    await cursor.execute("UPDATE KB_Events_Consequence SET Name = ? WHERE Name = ?",
+                                         (new_name, old_name))
+                await db.commit()
+        except (TypeError, ValueError) as e:
+            logging.exception(f"Error in create_event: {e}")
+            await interaction.followup.send("An error occurred while creating an event.")
 
+    @event_group.command(name="delete", description="Delete an event from the kingdom")
+    @app_commands.autocomplete(name=event_name_autocomplete)
+    async def delete_event(self, interaction: discord.Interaction, name: str):
+        """Create a new event for the kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Name from KB_Events where Name = ?", (name,))
+                event = await cursor.fetchone()
+                if not event:
+                    await interaction.followup.send("An event with that name does not exist.")
+                    return
+                await cursor.execute("DELETE FROM KB_Events where Name = ?", (name,))
+                await cursor.execute("DELETE FROM KB_Events_Consequence where Name = ?", (name,))
+                await db.commit()
+                await interaction.followup.send(f"The event with the name {name} has been deleted.")
+        except (TypeError, ValueError) as e:
+            logging.exception(f"Error in create_event: {e}")
+            await interaction.followup.send("An error occurred while creating an event.")
+
+    @event_group.command(name="complification", description="Add an Event Effect to an event")
+    @app_commands.choices(
+        severity=[discord.app_commands.Choice(name='on creation', value=-1),
+                  discord.app_commands.Choice(name='passive / failed result', value=0),
+                  discord.app_commands.Choice(name='single pass', value=1),
+                  discord.app_commands.Choice(name='passed both', value=2)])
+    @app_commands.choices(
+        roll_behavior=[discord.app_commands.Choice(name='set as result', value=-0),
+                       discord.app_commands.Choice(name='randomize result', value=1),
+                       discord.app_commands.Choice(name='percentile effect', value=2),
+                       discord.app_commands.Choice(name='exploding on max', value=3),
+                       discord.app_commands.Choice(name='Explodes into multiple on max', value=4)])
+    @app_commands.autocomplete(name=event_name_autocomplete)
+    @app_commands.autocomplete(type=type_value_autocomplete)
+    async def create_complication(
+            self, interaction: discord.Interaction, name: str,
+            severity: typing.Optional[discord.app_commands.Choice[int]],
+            type: str, value: int, reroll: typing.Optional[discord.app_commands.Choice[int]],
+    roll_behavior: discord.app_commands.Choice[int]):
+        """Create a new event for the kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Name from KB_Events where Name = ?", (name,))
+                event = await cursor.fetchone()
+                if not event:
+                    await interaction.followup.send("An event with that name does not exist.")
+                    return
+                severity_value = severity.value if isinstance(severity, discord.app_commands.Choice) else severity
+                reroll_value = reroll.value if isinstance(reroll, discord.app_commands.Choice) else reroll
+                await cursor.execute(
+                    "INSERT INTO KB_Events_Consequence (Name, Severity, Type, Value, Reroll) VALUES (?, ?, ?, ?, ?)",
+                    (name, severity_value, type, value, reroll_value))
+                await db.commit()
+                await cursor.execute("SELECT MAX(ID) from KB_Events_Consequence")
+                id = await cursor.fetchone()
+                await interaction.followup.send(f"The complication has been added to the event with ID {id[0]}.")
+        except (TypeError, ValueError) as e:
+            logging.exception(f"Error in create_complication: {e}")
+            await interaction.followup.send("An error occurred while creating an event.")
+
+    @event_group.command(name="modify_complication", description="Modify an Event Effect to an event")
+    @app_commands.choices(
+        severity=[discord.app_commands.Choice(name='on creation', value=-1),
+                  discord.app_commands.Choice(name='passive / failed result', value=0),
+                  discord.app_commands.Choice(name='single pass', value=1),
+                  discord.app_commands.Choice(name='passed both', value=2)])
+    @app_commands.choices(
+        roll_behavior=[discord.app_commands.Choice(name='set as result', value=-0),
+                       discord.app_commands.Choice(name='randomize result', value=1),
+                       discord.app_commands.Choice(name='percentile effect', value=2),
+                       discord.app_commands.Choice(name='exploding on max', value=3),
+                       discord.app_commands.Choice(name='Explodes into multiple on max', value=4)])
+    @app_commands.autocomplete(name=event_name_autocomplete)
+    @app_commands.autocomplete(type=type_value_autocomplete)
+    async def modify_complication(
+            self, interaction: discord.Interaction, name: typing.Optional[str], id: int,
+            severity: typing.Optional[discord.app_commands.Choice[int]],
+            type: typing.Optional[str], value: typing.Optional[int],
+            reroll: typing.Optional[discord.app_commands.Choice[int]],
+    roll_behavior: typing.Optional[discord.app_commands.Choice[int]]):
+        """Modify an existing event consequence for the kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute(
+                    "SELECT Name, Severity, Type, Value, Reroll from KB_Events_Consequence where ID = ?", (id,))
+                event = await cursor.fetchone()
+                if not event:
+                    await interaction.followup.send("An event with that name does not exist.")
+                    return
+                (old_name, old_severity, old_type, old_value, old_reroll) = event
+                name = name if name else old_name
+                severity_value = severity.value if isinstance(severity, discord.app_commands.Choice) else old_severity
+                reroll_value = reroll.value if isinstance(reroll, discord.app_commands.Choice) else old_reroll
+                type = type if type else old_type
+                value = value if value else old_value
+                await cursor.execute(
+                    "UPDATE KB_Events_Consequence SET Name = ?, Severity = ?, Type = ?, Value = ?, Reroll = ? WHERE ID = ?",
+                    (name, severity_value, type, value, reroll_value, id))
+                await db.commit()
+                await interaction.followup.send(f"The complication has been modified.")
+        except (TypeError, ValueError) as e:
+            logging.exception(f"Error in create_complication: {e}")
+            await interaction.followup.send("An error occurred while creating an event.")
+
+    @event_group.command(name="delete_complication", description="Delete an Event Effect to an event")
+    @app_commands.autocomplete(name=event_name_autocomplete)
+    async def delete_complication(self, interaction: discord.Interaction, name: str, id: int):
+        """Delete an Event from a kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Name from KB_Events where Name = ?", (name,))
+                event = await cursor.fetchone()
+                if not event:
+                    await interaction.followup.send("An event with that name does not exist.")
+                    return
+                await cursor.execute("DELETE FROM KB_Events_Consequence where ID = ?", (id,))
+                await db.commit()
+                await interaction.followup.send(f"The complication has been removed.")
+        except (TypeError, ValueError) as e:
+            logging.exception(f"Error in create_complication: {e}")
+            await interaction.followup.send("An error occurred while creating an event.")
+
+    @event_group.command(name="display", description="display a list of events")
+    @app_commands.autocomplete(name=event_name_autocomplete)
+    @app_commands.choices(
+        type=[discord.app_commands.Choice(name='all', value=0),
+              discord.app_commands.Choice(name='problematic', value=1),
+              discord.app_commands.Choice(name='beneficial', value=2)])
+    async def display_event(self, interaction: discord.Interaction, name: typing.Optional[str],
+                            view_type: discord.app_commands.Choice[int] = 1,
+                            type: discord.app_commands.Choice[int] = 0):
+        """Display a list of events"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                view_type_value = view_type.value if isinstance(view_type, discord.app_commands.Choice) else view_type
+                if name:
+                    if view_type_value == 1:
+                        await cursor.execute("SELECT Name from KB_Events", (name,))
+                    elif view_type_value == 2:
+                        await cursor.execute("SELECT Name from KB_Events where Type = 'Problematic'", (name,))
+                    else:
+                        await cursor.execute("SELECT Name from KB_Events where Type = 'Beneficial'", (name,))
+                    events = await cursor.fetchall()
+                    for idx, event in enumerate(events):
+                        if name in event:
+                            offset = idx
+                            break
+                    if not offset:
+                        offset = 0
+                else:
+                    offset = 0
+
+                view = EventDisplayView(
+                    user_id=interaction.user.id, guild_id=interaction.guild_id, offset=offset, limit=10,
+                    view_type=view_type_value,
+                    interaction=interaction)
+                await view.update_results()
+                await view.create_embed()
+                await interaction.followup.send(embed=view.embed, view=view)
+        except (TypeError, ValueError) as e:
+            logging.exception(f"Error in display_event: {e}")
+            await interaction.followup.send("An error occurred while displaying events.")
+
+    @event_group.command(name="spawn", description="spawn an event for a kingdom")
+    @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
+    @app_commands.autocomplete(event=event_name_autocomplete)
+    @app_commands.describe(event="This selects a specific event and has the highest priority.")
+    @app_commands.choices(
+        randomize=[discord.app_commands.Choice(name='set', value=0),
+                   discord.app_commands.Choice(name='random', value=1)])
+    @app_commands.choices(
+        event_type=[discord.app_commands.Choice(name='Kingdom', value=0),
+                    discord.app_commands.Choice(name='Settlement', value=1)])
+    async def spawn_event(self, interaction: discord.Interaction, kingdom: str, event: typing.Optional[str], event_type: discord.app_commands.Choice[int],
+                          randomize: discord.app_commands.Choice[int] = 1, number: int = 1, ):
+        """Spawn an event for a kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            randomize_value = randomize.value if isinstance(randomize, discord.app_commands.Choice) else randomize
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                if randomize_value == 1:
+                    await cursor.execute("SELECT Name from KB_Events ORDER BY RANDOM() LIMIT 1")
+                    event = await cursor.fetchone()
+                await cursor.execute("SELECT Name from KB_Events where Name = ?", (event,))
+                event_info = await cursor.fetchone()
+                if not event_info:
+                    await interaction.followup.send("The event with that name does not exist.")
+                    return
+                await cursor.execute("SELECT Name from KB_Kingdoms where Kingdom = ?", (kingdom,))
+                kingdom_info = await cursor.fetchone()
+                if not kingdom_info:
+                    await interaction.followup.send("The kingdom with that name does not exist.")
+                    return
+                for _ in range(number):
+                    await cursor.execute("INSERT INTO KB_Kingdom_Events (Kingdom, Event) VALUES (?, ?)",
+                                         (kingdom, event))
+                await db.commit()
+                await interaction.followup.send(f"The event {event} has been spawned for the kingdom of {kingdom}.")
+        except (TypeError, ValueError) as e:
+            logging.exception(f"Error in spawn_event: {e}")
+            await interaction.followup.send("An error occurred while spawning an event.")
+
+    population_group = discord.app_commands.Group(
+        name='population',
+        description='Commands related to population management',
+        parent=overseer_group
+    )
+
+    @population_group.command(name='adjust', description='adjust the population in a kingdom')
+    @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
+    @app_commands.choices(
+        randomize=[discord.app_commands.Choice(name='set', value=0),
+                   discord.app_commands.Choice(name='random', value=1)])
+    async def adjust_population(self, interaction: discord.Interaction, kingdom: str, population: int,
+                                randomize: discord.app_commands.Choice[int] = 1):
+        """Adjust the population in a kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            randomize_value = randomize.value if isinstance(randomize, discord.app_commands.Choice) else randomize
+            if randomize_value == 2:
+                adjust_population = random.randint(1, abs(population))
+                population = -abs(adjust_population) if population < 0 else adjust_population
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Population from KB_Kingdoms where Kingdom = ?", (kingdom,))
+                kingdom_info = await cursor.fetchone()
+                if not kingdom_info:
+                    await interaction.followup.send("The kingdom with that name does not exist.")
+                    return
+                await cursor.execute("UPDATE KB_Kingdoms SET Population = Population + ? WHERE Kingdom = ?",
+                                     (population, kingdom))
+                await db.commit()
+                await interaction.followup.send(
+                    f"The population of {kingdom} has been adjusted to {kingdom_info[0] + population}.")
+        except (TypeError, ValueError) as e:
+            logging.exception(f"Error in adjust_population: {e}")
+            await interaction.followup.send("An error occurred while adjusting the population.")
+
+    @population_group.command(name='bip', description='adjust the bip in a region')
+    @app_commands.autocomplete(region=shared_functions.region_autocomplete)
+    @app_commands.choices(
+        randomize=[discord.app_commands.Choice(name='set', value=0),
+                   discord.app_commands.Choice(name='random', value=1)])
+    async def set_bid(self, interaction: discord.Interaction, region: str, population: int,
+                      randomize: discord.app_commands.Choice[int] = 1):
+        """Adjust the population in a kingdom"""
+        await interaction.response.defer(thinking=True)
+        try:
+            randomize_value = randomize.value if isinstance(randomize, discord.app_commands.Choice) else randomize
+            if randomize_value == 2:
+                adjust_population = random.randint(1, abs(population))
+                population = -abs(adjust_population) if population < 0 else adjust_population
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("Select Region from Regions where region = ?", (region,))
+                region_info = await cursor.fetchone()
+                if not region_info:
+                    await interaction.followup.send("The region with that name does not exist.")
+                    return
+                await cursor.execute("SELECT Population from KB_Bids where Region = ?", (region,))
+                region_info = await cursor.fetchone()
+                if not region_info:
+                    await cursor.exeucte("INSERT INTO KB_Bids (Region, Population) VALUES (?, ?)", (region, population))
+                else:
+                    await cursor.execute("UPDATE KB_Bids SET Population = Population + ? WHERE Region = ?",
+                                         (population, region))
+                await db.commit()
+                await interaction.followup.send(
+                    f"The population bid pool of {region} has been adjusted to {population}.")
+        except (TypeError, ValueError) as e:
+            logging.exception(f"Error in adjust_population: {e}")
+            await interaction.followup.send("An error occurred while adjusting the population.")
 
 
 logging.basicConfig(
@@ -1355,34 +2489,135 @@ logging.basicConfig(
     filemode='a'  # Append to the file
 )
 
-"""
-    @kingdom_group.command(name="stabilization_points", description="Adjust the stabilization points of a kingdom.")
-    @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
-    async def kingdom_stabilization_points(self, interaction: discord.Interaction, kingdom: str,
-                                           stabilization_points: int):
-        "Adjust the stabilization points of a kingdom."
-        await interaction.response.defer(thinking=True)
-        try:
-            status = await kingdom_commands.adjust_sp(interaction.guild_id, interaction.user.id, kingdom,
-                                                      stabilization_points)
-            await interaction.followup.send(status)
-        except (TypeError, ValueError) as e:
-            logging.exception(f"Error in kingdom_stabilization_points: {e}")
-            await interaction.followup.send("An error occurred while adjusting kingdom stabilization points.")
-"""
 
-"""
-    @settlement_group.command(name='decay',
-                              description='Modify the multiplier for stabilization points a settlement requires in order to build.')
-    @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
-    @app_commands.autocomplete(settlement=kingdom_commands.settlement_autocomplete)
-    async def settlement_decay(self, interaction: discord.Interaction, kingdom: str, settlement: str, decay: int):
-        "Modify the multiplier for stabilization points a settlement requires in order to build."
-        await interaction.response.defer(thinking=True)
-        try:
-            status = await settlement_decay_set(interaction.guild_id, interaction.user.id, kingdom, settlement, decay)
-            await interaction.followup.send(status)
-        except (TypeError, ValueError) as e:
-            logging.exception(f"Error in settlement_decay: {e}")
-            await interaction.followup.send("An error occurred while setting settlement decay.")
-"""
+class EventDisplayView(shared_functions.DualView):
+    def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, view_type: int,
+                 interaction: discord.Interaction):
+        super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, view_type=view_type,
+                         interaction=interaction, content="")
+        self.max_items = None  # Cache total number of items
+        self.view_type = view_type
+
+    async def update_results(self):
+        """Update the results based on the current offset."""
+        if self.view_type == 1:
+            statement = """
+            SELECT Scale, Likelihood, Region, Type, Name, Effect, Special, 
+            Check_A, Check_B, Hex, Success_Requirements, 
+            Duration, Bonus, Penalty, Hex 
+            from KB_Events ORDER BY Name LIMIT ? OFFSET ?
+            """
+        elif self.view_type == 2:
+            statement = """
+                        SELECT Scale, Likelihood, Region, Type, Name, Effect, Special, 
+                        Check_A, Check_B, Hex, Success_Requirements, 
+                        Duration, Bonus, Penalty, Hex from 
+                        KB_Events WHERE Type = "Problematic" 
+                        ORDER BY Name LIMIT ? OFFSET ?
+                        """
+        else:
+            statement = """
+                        SELECT Scale, Likelihood, Region, Type, Name, Effect, Special, 
+                        Check_A, Check_B, Hex, Success_Requirements, 
+                        Duration, Bonus, Penalty, Hex from 
+                        KB_Events WHERE Type = "Beneficial" 
+                        ORDER BY Name LIMIT ? OFFSET ?
+                        """
+        async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+            cursor = await db.execute(statement, (self.limit, self.offset))
+            self.results = await cursor.fetchall()
+
+    async def create_embed(self):
+        """Create the embed for the titles."""
+        if self.view_type == 1:
+            if not self.player_name:
+                current_page = (self.offset // self.limit)
+                total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+                self.embed = discord.Embed(title=f"Character Summary",
+                                           description=f"Page {current_page} of {total_pages}")
+            else:
+                current_page = (self.offset // self.limit) + 1
+                total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+                self.embed = discord.Embed(title=f"Character Summary for {self.player_name}",
+                                           description=f"Page {current_page} of {total_pages}")
+            for result in self.results:
+                (player_name, true_character_name, title, titles, description, oath, level, tier, milestones,
+                 milestones_required, trials, trials_required, gold, gold_value, essence, fame, prestige, color,
+                 mythweavers, image_link, tradition_name, tradition_link, template_name, template_link,
+                 article_link) = result
+                gold_string = shared_functions.get_gold_breakdown(gold)
+                self.embed.add_field(name=f'Character Name', value=f'**Name**:{true_character_name}')
+                self.embed.add_field(name=f'Information',
+                                     value=f'**Level**: {level}, **Mythic Tier**: {tier}', inline=False)
+                self.embed.add_field(name=f'Total Experience',
+                                     value=f'**Milestones**: {milestones}, **Trials**: {trials}',
+                                     inline=False)
+                self.embed.add_field(name=f'Current Wealth', value=f'**Gold**: {gold_string}, **Essence**: {essence}',
+                                     inline=False)
+                linkage = ""
+                linkage += f"**Tradition**: [{tradition_name}]({tradition_link})" if tradition_name else ""
+                linkage += f" " if tradition_name and template_name else ""
+                linkage += f"**Template**: [{template_name}]({template_link})" if template_name else ""
+                if tradition_name or template_name:
+                    self.embed.add_field(name=f'Additional Info', value=linkage, inline=False)
+        else:
+            current_page = (self.offset // self.limit)
+            total_pages = ((await self.get_max_items() - 1) // self.limit) + 1
+            for result in self.results:
+                (scale, likelihood, region, type, name, effect, special,
+                 check_a, check_b, hex, success_requirements,
+                 duration, bonus, penalty, hex) = result
+                duration = f"{duration} turns" if duration > 0 else "Ongoing"
+                check_dict = {1: "Loyalty", 2: "Stability", 3: "Economy", 4: "Demand Building", 5: "Demand Improvement"}
+                check_a = check_dict[check_a]
+                check_b = check_dict[check_b]
+                type_dict = {1: "Beneficial", 2: "Problematic"}
+                hex_dict = {0: "Does not affect hexes", 1: "Affects a hex"}
+                requirements_dict = {0: "No requirements", 1: "Succeed at one check", 2: "Succeed at both checks"}
+                field_content = f"""**Likelihood**: {likelihood} **Type**: {type_dict[type]} 
+                \r\n**Scale**: {scale}, **Region**: {region}, **Hex**: {hex_dict[hex]}, **Duration**: {duration}
+                \r\n**Effect**: {effect}
+                \r\n**Special**: {special}, 
+                \r\n**Check A**: {check_a}, **Check B**: {check_b}, **Success Requirements**: {requirements_dict[success_requirements]}'
+                \r\n**Bonus**: {bonus}, **Penalty**: {penalty}
+                """
+                self.embed.add_field(name=f'**Event**: {name}', value=field_content, inline=False)
+                field_content = ""
+                async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                    cursor = await db.execute(
+                        "SELECT ID, Name, Severity, Type, Value, Reroll FROM KB_Events_Consequence where Name = ? Order BY Severity asc",
+                        (name,))
+                    unforeseen_consequences = await cursor.fetchall()
+                    consequence_rolltype_dict = {0: "Set", 1: "Randomized", 2: "Per building sharing this trait",
+                                                 3: "Percentile Effect", 4: "Randomized with 'exploding' reroll on max",
+                                                 5: "Singular Effect that explodes on Max"}
+                    if type == "Problematic":
+                        consequence_severity_dict = {0: "No Action or failed rolls", 1: "Passed 1 Check",
+                                                     2: "passed 2 checks"}
+                    else:
+                        consequence_severity_dict = {0: "No Action Required"}
+                    for consequence in unforeseen_consequences:
+                        (id, name, severity, type, value, reroll) = consequence
+                        field_content += f"\r\n**ID**: {id} **Consequence**: {name}, **Severity**: {consequence_severity_dict[severity]}, **Effects**: {type}, **Value**: {value}, **Reroll**: {consequence_rolltype_dict[reroll]}"
+                    self.embed.add_field(name=f'**{name} consequences**', value=field_content, inline=False)
+
+    async def get_max_items(self):
+        """Get the total number of titles."""
+        if self.max_items is None:
+            async with aiosqlite.connect(f"Pathparser_{self.guild_id}.sqlite") as db:
+                if self.view_type == 1:
+                    cursor = await db.execute("SELECT COUNT(*) from KB_Events")
+                elif self.view_type == 2:
+                    cursor = await db.execute("SELECT COUNT(*) from KB_Events where Type = 'Problematic'")
+                else:
+                    cursor = await db.execute("SELECT COUNT(*) from KB_Events where Type = 'Beneficial'")
+                count = await cursor.fetchone()
+                self.max_items = count[0]
+        return self.max_items
+
+    async def on_view_change(self):
+        self.view_type = 1 if self.view_type == 2 else 2
+        if self.view_type == 1:
+            self.limit = 5  # Change the limit to 5 for the summary view
+        else:
+            self.limit = 1  # Change the limit to 1 for the detailed view

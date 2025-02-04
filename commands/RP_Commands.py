@@ -469,7 +469,7 @@ async def update_balance_and_stock(db, user_id, new_balance, item_name, stock_re
 
 
 async def handle_inventory_or_use(db, interaction, user_id, item_id, item_name, amount, inventory, custom_message):
-    if inventory == "0":  # Item is consumed immediately
+    if inventory == 0:  # Item is consumed immediately
         for _ in range(amount):
             try:
                 await use_item(interaction, item_name)
@@ -763,6 +763,15 @@ class RPCommands(commands.Cog, name='RP'):
                         response += "\n" + actions[0] if isinstance(actions[0], str) else ""
                         response += "\n" + actions[1] if isinstance(actions[1], str) else ""
                         response += "\n" + actions[2] if isinstance(actions[2], str) else ""
+                if item_quantity[0] - amount > 0:
+                    await db.execute(
+                        "UPDATE RP_Players_Items SET Item_Quantity = Item_Quantity - ? WHERE player_id = ? and item_name = ?",
+                        (amount, user_id, item_name))
+                    await db.commit()
+                else:
+                    await db.execute("DELETE FROM RP_Players_Items WHERE player_id = ? and item_name = ?",
+                                     (user_id, item_name))
+                    await db.commit()
                 await interaction.followup.send(response)
 
     @roleplay_group.command(name="send", description="send RP to another user")

@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import logging
 import os
@@ -69,9 +70,9 @@ async def reinstate_reminders(server_bot) -> None:
 async def reinstate_session_buttons(server_bot) -> None:
     guilds = server_bot.guilds
     now = datetime.datetime.now(datetime.timezone.utc)
+
     for guild in guilds:
         try:
-
             async with aiosqlite.connect(f"pathparser_{guild.id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute(
@@ -79,9 +80,12 @@ async def reinstate_session_buttons(server_bot) -> None:
                     (now.timestamp(),)
                 )
                 sessions = await cursor.fetchall()
-                await cursor.execute("SELECT Search From Admin Where Identifier = 'Sessions_Channel'")
+
+                await cursor.execute("SELECT Search FROM Admin WHERE Identifier = 'Sessions_Channel'")
                 channel_id = await cursor.fetchone()
-                print(channel_id)
+                logging.info(f"Found sessions channel: {channel_id}")
+
+                # Try to get the channel from cache, or fetch it.
                 channel = server_bot.get_channel(channel_id[0])
                 if not channel:
                     channel = await guild.fetch_channel(channel_id[0])
@@ -90,20 +94,47 @@ async def reinstate_session_buttons(server_bot) -> None:
                     session_id, session_name, message_id, channel_id, hammer_time_str = session
                     session_start_time = datetime.datetime.fromtimestamp(int(hammer_time_str), datetime.timezone.utc)
                     timeout_seconds = (
-                            session_start_time - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+                                session_start_time - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+                    # Cap the timeout at 12 hours.
                     timeout_seconds = min(timeout_seconds, 12 * 3600)
 
-                    # Fetch the channel and message
-                    message = await channel.fetch_message(message_id)
+                    # Fetch the message to be edited.
+                    try:
+                        message = await channel.fetch_message(message_id)
+                    except discord.HTTPException as http_err:
+                        logging.exception(f"Failed to fetch message {message_id} in guild {guild.id}: {http_err}")
+                        continue  # Skip to the next session
 
-                    # Create a new view with the updated timeout
-                    view = gamemaster_commands.JoinOrLeaveSessionView(timeout_seconds=int(timeout_seconds),
-                                                                      session_id=session_id, guild=guild,
-                                                                      session_name=session_name, content="")
-                    await message.edit(view=view)
+                    # Create a new view with the updated timeout.
+                    view = gamemaster_commands.JoinOrLeaveSessionView(
+                        timeout_seconds=int(timeout_seconds),
+                        session_id=session_id,
+                        guild=guild,
+                        session_name=session_name,
+                        content=""
+                    )
+
+                    # Try to edit the message. If a rate limit occurs, wait and try again.
+                    try:
+                        await message.edit(view=view)
+                    except discord.HTTPException as http_err:
+                        logging.warning(f"Rate limit editing message {message_id} in guild {guild.id}: {http_err}")
+                        # Optionally sleep for a couple seconds and then try again:
+                        await asyncio.sleep(2)
+                        try:
+                            await message.edit(view=view)
+                        except discord.HTTPException as http_err_retry:
+                            logging.exception(
+                                f"Retry failed for message {message_id} in guild {guild.id}: {http_err_retry}")
+                            continue  # Skip this session if it still fails
+
+                    # Add a small delay to prevent hammering the API.
+                    await asyncio.sleep(0.5)
 
         except aiosqlite.Error as e:
             logging.exception(f"Failed to reinstate session buttons for guild {guild.id} with error: {e}")
+        except Exception as general_e:
+            logging.exception(f"An unexpected error occurred for guild {guild.id}: {general_e}")
 
 
 @bot.event
@@ -120,7 +151,6 @@ async def on_ready():
     print("cogs added")
     await bot.tree.sync()
     print("tree synced.")
-
     await reinstate_cache(bot)
     await reinstate_rp_cache(bot)
     await reinstate_reminders(bot)

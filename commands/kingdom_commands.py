@@ -729,14 +729,22 @@ async def adjust_bp(
         guild_id: int,
         author: int,
         kingdom: str,
-        amount: int) -> str:
+        amount: int,
+        apply_unrest: bool = True) -> str:
     try:
         async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
             cursor = await db.cursor()
+            return_string = f"The build points of {kingdom} have been increased by {amount}."
             await cursor.execute("SELECT Build_Points FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
             kingdom_info = await cursor.fetchone()
+
             if kingdom_info is None:
                 return "The kingdom does not exist."
+            if apply_unrest and amount < 0:
+                await cursor.execute(
+                    "UPDATE kb_Kingdoms SET Unrest = Unrest + ? WHERE Kingdom = ?",
+                    (abs(amount), kingdom))
+                return_string += f" Unrest has been increased by {abs(amount)}."
             if amount < 0:
                 amount = max(amount, -kingdom_info[0])
             await cursor.execute("UPDATE kb_Kingdoms SET Build_Points = Build_Points + ? WHERE Kingdom = ?",
@@ -746,7 +754,8 @@ async def adjust_bp(
                 (author, datetime.datetime.now(), "kb_Kingdoms", "Increase BP",
                  f"Increased the build points of {kingdom} by {amount}"))
             await db.commit()
-            return f"The build points of {kingdom} have been increased by {amount}."
+
+            return return_string
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error increasing build points: {e}")
         return "An error occurred while increasing build points."
@@ -1036,6 +1045,9 @@ async def add_an_improvement(
                 await cursor.execute(
                     "UPDATE kb_hexes_constructed SET Amount = Amount + ? WHERE Full_Name = ? and ID = ?",
                     (max_amount, improvement, hex_id))
+            await cursor.execute("UPDATE kb_Kingdoms_Custom SET Economy = Economy + ?, Loyalty = Loyalty + ?, Stability = Stability + ?, Unrest = Unrest + ? WHERE Kingdom = ?",
+                                    (improvement_info['Economy'] * max_amount, improvement_info['Loyalty'] * max_amount,
+                                    improvement_info['Stability'] * max_amount, improvement_info['Unrest'] * max_amount, kingdom))
             return f"The improvement of {improvement} has been added to the hex of {hex_id}."
     except (aiosqlite.Error, TypeError, ValueError) as e:
         logging.exception(f"Error adding improvement: {e}")
@@ -1315,7 +1327,7 @@ async def relinquish_settlement(
         return "An error occurred while unclaiming the settlement."
 
 
-class KingdomCommands(commands.Cog, name='Kingdom'):
+class KingdomCommands(commands.Cog, name='kingdom'):
     def __init__(self, bot):
         self.bot = bot
 
@@ -2156,7 +2168,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         parent=kingdom_group
     )
 
-    @trade_group.command(name="Request", description="Request a trade route to another kingdom")
+    @trade_group.command(name="request", description="Request a trade route to another kingdom")
     @app_commands.autocomplete(kingdom=kingdom_autocomplete)
     @app_commands.autocomplete(target_kingdom=kingdom_autocomplete)
     async def request_trade(
@@ -2306,7 +2318,7 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
             logging.exception(f"Error requesting trade route: {e}")
             await interaction.followup.send(content="An error occurred while requesting a trade route.")
 
-    @trade_group.command(name="Cancel", description="Cancel a trade route with another kingdom")
+    @trade_group.command(name="cancel", description="Cancel a trade route with another kingdom")
     @app_commands.choices(
         intent=[discord.app_commands.Choice(name='outgoing', value=1),
                 discord.app_commands.Choice(name='incoming', value=2)])
@@ -2385,6 +2397,144 @@ class KingdomCommands(commands.Cog, name='Kingdom'):
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"Error canceling trade route: {e}")
             await interaction.followup.send(content="An error occurred while canceling a trade route.")
+
+    population_group = discord.app_commands.Group(
+        name='population',
+        description='Commands related to kingdom management',
+        parent=kingdom_group
+    )
+
+    @population_group.command(name="bid", description="Bid for a portion of the population pool")
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    async def bid_population(self, interaction: discord.Interaction, kingdom: str, password: str, amount: int):
+        """This command is used to bid for a portion of the population pool"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password, Build_Points, Region FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                amount = min(amount, kingdom_results[1])
+                await cursor.execute("Select Build_points from KB_Population_Bids where Kingdom = ?", (kingdom,))
+                population_bid = await cursor.fetchone()
+                if not population_bid:
+                    await cursor.execute("INSERT INTO KB_Population_Bids (Kingdom, Amount, Region) VALUES (?, ?, ?)", (kingdom, amount, kingdom_results[2]))
+                    await interaction.followup.send(content=f"{amount} Build Points have been bid for population on.")
+                else:
+                    await cursor.execute("UPDATE KB_Population_Bids SET Amount = Amount + ? WHERE Kingdom = ?", (amount, kingdom))
+                    await interaction.followup.send(content=f"{amount} Build Points have been added to the population bid.")
+                await cursor.execute("UPDATE kb_Kingdoms SET Build_Points = Build_Points - ? WHERE Kingdom = ?", (amount, kingdom))
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error bidding on population: {e}")
+            await interaction.followup.send(content="An error occurred while bidding on population.")
+
+    @population_group.command(name="display", description="Display the current population bid")
+    @app_commands.autocomplete(region=shared_functions.region_autocomplete)
+    async def display_population(self, interaction: discord.Interaction, region: str):
+        """This command is used to display the current population bid"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Population FROM KB_Population WHERE region = ?", (region,))
+                region = await cursor.fetchone()
+                if not region:
+                    await interaction.followup.send(content=f"The region of {region} does not exist.")
+                    return
+                await cursor.execute("SELECT sum(Amount) FROM KB_Population_Bids WHERE Region = ?", (region,))
+                total_bid = await cursor.fetchone()
+                await cursor.execute("SELECT Kingdom, Amount FROM KB_Population_Bids WHERE Region = ?", (region,))
+                bids = await cursor.fetchall()
+                if not bids:
+                    await interaction.followup.send(content="There are no bids for this region.")
+                    return
+                embed = discord.Embed(
+                    title=f"Population Bids for {region}",
+                    description="The following kingdoms have bid for this region."
+                )
+                list_of_kingdoms = ""
+                for idx, bid in enumerate(bids):
+                    (kingdom, amount) = bid
+                    list_of_kingdoms += f"{kingdom} has bid {amount} BP, potentially claiming {(amount / total_bid[0]) * region[0]} people.\r\n"
+                    if idx % 10 == 0:
+                        embed.add_field(name="Bids", value=list_of_kingdoms)
+                        list_of_kingdoms = ""
+                embed.add_field(name="Bids", value=list_of_kingdoms)
+                await interaction.followup.send(embed=embed)
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error displaying population bid: {e}")
+            await interaction.followup.send(content="An error occurred while displaying the population bid.")
+
+
+    army_group = discord.app_commands.Group(
+        name='army',
+        description='Commands related to kingdom management',
+        parent=kingdom_group
+    )
+
+    @army_group.command(name="create", description="Create an army")
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    async def create_army(self, interaction: discord.Interaction, kingdom: str, password: str, army_name: str, consumption_size: int):
+        """This command is used to create an army"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                await cursor.execute("Select Army_Name from KB_Armies where Kingdom = ? and Army_Name = ?", (kingdom, army_name))
+                army = await cursor.fetchone()
+                if army:
+                    await cursor.execute("UPDATE KB_Armies SET consumption_size = ? WHERE Kingdom = ? and Army_Name = ?", (consumption_size, kingdom, army_name))
+                    await interaction.followup.send(content=f"Army {army_name} has been updated.")
+                else:
+                    await cursor.execute("INSERT INTO KB_Armies (Kingdom, Army_Name, consumption_size) VALUES (?, ?, ?)", (kingdom, army_name, consumption_size))
+                    await interaction.followup.send(content=f"Army {army_name} has been created.")
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error creating army: {e}")
+            await interaction.followup.send(content="An error occurred while creating an army.")
+
+    @army_group.command(name="delete", description="Delete an army")
+    @app_commands.autocomplete(kingdom=kingdom_autocomplete)
+    async def delete_army(self, interaction: discord.Interaction, kingdom: str, password: str, army_name: str):
+        """This command is used to delete an army"""
+        await interaction.response.defer(thinking=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Password FROM kb_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                kingdom_results = await cursor.fetchone()
+                if not kingdom_results:
+                    await interaction.followup.send(content=f"The kingdom of {kingdom} does not exist.")
+                    return
+                valid_password = validate_password(password, kingdom_results[0])
+                if not valid_password:
+                    await interaction.followup.send(content="The password provided is incorrect.")
+                    return
+                await cursor.execute("Select Army_Name from KB_Armies where Kingdom = ? and Army_Name = ?", (kingdom, army_name))
+                army = await cursor.fetchone()
+                if not army:
+                    await interaction.followup.send(content=f"Army {army_name} does not exist.")
+                    return
+                await cursor.execute("DELETE FROM KB_Armies where Kingdom = ? and Army_Name = ?", (kingdom, army_name))
+                await interaction.followup.send(content=f"Army {army_name} has been deleted.")
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"Error deleting army: {e}")
+            await interaction.followup.send(content="An error occurred while deleting an army.")
 
 class KingdomView(shared_functions.ShopView):
     """

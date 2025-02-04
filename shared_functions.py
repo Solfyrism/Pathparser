@@ -602,7 +602,7 @@ async def character_embed(
                 SELECT player_name, player_id, True_Character_Name, Title, Titles, Description, Oath, Level,
                        Tier, Milestones, Milestones_Required, Trials, Trials_Required, Gold, Gold_Value,
                        Essence, Fame, Prestige, Color, Mythweavers, Image_Link, Tradition_Name,
-                       Tradition_Link, Template_Name, Template_Link, Article_Link, Message_ID
+                       Tradition_Link, Template_Name, Template_Link, Article_Link, Message_ID, Region
                 FROM Player_Characters WHERE Character_Name = ?
                 """, (character_name,))
             character_info = await cursor.fetchone()
@@ -655,6 +655,8 @@ async def character_embed(
             description_field += f"**Other Names**: {titles}\n"
         if article_link:
             description_field += f"[**Backstory**]({article_link})"
+        if character_info['Region']:
+            description_field += f"\n**Region**: {character_info['Region']}"
 
         titled_character_name = true_character_name if not title else f"{title} {true_character_name}"
 
@@ -792,6 +794,7 @@ class CharacterChange:
     prestige: Optional[int] = None
     prestige_change: Optional[int] = None
     source: Optional[str] = None
+    region: Optional[str] = None
 
 
 @dataclass
@@ -1004,6 +1007,11 @@ async def log_embed(change: CharacterChange, guild: discord.Guild, thread: int, 
                     f"**Total Prestige**: {prestige}\n"
                     f"**Received Prestige**: {prestige_change}"
                 )
+            )
+        if change.region is not None:
+            embed.add_field(
+                name="Region",
+                value=change.region
             )
 
         # Set Footer
@@ -1320,8 +1328,9 @@ def validate_mythweavers(url: str) -> Tuple[bool, str, int]:
             return False, "URL must start with 'https://'", 0
         if parsed_url.netloc != 'www.myth-weavers.com':
             return False, "URL must be from 'www.myth-weavers.com'", 1
-        if parsed_url.path != '/sheets/':
+        if parsed_url.path != '/sheets/' and parsed_url.path != '/sheets//':
             return False, "URL path must be '/sheet.html'", 2
+
         query_params = parse_qs(parsed_url.query)
         fragment_params = parse_qs(parsed_url.fragment)
         id_param = query_params.get('id') or fragment_params.get('id')
@@ -1463,7 +1472,7 @@ def validate_hammertime(timestamp_str):
         five_years_earlier = now - (5 * 365 * 24 * 60 * 60)
         timestamp = int(timestamp_str)
         if five_years_earlier < timestamp < now:
-            return False, "The time you provided is in the past."
+            return False, False, "The time you provided is in the past."
         elif timestamp < five_years_earlier:
             # Handle special cases like "99 years ago"
             return True, False, ("Special Date", None, "Arrival", "Hammer Time")
@@ -1476,7 +1485,7 @@ def validate_hammertime(timestamp_str):
 
             return True, True, (date, time_hhmm, arrival, hammer_time_stamp)
     except ValueError:
-        return False, "Invalid timestamp format. Please provide a valid timestamp."
+        return False, False, "Invalid timestamp format. Please provide a valid timestamp."
 
 
 def convert_datetime_to_unix(time_str, timezone_str):

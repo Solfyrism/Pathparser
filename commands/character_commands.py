@@ -66,6 +66,111 @@ async def get_max_level(guild_id: int) -> Optional[int]:
                 return None
 
 
+def normal_sheet_attributes(skills_data: dict) -> dict:
+    attributes = {
+        'strength': safe_int(skills_data.get('Str')),
+        'strength_mod': safe_int(skills_data.get('StrMod')),
+        'dexterity': safe_int(skills_data.get('Dex')),
+        'dexterity_mod': safe_int(skills_data.get('DexMod')),
+        'constitution': safe_int(skills_data.get('Con')),
+        'constitution_mod': safe_int(skills_data.get('ConMod')),
+        'intelligence': safe_int(skills_data.get('Int')),
+        'intelligence_mod': safe_int(skills_data.get('IntMod')),
+        'wisdom': safe_int(skills_data.get('Wis')),
+        'wisdom_mod': safe_int(skills_data.get('WisMod')),
+        'charisma': safe_int(skills_data.get('Cha')),
+        'charisma_mod': safe_int(skills_data.get('ChaMod')),
+        'fortitude': safe_int(skills_data.get('Fort')),
+        'reflex': safe_int(skills_data.get('Reflex')),
+        'will': safe_int(skills_data.get('Will')),
+        'initiative': safe_int(skills_data.get('Init')),
+        'hit_points': safe_int(skills_data.get('HP')),
+        'armor_class': safe_int(skills_data.get('AC')),
+        'touch_armor_class': safe_int(skills_data.get('ACTouch')),
+        'cmd': safe_int(skills_data.get('CMD')),
+        'ranged': safe_int_atk(skills_data.get('RBAB')),
+        'melee': safe_int_atk(skills_data.get('MBAB')),
+        'cmb': safe_int_atk(skills_data.get('CMB')),
+    }
+    return attributes
+def experimental_sheet_attributes(skills_data: dict) -> dict:
+    attributes = {
+        'strength': safe_int(skills_data.get('strength_score')),
+        'strength_mod': safe_int(skills_data.get('strength_mod')),
+        'dexterity': safe_int(skills_data.get('dexterity_score')),
+        'dexterity_mod': safe_int(skills_data.get('dexterity_mod')),
+        'constitution': safe_int(skills_data.get('constitution_score')),
+        'constitution_mod': safe_int(skills_data.get('constitution_mod')),
+        'intelligence': safe_int(skills_data.get('intelligence_score')),
+        'intelligence_mod': safe_int(skills_data.get('intelligence_mod')),
+        'wisdom': safe_int(skills_data.get('wisdom_score')),
+        'wisdom_mod': safe_int(skills_data.get('wisdom_mod')),
+        'charisma': safe_int(skills_data.get('charisma_score')),
+        'charisma_mod': safe_int(skills_data.get('charisma_mod')),
+        'fortitude': safe_int(skills_data.get('fortitude_total')),
+        'reflex': safe_int(skills_data.get('reflex_total')),
+        'will': safe_int(skills_data.get('will_total')),
+        'initiative': safe_int(skills_data.get('init_total')),
+        'hit_points': safe_int(skills_data.get('hp')),
+        'armor_class': safe_int(skills_data.get('ac_total')),
+        'touch_armor_class': safe_int(skills_data.get('ac_touch')),
+        'cmd': safe_int(skills_data.get('ac_cmd')),
+        'ranged': safe_int_atk(skills_data.get('rab_ab')),
+        'melee': safe_int_atk(skills_data.get('mab_ab')),
+        'cmb': safe_int_atk(skills_data.get('cmb_ab')),
+    }
+    return attributes
+
+async def normal_sheet_skills(db: aiosqlite.Connection, skills_data: dict, character_name: str) -> str:
+    cursor = await db.cursor()
+    for i in range(1, 36):
+        skill_key = f"Skill{i:02}"
+        if skill_key in skills_data:
+            skill_name = skills_data.get(skill_key)
+            ability = skills_data.get(f"{skill_key}Ab", "Unknown")
+            skill_rank = safe_int(skills_data.get(f"{skill_key}Rank"))
+            ability_mod = attributes.get(f"{ability.lower()}Mod", 0)
+            skill_modifier = safe_int(skills_data.get(f"{skill_key}Mod"))
+
+            # Insert or replace skill
+            await cursor.execute(
+                '''
+                INSERT OR REPLACE INTO Player_Characters_Skills (
+                    character_name, skill_name, ability, skill_rank, skill_modifier
+                ) VALUES (?, ?, ?, ?, ?)
+                ''',
+                (
+                    character_name, skill_name, ability, skill_rank, skill_modifier
+                )
+            )
+    await db.commit()
+    return "Skills updated successfully."
+
+async def experimental_sheet_skills(db: aiosqlite.Connection, skills_data: dict, character_name: str) -> str:
+    cursor = await db.cursor()
+    for i in range(1, 36):
+        skill_key = f"skill_{i}_name"
+        if skill_key in skills_data:
+            skill_name = skills_data.get(skill_key)
+            ability = skills_data.get(f"skill_{i}_abil", "Unknown")
+            skill_rank = safe_int(skills_data.get(f"skill_{i}_Rank"))
+            skill_modifier = safe_int(skills_data.get(f"skill_{i}_skill_mod"))
+
+            # Insert or replace skill
+            await cursor.execute(
+                '''
+                INSERT OR REPLACE INTO Player_Characters_Skills (
+                    character_name, skill_name, ability, skill_rank, skill_modifier
+                ) VALUES (?, ?, ?, ?, ?)
+                ''',
+                (
+                    character_name, skill_name, ability, skill_rank, skill_modifier
+                )
+            )
+    return "Skills updated successfully."
+
+
+
 def calculate_milestones(
         milestone_values: Tuple[Optional[int], Optional[int], Optional[int], Optional[int]],
         multipliers: List[int],
@@ -650,24 +755,42 @@ async def stg_character_embed(guild_id, character_name) -> (Union[Tuple[discord.
                                   f'**Remaining**: {trials_required}')  # Trials, Remaining Trials
             message = f"<@{character_info[1]}>"
             check_backstory = shared_functions.drive_word_document(backstory)
-            if check_backstory is not None:
-                backstory_field = f"{check_backstory}"
-            else:
-                if backstory:
-                    if len(backstory) < 1000:
-                        backstory_field = f"{backstory}"
-                    elif len(backstory) < 1950:
-                        message += f"```{backstory}```"
+            if backstory:
+                if backstory.startswith("http"):
+                    document_id = shared_functions.extract_document_id(backstory)
+                    if document_id is None:
+                        if oath == 'Offerings':
+                            embed.set_footer(text=f'{oath}, Could not parse Document Link!', icon_url=f'https://i.imgur.com/dSuLyJd.png')
+                        elif oath == 'Poverty':
+                            embed.set_footer(text=f'{oath}, Could not parse Document Link!', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
+                        elif oath == 'Absolute':
+                            embed.set_footer(text=f'{oath}, Could not parse Document Link!', icon_url=f'https://i.imgur.com/ibE5vSY.png')
+                        else:
+                            embed.set_footer(text=f'Could not parse Document Link!')
+                    else:
+                        embed.add_field(name="Backstory", value=f"{backstory}", inline=False)
+                        if oath == 'Offerings':
+                            embed.set_footer(text=f'{oath}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
+                        elif oath == 'Poverty':
+                            embed.set_footer(text=f'{oath}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
+                        elif oath == 'Absolute':
+                            embed.set_footer(text=f'{oath} Poverty', icon_url=f'https://i.imgur.com/ibE5vSY.png')
                 else:
-                    backstory_field = f"{oath}"
-            if oath == 'Offerings':
-                embed.set_footer(text=f'{backstory_field}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
-            elif oath == 'Poverty':
-                embed.set_footer(text=f'{backstory_field}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
-            elif oath == 'Absolute':
-                embed.set_footer(text=f'{backstory_field}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
+                    if oath == 'Offerings':
+                        embed.set_footer(text=f'{backstory}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
+                    elif oath == 'Poverty':
+                        embed.set_footer(text=f'{backstory}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
+                    elif oath == 'Absolute':
+                        embed.set_footer(text=f'{backstory} Poverty', icon_url=f'https://i.imgur.com/ibE5vSY.png')
+                    else:
+                        embed.set_footer(text=f'{backstory}')
             else:
-                embed.set_footer(text=f'{backstory_field}')
+                if oath == 'Offerings':
+                    embed.set_footer(text=f'{oath}', icon_url=f'https://i.imgur.com/dSuLyJd.png')
+                elif oath == 'Poverty':
+                    embed.set_footer(text=f'{oath}', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
+                elif oath == 'Absolute':
+                    embed.set_footer(text=f'{oath}', icon_url=f'https://i.imgur.com/ibE5vSY.png')
 
             return_message = embed, message
 
@@ -714,7 +837,7 @@ async def update_character_name(guild_id: int, character_name: str, new_characte
             await conn.commit()
             return_string = f"Updating character name for '{character_name}' to '{new_character_name}' for Leadership"
             await cursor.execute(
-                "UPDATE Leadership SET Character_Name = ? WHERE Character_Name = ?",
+                "UPDATE KB_Leadership SET Character_Name = ? WHERE Character_Name = ?",
                 (new_character_name, character_name))
             await conn.commit()
             return_string = f"Update {character_name} to {new_character_name} is successful"
@@ -808,13 +931,13 @@ class CharacterCommands(commands.Cog, name='character'):
             async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
                 cursor = await conn.cursor()
                 await cursor.execute(
-                    "SELECT Player_ID, Character_Name, Level, Region FROM Player_Characters WHERE Character_Name = ? and Player_ID = ?",
+                    "SELECT Player_ID, Character_Name, Level, Region, Thread_ID FROM Player_Characters WHERE Character_Name = ? and Player_ID = ?",
                     (character, author_id))
                 character_info = await cursor.fetchone()
                 if character_info is None:
                     await interaction.followup.send(f"Character {character} not found")
                     return
-                (player_id, character_name, level, old_region) = character_info
+                (player_id, character_name, level, old_region, thread) = character_info
                 if old_region == region:
                     await interaction.followup.send(f"Character {character} is already in {region}")
                     return
@@ -882,7 +1005,14 @@ class CharacterCommands(commands.Cog, name='character'):
                     await interaction.guild.fetch_channel(region_role[1])
                 await new_text_channel.send(
                     f"{datetime.date.today()}\r\nCharacter {character} moved from {old_region} to {region} by {interaction.user}\r\n{reason}")
+                changer_changes = shared_functions.CharacterChange(
+                    character_name=character_name,
+                    author=interaction.user.name,
+                    region=region,
+                    source='Character Edit')
+                await shared_functions.log_embed(guild=interaction.guild, change=changer_changes, bot=self.bot, thread=thread)
                 await interaction.followup.send(f"Character {character} moved from {old_region} to {region}")
+                await shared_functions.character_embed(guild=interaction.guild, character_name=character)
         except aiosqlite.Error as e:
             logging.exception(f"Error in character move for {character}: {e}")
             await interaction.followup.send(f"Error in character move for {character}: {e}")
@@ -998,6 +1128,12 @@ class CharacterCommands(commands.Cog, name='character'):
                                 print(configs)
                                 if configs:
                                     starting_level = configs.get('Starting_Level')
+                                else:
+                                    await cursor.execute(
+                                        "Select Search From Admin where Identifier = 'Starting_Level'")
+                                    starting_level = await cursor.fetchone()
+                                    print(starting_level)
+                                    starting_level = starting_level[0]
 
                             await cursor.execute(
                                 "SELECT Minimum_Milestones, Milestones_to_level, WPL FROM Milestone_System where level = ?",
@@ -3040,8 +3176,11 @@ class CharacterCommands(commands.Cog, name='character'):
     @mythweavers_group.command(name='upload',
                                description='Upload the Abilities and skills from your mythweavers sheet.')
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
-    async def upload(self, interaction: discord.Interaction, character_name: str, mythweavers: discord.Attachment):
+    @app_commands.choices(sheet=[discord.app_commands.Choice(name='Sane_Person_Very_Regular', value=1),
+                                discord.app_commands.Choice(name='Experimental', value=2)])
+    async def upload(self, interaction: discord.Interaction, character_name: str, mythweavers: discord.Attachment, sheet: discord.app_commands.Choice[int] = 1):
         try:
+            sheet_value = 1 if isinstance(sheet, int) else sheet.value
             await interaction.response.defer(thinking=True, ephemeral=True)
             guild_id = interaction.guild_id
             async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
@@ -3075,33 +3214,11 @@ class CharacterCommands(commands.Cog, name='character'):
                             ephemeral=True
                         )
                         return
-
+                    if sheet_value == 1:
+                        attributes = normal_sheet_attributes(skills_data)
                     # Extract and safely convert Attributes
-                    attributes = {
-                        'strength': safe_int(skills_data.get('Str')),
-                        'strength_mod': safe_int(skills_data.get('StrMod')),
-                        'dexterity': safe_int(skills_data.get('Dex')),
-                        'dexterity_mod': safe_int(skills_data.get('DexMod')),
-                        'constitution': safe_int(skills_data.get('Con')),
-                        'constitution_mod': safe_int(skills_data.get('ConMod')),
-                        'intelligence': safe_int(skills_data.get('Int')),
-                        'intelligence_mod': safe_int(skills_data.get('IntMod')),
-                        'wisdom': safe_int(skills_data.get('Wis')),
-                        'wisdom_mod': safe_int(skills_data.get('WisMod')),
-                        'charisma': safe_int(skills_data.get('Cha')),
-                        'charisma_mod': safe_int(skills_data.get('ChaMod')),
-                        'fortitude': safe_int(skills_data.get('Fort')),
-                        'reflex': safe_int(skills_data.get('Reflex')),
-                        'will': safe_int(skills_data.get('Will')),
-                        'initiative': safe_int(skills_data.get('Init')),
-                        'hit_points': safe_int(skills_data.get('HP')),
-                        'armor_class': safe_int(skills_data.get('AC')),
-                        'touch_armor_class': safe_int(skills_data.get('ACTouch')),
-                        'cmd': safe_int(skills_data.get('CMD')),
-                        'ranged': safe_int_atk(skills_data.get('RBAB')),
-                        'melee': safe_int_atk(skills_data.get('MBAB')),
-                        'cmb': safe_int_atk(skills_data.get('CMB')),
-                    }
+                    else:
+                        attributes = experimental_sheet_attributes(skills_data)
 
                     await cursor.execute(
                         '''
@@ -3128,26 +3245,10 @@ class CharacterCommands(commands.Cog, name='character'):
                     )
 
                     # Process skills
-                    for i in range(1, 36):
-                        skill_key = f"Skill{i:02}"
-                        if skill_key in skills_data:
-                            skill_name = skills_data.get(skill_key)
-                            ability = skills_data.get(f"{skill_key}Ab", "Unknown")
-                            skill_rank = safe_int(skills_data.get(f"{skill_key}Rank"))
-                            ability_mod = attributes.get(f"{ability.lower()}Mod", 0)
-                            skill_modifier = safe_int(skills_data.get(f"{skill_key}Mod"))
-
-                            # Insert or replace skill
-                            await cursor.execute(
-                                '''
-                                INSERT OR REPLACE INTO Player_Characters_Skills (
-                                    character_name, skill_name, ability, skill_rank, skill_modifier
-                                ) VALUES (?, ?, ?, ?, ?)
-                                ''',
-                                (
-                                    character_name, skill_name, ability, skill_rank, skill_modifier
-                                )
-                            )
+                    if sheet_value == 1:
+                        await normal_sheet_skills(db=conn, skills_data=skills_data, character_name=character_name)
+                    else:
+                        await experimental_sheet_skills(db=conn, skills_data=skills_data, character_name=character_name)
                     await conn.commit()
                     await interaction.followup.send(
                         f"Mythweavers sheet uploaded successfully for {character_name}.",

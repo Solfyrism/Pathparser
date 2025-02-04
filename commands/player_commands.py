@@ -2025,7 +2025,7 @@ async def player_signup(
             cursor = await db.cursor()
             await cursor.execute(
                 """Select 
-                player_name, True_Character_Name, titlfe, 
+                player_name, True_Character_Name, title, 
                 level, tier, 
                 gold, gold_value, 
                 tradition_name, tradition_link, template_name, template_link, 
@@ -2440,7 +2440,7 @@ class PlayerCommands(commands.Cog, name='Player'):
                                     (secondary_role, min_level, max_level) = secondary_role
                                 if overflow == 1 or not secondary_role:
                                     await cursor.execute(
-                                        "Select min(level), max(level) Role_Name from Milestone_System WHERE Level_Range_ID = ?",
+                                        "Select min(level), max(level), Level_Range_ID from Milestone_System WHERE Level_Range_ID = ?",
                                         (session_range_id,))
                                     level_range_info = await cursor.fetchone()
                                     (min_level, max_level, role_name) = level_range_info

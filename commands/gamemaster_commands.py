@@ -635,17 +635,17 @@ async def validate_milestone_system_overflow(
 
             elif overflow == 2:
                 await cursor.execute(
-                    "SELECT min(level), max(level) FROM Milestone_System WHERE Role_ID = ?",
+                    "SELECT min(level), max(level) FROM Milestone_System WHERE Level_range_ID = ?",
                     (session_range_id,))
                 session_range_info = await cursor.fetchone()
 
                 if session_range_info is not None:
                     await cursor.execute(
-                        "SELECT Role_ID FROM Level_Range WHERE level = ?",
+                        "SELECT level_range_id FROM Milestone_System WHERE level = ?",
                         (session_range_info[1] + 1,))
                     overflow_range_id = await cursor.fetchone()
                     await cursor.execute(
-                        "SELECT Min(level), Max(level) FROM Level_Range WHERE Role_ID = ?", (overflow_range_id[0],))
+                        "SELECT Min(level), Max(level) FROM Milestone_System WHERE level_range_id = ?", (overflow_range_id[0],))
                     overflow_range_info = await cursor.fetchone()
                     session_range = guild.get_role(overflow_range_id[0])
 
@@ -660,7 +660,7 @@ async def validate_milestone_system_overflow(
 
             elif overflow == 3:
                 await cursor.execute(
-                    "SELECT min(level), max(level) FROM Level_Range WHERE Role_ID = ?",
+                    "SELECT min(level), max(level) FROM Milestone_System WHERE level_range_id = ?",
                     (session_range_id,))
                 session_range_info = await cursor.fetchone()
 
@@ -670,7 +670,7 @@ async def validate_milestone_system_overflow(
                         (session_range_info[0] - 1,))
                     overflow_range_id = await cursor.fetchone()
                     await cursor.execute(
-                        "SELECT Min(level), Max(level) FROM Level_Range WHERE Role_ID = ?", (overflow_range_id[0],))
+                        "SELECT Min(level), Max(level) FROM Milestone_System WHERE level_range_id = ?", (overflow_range_id[0],))
                     overflow_range_info = await cursor.fetchone()
                     session_range = guild.get_role(overflow_range_id[0])
 
@@ -707,14 +707,14 @@ async def validate_region_system_overflow(
 
             elif overflow == 2:
                 await cursor.execute(
-                    "SELECT Min_level, Max_Level, Region FROM Regions_Level_Range WHERE Role_ID = ?",
+                    "SELECT Min_level, Max_Level, Name FROM Regions_Level_Range WHERE Role_ID = ?",
                     (session_range_id,))
                 session_range_info = await cursor.fetchone()
 
                 if session_range_info is not None:
                     (min_level, max_level, region) = session_range_info
                     await cursor.execute(
-                        "SELECT Role_ID, min_level, max_level FROM Level_Range WHERE Min_Level <= ? And Region = ?",
+                        "SELECT Role_ID, min_level, max_level FROM Regions_Level_Range WHERE Min_Level = ? And Name = ?",
                         (max_level + 1, region))
                     overflow_range_id = await cursor.fetchone()
 
@@ -731,14 +731,14 @@ async def validate_region_system_overflow(
 
             elif overflow == 3:
                 await cursor.execute(
-                    "SELECT min_level, max_level, region FROM Level_Range WHERE Role_ID = ?",
+                    "SELECT min_level, max_level, name FROM Regions_Level_Range WHERE Role_ID = ?",
                     (session_range_id,))
                 session_range_info = await cursor.fetchone()
 
                 if session_range_info is not None:
                     (min_level, max_level, region) = session_range_info
                     await cursor.execute(
-                        "SELECT Role_ID, Min_level, Max_Level FROM Level_Range WHERE max_level >= ? and region = ?", (min_level - 1, region))
+                        "SELECT Role_ID, Min_level, Max_Level FROM Regions_Level_Range WHERE max_level = ? and name = ?", (min_level - 1, region))
                     overflow_range_id = await cursor.fetchone()
 
                     session_range = guild.get_role(overflow_range_id[0])
@@ -867,6 +867,28 @@ async def player_accept(guild_id: int, session_name, session_id: int, player_id:
 
     except (aiosqlite.Error, TypeError) as e:
         logging.info(f"Failed to sign up player {player_id} for session {session_id}: {e}.")
+        return False
+
+async def player_accept_specific(guild_id: int, session_name: str, session_id: int, character_name: str) -> bool:
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            cursor = await db.cursor()
+
+            updated = await cursor.execute(
+                """insert into Sessions_participants(Session_Name, Session_ID, Player_Name, Player_ID, Character_Name, Level, Effective_Wealth, Tier, Notification_Warning) 
+                select ?, ?, Player_Name, Player_ID, Character_Name, Level, Gold_Value, Tier, 0 from Player_Characters where Character_Name = ?""",
+                (session_name, session_id, character_name))
+            await db.commit()
+
+            await cursor.execute(
+                "DELETE from Sessions_Signups where Character_Name = ? and Session_ID = ?",
+                (character_name,session_id))
+            await db.commit()
+
+            return True if updated else False
+
+    except (aiosqlite.Error, TypeError) as e:
+        logging.info(f"Failed to sign up player {character_name} for session {session_id}: {e}.")
         return False
 
 
@@ -1195,6 +1217,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                     message_content += f", {group_range_text}" if group_range_text else ""
                     message_content += f"\r\n{interaction.user.mention} is running a session"
                     message_content += f" in <@&{region.id}>!" if region else "!"
+                    message_content += F"\r\n THIS IS AN LM SESSION, IF YOU HAVE NOT PREPARED TO DIE, PUSSY OUT NOW... YOU SHOULD BE SCARED. YOU SHOULD BE SCARED OF DEATH. IF YOU ARE GOING TO GET UPSETTI OVER THIS SPHAGHETTI THIS IS NOT THE SESSION FOR YOU." if interaction.user.id == 237394424815026176 else ""
                     embed_information = SessionEmbedInfo(
                         guild=interaction.guild,
                         gm_name=interaction.user.name,
@@ -1242,7 +1265,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                             created_thread = await announcement_message.create_thread(
                                 name=f"{session_id}: {session_name}",
                                 auto_archive_duration=10080)
-                            mini_embed = discord.Embed(title="Sign up for this session!", description=f"you can sign up using the buttons on the [original message](<{announcement_message.jump_url}>)! \n you can also use the /player sessions join command to sign up for this session! \n the /player sessions leave command to leave. \n if there is blue text in the session it's probably a link!")
+                            mini_embed = discord.Embed(title="Sign up for this session!", description=f"you can sign up using the buttons on the [original message](<{announcement_message.jump_url}>)! **WHILST ON THE CHANNEL, NOT IN THIS THREAD.**\n you can also use the /player sessions join command to sign up for this session! \n the /player sessions leave command to leave. \n if there is blue text in the session it's probably a link!")
                             await created_thread.send(embed=mini_embed)
                             await cursor.execute(
                                 "UPDATE Sessions SET Message = ?, Session_Thread = ? WHERE Session_ID = ?",
@@ -1403,7 +1426,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                             content = f"{build_info_base.session_range}"
                             content += f"\r\n {interaction.user.mention} is running a session"
                             content += f" in <@&{build_info_base.region}>!" if build_info_base.region else "!"
-
+                            content += F"\r\n THIS IS AN LM SESSION, IF YOU HAVE NOT PREPARED TO DIE, PUSSY OUT NOW... YOU SHOULD BE SCARED. YOU SHOULD BE SCARED OF DEATH. IF YOU ARE GOING TO GET UPSETTI OVER THIS SPHAGHETTI THIS IS NOT THE SESSION FOR YOU." if interaction.user.id == 237394424815026176 else ""
                             await announcement_message.edit(content=content, embed=embed,
                                                             view=view)
                             clear_session_reminders(
@@ -1525,6 +1548,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                         (session_name, play_location, hammer_time, game_link, session_thread) = session_info
                         hammer_validated = shared_functions.validate_hammertime(hammer_time)
                         if hammer_validated[1]:
+                            print(hammer_validated)
                             hammer_times = hammer_validated[2]
                             (hammer_date, hammer_hour, hammer_until, hammer_time) = hammer_times
                             date_and_time = f"Date & Time: {hammer_date} at {hammer_hour} which is {hammer_until}"
@@ -1554,16 +1578,17 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                 (specific_character, session_id)
                             )
                             player = await cursor.fetchone()
+
                             if not player:
                                 embed.add_field(name=f"SIGNUP FAILED: {specific_character}",
                                                 value="Could not be accepted!")
                             else:
                                 player_id = player[0]
-                                accepted = await player_accept(
+                                accepted = await player_accept_specific(
                                     guild_id=interaction.guild_id,
                                     session_name=session_name,
                                     session_id=session_id,
-                                    player_id=player_id
+                                    character_name=specific_character
                                 )
                                 if accepted:
                                     embed.add_field(name=specific_character,
@@ -2102,6 +2127,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                 if session_info is None:
                     await interaction.followup.send(
                         f"Invalid Session ID of {session_id} associated with host {interaction.user.name}")
+                    return
                 else:
                     await cursor.execute("SELECT Player_ID FROM Sessions_Participants WHERE Session_ID = ?",
                                          (session_id,))
@@ -2783,6 +2809,7 @@ class CharacterSelectionView(discord.ui.View):
 
     async def handle_character_selection(self, interaction: discord.Interaction, character_name: str):
         # Prompt for reminder preference
+        print("reacting to the button?")
         view = ReminderPreferenceView(character_name, self.interaction, self.session_id)
         await player_commands.player_signup(
             guild=interaction.guild,

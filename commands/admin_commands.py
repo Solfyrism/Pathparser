@@ -2902,6 +2902,9 @@ class AdminCommands(commands.Cog, name='admin'):
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
                 cursor = await db.cursor()
                 if player:
+                    if player.bot:
+                        await interaction.followup.send("Very funny. You cannot adjust the RP of a bot.", ephemeral=True)
+                        return
                     await cursor.execute("SELECT balance from RP_Players WHERE user_id = ?", (player.id,))
                     rp_balance = await cursor.fetchone()
 
@@ -2910,9 +2913,9 @@ class AdminCommands(commands.Cog, name='admin'):
                             "INSERT INTO RP_Players (user_id, user_name, balance) "
                             "VALUES (?, ?, ?)",
                             (player.id, player.name, amount))
-
-                    await cursor.execute("UPDATE RP_Players SET balance = balance + ? WHERE user_id = ?",
-                                         (amount, player.id))
+                    else:
+                        await cursor.execute("UPDATE RP_Players SET balance = balance + ? WHERE user_id = ?",
+                                             (amount, player.id))
                     await db.commit()
                     await interaction.followup.send(
                         f"RP balance for {player.mention} has been adjusted by {amount} they now have {rp_balance[0] + amount}.",
@@ -2926,7 +2929,8 @@ class AdminCommands(commands.Cog, name='admin'):
                                 "INSERT INTO RP_Players (user_id, user_name, balance) "
                                 "VALUES (?, ?, ?)",
                                 (player.id, player.name, amount))
-                        await cursor.execute("UPDATE RP_Players SET balance = balance + ? WHERE user_id = ?",
+                        else:
+                            await cursor.execute("UPDATE RP_Players SET balance = balance + ? WHERE user_id = ?",
                                              (amount, player.id))
                         await db.commit()
                     await interaction.followup.send(
