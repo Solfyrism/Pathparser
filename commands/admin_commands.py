@@ -448,7 +448,7 @@ class AdminCommands(commands.Cog, name='admin'):
     @character_group.command(name="essence",
                              description="commands for adding or removing essence from a character")
     @app_commands.autocomplete(character_name=character_select_autocompletion)
-    async def essence(self, interaction: discord.Interaction, character_name: str, amount: int):
+    async def essence(self, interaction: discord.Interaction, character_name: str, amount: int, reason: str):
         """Adjust the essence a PC has"""
         _, unidecode_name = name_fix(character_name)
         guild_id = interaction.guild_id
@@ -506,7 +506,8 @@ class AdminCommands(commands.Cog, name='admin'):
                             author=interaction.user.name,
                             essence=new_essence,
                             essence_change=essence_change,
-                            source=f"admin adjusted essence by {amount} for {character_name}")
+                            source=f"admin adjusted essence by {amount} for {character_name}\r\nReason: {reason}",
+                            )
                         character_log = await shared_functions.log_embed(change=character_changes, guild=guild,
                                                                          thread=thread_id, bot=self.bot)
 
@@ -2870,6 +2871,81 @@ class AdminCommands(commands.Cog, name='admin'):
                 f"An error occurred whilst fetching data. Please try again later.",
                 ephemeral=True)
 
+    @roleplay_group.command(name='add_category', description='Add all channels in a category to the RP channels')
+    async def add_rp_category(self, interaction: discord.Interaction, category: discord.CategoryChannel, except_channel_1: typing.Optional[discord.TextChannel], except_channel_2: typing.Optional[discord.TextChannel], except_channel_3: typing.Optional[discord.TextChannel], except_channel_4: typing.Optional[discord.TextChannel]):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            response = f"In this category there were the following channels:"
+            for channel in category.text_channels:
+                if channel == except_channel_1 or channel == except_channel_2 or channel == except_channel_3 or channel == except_channel_4:
+                    response += f"\n{channel.mention} was skipped."
+                    continue
+                else:
+                    async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
+                        cursor = await db.execute("SELECT 1 FROM rp_Approved_Channels WHERE channel_id = ?", (channel.id,))
+                        existing_channel = await cursor.fetchone()
+
+                        if existing_channel:
+                            response += f"\n {channel.mention} is already an RP channel."
+                            continue
+                        else:
+
+                            await db.execute("INSERT INTO rp_Approved_Channels (channel_id) VALUES (?)", (channel.id,))
+                            await db.commit()
+                            response += f"\n{channel.mention} has been added to the RP channels."
+            await shared_functions.add_guild_to_cache(interaction.guild.id)
+            await interaction.followup.send(response, ephemeral=True)
+        except (aiosqlite.Error, ValueError) as e:
+            print(e)
+            logging.exception(
+                f"An error occurred whilst listing RP channels: {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred whilst fetching data. Please try again later.",
+                ephemeral=True
+            )
+
+    @roleplay_group.command(name='remove_category', description='Remove all channels in a category from the RP channels')
+    async def remove_rp_channel(
+            self,
+            interaction: discord.Interaction,
+            category: discord.CategoryChannel,
+            except_channel_1: typing.Optional[discord.TextChannel],
+            except_channel_2: typing.Optional[discord.TextChannel],
+            except_channel_3: typing.Optional[discord.TextChannel],
+            except_channel_4: typing.Optional[discord.TextChannel]):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            response = f"In this category there were the following channels:"
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
+                for channel in category.text_channels:
+                    if channel == except_channel_1 or channel == except_channel_2 or channel == except_channel_3 or channel == except_channel_4:
+                        response += f"\n{channel.mention} was skipped."
+                        continue
+                    else:
+                        cursor = await db.execute("SELECT 1 FROM rp_Approved_Channels WHERE channel_id = ?", (channel.id,))
+                        rp_channel = await cursor.fetchone()
+
+                        if rp_channel:
+                            await db.execute("DELETE FROM rp_Approved_Channels WHERE channel_id = ?", (channel.id,))
+                            await db.commit()
+
+                            response += f"\n{channel.mention} has been removed from the RP channels."
+                        else:
+                            response += f"\n{channel.mention} is not an RP channel."
+                async with shared_functions.config_cache.lock:
+                    await shared_functions.add_guild_to_cache(interaction.guild.id)
+                await interaction.followup.send(response,ephemeral=True)
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception(
+                f"An error occurred whilst listing RP channels: {e}"
+            )
+            await interaction.followup.send(
+                f"An error occurred whilst fetching data. Please try again later.",
+                ephemeral=True)
+
+
+
     @roleplay_group.command(name='list_channels', description='List the RP channels')
     async def list_rp_channels(self, interaction: discord.Interaction):
         await interaction.response.defer(thinking=True, ephemeral=True)
@@ -3082,7 +3158,7 @@ class AdminCommands(commands.Cog, name='admin'):
             response: typing.Optional[str] = None,
             storable: discord.app_commands.Choice[int] = 1,
             sellable: discord.app_commands.Choice[int] = 1,
-            usable: discord.app_commands.Choice[int] = 1
+            usable: discord.app_commands.Choice[int] = 1,
     ):
         await interaction.response.defer(thinking=True, ephemeral=True)
         try:

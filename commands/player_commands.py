@@ -1164,7 +1164,6 @@ class AvailabilityView(discord.ui.View):
                 options.append(discord.SelectOption(label='Other...', value='other'))
             options.append(discord.SelectOption(label='Cancel', value='cancel'))
             options.append(discord.SelectOption(label='Return', value='return'))
-            self.add_item(CountrySelect(options=options))
 
             if not options:
                 await interaction.response.send_message(
@@ -2059,9 +2058,21 @@ async def player_signup(
                 if not thread:
                     thread = await guild.fetch_channel(thread_id)
                 if thread:
-                    embed = signup_embed(character_name, titles, level, tier, gold, gold_value, tradition_name,
-                                         tradition_link, template_name, template_link, mythweavers, image_link, color,
-                                         description)
+                    embed = signup_embed(
+                        character_name=character_name,
+                        title=titles,
+                        level=level,
+                        tier=tier,
+                        gold=gold,
+                        gold_value=gold_value,
+                        tradition_name=tradition_name,
+                        tradition_link=tradition_link,
+                        template_name=template_name,
+                        template_link=template_link,
+                        mythweavers=mythweavers,
+                        image_link=image_link,
+                        color=color,
+                        description=description)
                     await thread.send(embed=embed, content=f"<@{player_id}>",
                                       allowed_mentions=discord.AllowedMentions(users=True))
                     return True
@@ -2073,11 +2084,25 @@ async def player_signup(
         logging.exception(f"Failed to sign up player <@{player_id}> for session {session_name} ({session_id}): {e}")
 
 
-def signup_embed(character_name: str, title: str, level: int, tier: int, gold: int, gold_value: int,
-                 tradition_name: str,
-                 tradition_link: str, template_name: str, template_link: str, mythweavers: str, image_link: str,
-                 color: str, description: str) -> discord.Embed:
+def signup_embed(
+        character_name: str,
+        title: str,
+        level: int,
+        tier: int,
+        gold: int,
+        gold_value: int,
+        tradition_name: str,
+        tradition_link: str,
+        template_name: str,
+        template_link: str,
+        mythweavers: str,
+        image_link: str,
+        color: str,
+        description: str) -> discord.Embed:
     try:
+        if any([tradition_name, tradition_link, template_name, template_link]):
+            print("Tradition or template found")
+            print(tradition_name, tradition_link, template_name, template_link)
         title_field = f"{character_name} would like to participate" if title is None else f"{title} {character_name} would like to participate"
         embed = discord.Embed(title=title_field, color=int(color[1:], 16), url=mythweavers)
         embed.set_thumbnail(url=image_link)

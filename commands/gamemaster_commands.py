@@ -102,8 +102,8 @@ async def session_reward_reversal(
                     """SELECT 
                     True_Character_Name, Oath, Level, Personal_Cap, Tier, 
                     Milestones, Trials, Gold, Gold_Value, Gold_Value_Max, 
-                    Essence, Fame, Prestige, Accepted_Date, Thread_ID, Region FROM Player_Characters WHERE Character_Name = ? OR Nickname = ?""",
-                    (character_name, character_name))
+                    Essence, Fame, Prestige, Accepted_Date, Thread_ID, Region FROM Player_Characters WHERE Character_Name = ? OR Nickname = ? or True_Character_Name = ?""",
+                    (character_name, character_name, character_name))
                 player_info = await cursor.fetchone()
 
                 if not player_info:
@@ -288,8 +288,8 @@ async def session_reward_calculation(
             cursor = await conn.cursor()
 
             await cursor.execute(
-                "SELECT Player_ID, player_name, True_Character_Name, Oath, Level, Tier, Milestones, Trials, Gold, Gold_Value, Gold_Value_Max, Essence, Thread_ID, Accepted_Date, Fame, Prestige, Personal_Cap, Thread_ID, Region FROM Player_Characters WHERE Character_Name = ? OR Nickname = ?",
-                (character_name, character_name))
+                "SELECT Player_ID, player_name, True_Character_Name, Oath, Level, Tier, Milestones, Trials, Gold, Gold_Value, Gold_Value_Max, Essence, Thread_ID, Accepted_Date, Fame, Prestige, Personal_Cap, Thread_ID, Region FROM Player_Characters WHERE Character_Name = ? OR Nickname = ? or True_Character_Name = ?",
+                (character_name, character_name, character_name))
             player_info = await cursor.fetchone()
 
             if not player_info:
@@ -638,8 +638,8 @@ async def validate_milestone_system_overflow(
                     "SELECT min(level), max(level) FROM Milestone_System WHERE Level_range_ID = ?",
                     (session_range_id,))
                 session_range_info = await cursor.fetchone()
-
-                if session_range_info is not None:
+                (min_level, max_level) = session_range_info
+                if min_level or max_level:
                     await cursor.execute(
                         "SELECT level_range_id FROM Milestone_System WHERE level = ?",
                         (session_range_info[1] + 1,))
@@ -1295,7 +1295,8 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                         session_content=message_content,
                                         session_embed=embed,
                                         interaction=interaction,
-                                        game_link=game_link_fetch[0])
+                                        game_link=game_link_fetch[0],
+                                        session_id=session_id)
                                     await game_view.send_initial_message()
                                 else:
                                     await interaction.followup.send(
@@ -1538,15 +1539,19 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                 async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
                     cursor = await db.cursor()
                     await cursor.execute(
-                        "SELECT Session_Name, Play_location, hammer_time, game_link, Session_thread FROM Sessions WHERE Session_ID = ? AND GM_Name = ?",
+                        "SELECT Session_Name, Play_location, hammer_time, game_link, Session_thread, isactive FROM Sessions WHERE Session_ID = ? AND GM_Name = ?",
                         (session_id, interaction.user.name))
                     session_info = await cursor.fetchone()
                     if session_info is None:
                         await interaction.followup.send(
                             f"Invalid Session ID of {session_id} associated with host {interaction.user.name}")
                     else:
-                        (session_name, play_location, hammer_time, game_link, session_thread) = session_info
+                        (session_name, play_location, hammer_time, game_link, session_thread, isactive) = session_info
                         hammer_validated = shared_functions.validate_hammertime(hammer_time)
+                        if not isactive:
+                            await interaction.followup.send(
+                                f"Session {session_name} is not active and cannot accept players.")
+                            return
                         if hammer_validated[1]:
                             print(hammer_validated)
                             hammer_times = hammer_validated[2]
@@ -1925,6 +1930,10 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                     "UPDATE Sessions SET IsActive = 0, Gold = ?, Essence = ?, Easy = ?, Medium = ?, Hard = ?, Deadly = ?, Trials = ?, fame = ?, Prestige = ?, Rewards_Message = ?, Rewards_Thread = ?, Completed_Time = ? WHERE Session_ID = ?",
                                     (gold, awarded_essence, easy, medium, hard, deadly, trials, fame, prestige,
                                      quest_message.id, quest_thread_id, datetime.datetime.now(), session_id))
+                                await cursor.execute(
+                                    "DELETE FROM Sessions_Signups WHERE Session_ID = ? and Player_Name = ?",
+                                    (session_id, player_name))
+
                                 await db.commit()
                                 await interaction.followup.send(
                                     f"Rewards have been sent to the players! Check the Quest Rewards Channel with {quest_message.jump_url} for more information!",
@@ -2550,11 +2559,13 @@ class UpdateGameLinkView(shared_functions.SelfAcknowledgementView):
                  session_content: str,
                  session_embed: discord.Embed,
                  interaction: discord.Interaction,
+                 session_id: int,
                  game_link: str):
         super().__init__(content=content, interaction=interaction)
         self.announcement_message = announcement_message
         self.session_content = session_content
         self.session_embed = session_embed
+        self.session_id = session_id
         self.game_link = game_link
 
     async def accepted(self, interaction: discord.Interaction):
@@ -2563,9 +2574,13 @@ class UpdateGameLinkView(shared_functions.SelfAcknowledgementView):
         # Adjust prestige, log the transaction, notify the requester, etc.
         self.session_embed.url = self.game_link
         print("i got here")
-        print(self.game_link)
-        print(self.announcement_message.jump_url, self.announcement_message.id)
+
         await self.announcement_message.edit(content=self.session_content, embed=self.session_embed)
+        async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            await cursor.execute("UPDATE Sessions SET Game_Link = ? WHERE Session_ID = ?",
+                                 (self.game_link, self.session_id))
+            await conn.commit()
 
     async def create_embed(self):
         """Dummy because this breaks without it, but just sets the embed to the one I made outside, so I don't have to pass as many variables in."""

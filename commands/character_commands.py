@@ -153,7 +153,7 @@ async def experimental_sheet_skills(db: aiosqlite.Connection, skills_data: dict,
         if skill_key in skills_data:
             skill_name = skills_data.get(skill_key)
             ability = skills_data.get(f"skill_{i}_abil", "Unknown")
-            skill_rank = safe_int(skills_data.get(f"skill_{i}_Rank"))
+            skill_rank = safe_int(skills_data.get(f"skill_{i}_prof"))
             skill_modifier = safe_int(skills_data.get(f"skill_{i}_skill_mod"))
 
             # Insert or replace skill
@@ -273,6 +273,7 @@ async def level_calculation(
 
             # Determine maximum level
             maximum_level = min(max_level, personal_cap) if personal_cap else max_level
+            print("This is maximum level for", maximum_level, character_name)
             logging.debug(f"Maximum level for character '{character_name}': {maximum_level}")
 
             # Get new level information
@@ -296,8 +297,8 @@ async def level_calculation(
             )
 
             # If level_ranges is required and guild and author_id are provided
-            if guild and author_id:
-                await level_ranges(cursor, guild, author_id, level, new_level, region)
+            if guild and author_id and new_level != level:
+                await level_ranges(cursor, guild, author_id, level, new_level, region, character_name)
 
             return (
                 new_level,
@@ -317,8 +318,9 @@ async def level_calculation(
 
 
 async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: int, new_level: int,
-                       region: str) -> None:
+                       region: str, character_name: str) -> None:
     try:
+        print("This is the level", level, new_level, region, author_id)
         await cursor.execute("SELECT Level, Level_Range_Name, Level_Range_ID FROM Milestone_System WHERE level = ?",
                              (new_level,))
         new_role = await cursor.fetchone()
@@ -329,9 +331,6 @@ async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: i
         else:
             member = guild.get_member(author_id)
             new_level_range_role = guild.get_role(int(new_role[2]))
-
-            if not new_level_range_role:
-                await guild.get_role()
 
             try:
                 await member.add_roles(new_level_range_role)
@@ -349,39 +348,47 @@ async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: i
                         "SELECT Character_Name from Player_Characters where Player_ID = ? AND level BETWEEN ? AND ?",
                         (author_id, old_role_range[0], old_role_range[1]))
                     character = await cursor.fetchone()
+                    print(character)
 
                     if character is None:
                         old_level_range_role = guild.get_role(int(old_role[0]))
 
                         await member.remove_roles(old_level_range_role)
+                        print("Removed role", old_level_range_role)
 
                 if region:
                     await cursor.execute(
                         "SELECT Min_Level, Max_Level, Role_ID FROM Regions_Level_Range WHERE Name = ? AND Min_Level <= ? AND Max_Level >= ?",
                         (region, new_level, new_level))
                     region_role = await cursor.fetchone()
+                    print("got region role", region_role)
                     if region_role:
                         (min_level, max_level, new_role_id) = region_role
                         if level < min_level or level > max_level:
-                            region_role = guild.get_role(int(new_role_id))
-                            await member.add_roles(region_role)
+                            region_role_object = guild.get_role(int(new_role_id))
+                            await member.add_roles(region_role_object)
+                            print('added region role', region_role_object)
                             await cursor.execute(
                                 "SELECT Min_level, Max_Level, Role_ID FROM Regions_Level_Range WHERE Name = ? and Min_Level <= ? and Max_Level >= ?",
                                 (region, level, level))
-                            old_region_role = await cursor.fetchone()
-                            if old_region_role:
-                                (min_level_old, max_level_old, old_region_role) = old_region_role
+                            old_region_role_info = await cursor.fetchone()
+                            if old_region_role_info:
+                                (min_level_old, max_level_old, old_region_role_id) = old_region_role_info
+                                print("got old region info", old_region_role_info, region, author_id)
                                 await cursor.execute("""
-                                                    SELECT COUNT(*) AS Total_Characters,
-                                                    SUM(CASE WHEN level BETWEEN ? AND ? THEN 1 ELSE 0 END) AS Characters_In_Range
+                                                    SELECT count(character_name)
                                                     FROM Player_Characters
-                                                    WHERE Player_ID = ? and Region = ?;""",
-                                                     (min_level_old, max_level_old, author_id, region))
+                                                    WHERE level BETWEEN ? AND ? AND 
+                                                    Player_ID = ? and Region = ? and character_name != ? limit 1;""",
+                                                     (min_level_old, max_level_old, author_id, region, character_name))
                                 character_in_old_range = await cursor.fetchone()
+                                print("got character in old range", character_in_old_range, min_level_old, max_level_old,)
                                 if character_in_old_range:
-                                    (total_characters, characters_in_range) = character_in_old_range
+                                    (characters_in_range,) = character_in_old_range
+                                    print("got characters in range", characters_in_range)
                                     if not characters_in_range:
-                                        await member.remove_roles(guild.get_role(int(old_region_role[2])))
+                                        await member.remove_roles(guild.get_role(int(old_region_role_id)))
+                                        print("removed old region role", old_region_role_id)
             except discord.Forbidden:
                 logging.error(f"Bot does not have permissions to add roles to <@{author_id}>")
                 return None
@@ -952,6 +959,8 @@ class CharacterCommands(commands.Cog, name='character'):
                     return
 
                 await cursor.execute("SELECT Role_ID, Channel_id, Going FROM Regions WHERE Name = ?", (old_region,))
+                await interaction.user.add_roles(interaction.guild.get_role(region_role[0]))
+
                 old_region_role = await cursor.fetchone()
                 if old_region_role is not None:
                     (old_role_id, old_channel, going) = old_region_role
@@ -977,7 +986,6 @@ class CharacterCommands(commands.Cog, name='character'):
                         min_level_old = 0
                         max_level_old = 0
 
-                    await interaction.user.add_roles(interaction.guild.get_role(region_role[0]))
                     await cursor.execute("""
                     SELECT COUNT(*) AS Total_Characters,
                     SUM(CASE WHEN level BETWEEN ? AND ? THEN 1 ELSE 0 END) AS Characters_In_Range
@@ -1333,7 +1341,7 @@ class CharacterCommands(commands.Cog, name='character'):
                      info_prestige,
                      info_article_link) = results
                     if new_character_name is not None:
-                        new_character_name, true_character_name = name_fix(new_character_name)
+                        true_character_name, new_character_name = name_fix(new_character_name)
                         await cursor.execute(
                             "SELECT Character_Name from A_STG_Player_Characters where Character_Name = ?",
                             (new_character_name,))
@@ -1354,7 +1362,7 @@ class CharacterCommands(commands.Cog, name='character'):
                                                                              author=author,
                                                                              source='Character Edit')
                     else:
-                        new_character_name, true_character_name = name_fix(info_true_character_name)
+                        true_character_name, new_character_name = name_fix(info_true_character_name)
                         character_changes = shared_functions.CharacterChange(character_name=new_character_name,
                                                                              author=author,
                                                                              source='Character Edit')
@@ -2437,7 +2445,7 @@ class CharacterCommands(commands.Cog, name='character'):
                     author=author_name,
                     source=f'Cap Adjustment to {level_cap}'
                 )
-                if level_cap < level:
+                if level_cap != level:
                     # Perform level calculation
                     character_updates = shared_functions.UpdateCharacterData(character_name=character_name_db)
                     try:
@@ -2807,8 +2815,8 @@ class CharacterCommands(commands.Cog, name='character'):
                                 gold_change=-abs(Decimal(expenditure)),
                                 gold_value=Decimal(gold_value),
                                 gold_value_max=Decimal(gold_value_max),
-                                gold_value_change=change_gold_value,
-                                gold_value_max_change=change_gold_value,
+                                gold_value_change=Decimal(change_gold_value),
+                                gold_value_max_change=Decimal(change_gold_value),
                                 reason=reason,
                                 source='Character Gold Buy Command',
                                 author_name=interaction.user.name,
@@ -3053,10 +3061,10 @@ class CharacterCommands(commands.Cog, name='character'):
                         oath=oath,
                         gold=gold,
                         gold_change=Decimal(0),
-                        gold_value=gold_value,
-                        gold_value_max=gold_value_max,
+                        gold_value=Decimal(gold_value),
+                        gold_value_max=Decimal(gold_value_max),
                         gold_value_change=-abs(Decimal(amount)),
-                        gold_value_max_change=None,
+                        gold_value_max_change=Decimal(0),
                         reason=reason,
                         source='Character Gold Consume Command',
                         author_id=interaction.user.id,
@@ -3767,7 +3775,7 @@ class CharacterDisplayView(shared_functions.DualView):
                  mythweavers, image_link, tradition_name, tradition_link, template_name, template_link,
                  article_link) = result
                 gold_string = shared_functions.get_gold_breakdown(gold)
-                self.embed.add_field(name=f'Character Name', value=f'**Name**:{true_character_name}')
+                self.embed.add_field(name=f'Character Name', value=f'**Name**:[{true_character_name}](<{mythweavers}>)')
                 self.embed.add_field(name=f'Information',
                                      value=f'**Level**: {level}, **Mythic Tier**: {tier}', inline=False)
                 self.embed.add_field(name=f'Total Experience',
@@ -3796,7 +3804,7 @@ class CharacterDisplayView(shared_functions.DualView):
                                            color=int(color[1:], 16))
                 self.embed.set_author(name=f'{player_name}')
                 self.embed.set_thumbnail(url=f'{image_link}')
-                self.embed.add_field(name=f'Character Name', value=f'**Name**:{true_character_name}')
+                self.embed.add_field(name=f'Character Name', value=f'**Name**:[{true_character_name}](<{mythweavers}>)')
                 self.embed.add_field(name=f'Information',
                                      value=f'**Level**: {level}, **Mythic Tier**: {tier}')
                 self.embed.add_field(name=f'Total Experience',
@@ -4102,11 +4110,11 @@ class GoldSendView(shared_functions.RecipientAcknowledgementView):
                 character_name=self.character_name,
                 level=self.source_level,
                 oath=self.source_oath,
-                gold=self.source_gold,
-                gold_value=self.source_gold_value,
-                gold_value_max=self.source_gold_value_max,
-                gold_change=-abs(self.gold_change),
-                gold_value_change=abs(self.market_value),
+                gold=Decimal(self.source_gold),
+                gold_value=Decimal(self.source_gold_value),
+                gold_value_max=Decimal(self.source_gold_value_max),
+                gold_change=Decimal(-abs(self.gold_change)),
+                gold_value_change=Decimal(abs(self.market_value)) + Decimal(-abs(self.gold_change)),
                 gold_value_max_change=None,
                 source=f"Gold Send",
                 reason=self.reason,
@@ -4118,10 +4126,10 @@ class GoldSendView(shared_functions.RecipientAcknowledgementView):
                     character_name=self.recipient_name,
                     level=self.target_level,
                     oath=self.target_oath,
-                    gold=self.recipient_gold,
-                    gold_value=self.recipient_gold_value,
-                    gold_value_max=self.recipient_gold_value_max,
-                    gold_change=abs(self.gold_change),
+                    gold=Decimal(self.recipient_gold),
+                    gold_value=Decimal(self.recipient_gold_value),
+                    gold_value_max=Decimal(self.recipient_gold_value_max),
+                    gold_change=Decimal(abs(self.gold_change)),
                     gold_value_change=None,
                     gold_value_max_change=None,
                     source=f"Gold Send",
@@ -4213,7 +4221,7 @@ class GoldSendView(shared_functions.RecipientAcknowledgementView):
         """Create the initial embed for the proposition."""
         gold_string = shared_functions.get_gold_breakdown(self.gold_change)
         self.embed = discord.Embed(
-            title=f"{self.character_name} is sending {gold_string} to {self.recipient_name}",
+            title=f"{self.character_name} is sending {gold_string}to {self.recipient_name}",
             description=self.reason,
             color=discord.Color.blue()
         )

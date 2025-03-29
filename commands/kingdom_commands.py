@@ -456,16 +456,18 @@ class LeadershipView(discord.ui.View):
             self.modifier_fields.append('Loyalty')
         if self.stability > 0:
             self.modifier_fields.append('Stability')
-
+        print(self.modifier_fields, len(self.modifier_fields), options, len(options))
         # Attribute Selection
         if options is None or len(options) == 0:
             self.stop()
         elif len(options) == 1:
+            print("singular attribute")
             self.attribute = options[0].value
             # Proceed to modifier selection
             asyncio.create_task(self.proceed_to_modifier_selection())
         else:
             # Multiple attributes, show selection
+            print("Multiple attributes")
             self.add_item(AttributeSelect(options=options))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -552,9 +554,9 @@ async def create_a_kingdom(
             kingdom_presence = await cursor.fetchone()
             if kingdom_presence is not None:
                 return "The kingdom already exists."
-            await cursor.execute(
-                """select Economy, Loyalty, Stability FROM AA_Alignment WHERE Alignment = ?""", (alignment,))
+            await cursor.execute("""select Economy, Loyalty, Stability FROM AA_Alignment WHERE Alignment = ?""", (alignment,))
             alignment_type = await cursor.fetchone()
+            print(alignment_type)
             if alignment_type is None:
                 return "Invalid alignment."
             await cursor.execute("""select Government FROM AA_Government WHERE Government = ?""", (government,))
@@ -569,7 +571,7 @@ async def create_a_kingdom(
                 Economy, Loyalty, Stability, 
                 Fame, Unrest, Consumption,
                 Control_DC, Build_Points,
-                Stored_seafood, Stored_meat, Stored_grain, Stored_produce,
+                Stored_seafood, Stored_meat, Stored_grain, Stored_produce
                 ) VALUES (
                 ?, ?, ?, ?, ?, 0, 0, 
                 ?, ?, ?,
@@ -663,8 +665,8 @@ async def edit_a_kingdom(
                 new_government_info = await cursor.fetchone()
                 if new_government_info is None:
                     return "Invalid government type."
-                (new_corruption, new_crime, new_law, new_lore, new_productivity, new_society) = new_government_info
-                (old_corruption, old_crime, old_law, old_lore, old_productivity, old_society) = old_government_info
+                (new_government_type, new_corruption, new_crime, new_law, new_lore, new_productivity, new_society) = new_government_info
+                (old_government_type, old_corruption, old_crime, old_law, old_lore, old_productivity, old_society) = old_government_info
                 sum_corruption = new_corruption - old_corruption
                 sum_crime = new_crime - old_crime
                 sum_law = new_law - old_law
@@ -694,6 +696,19 @@ async def edit_a_kingdom(
                                  (new_kingdom, old_kingdom_info.kingdom))
             await cursor.execute("UPDATE kb_hexes SET Kingdom = ? WHERE Kingdom = ?",
                                  (new_kingdom, old_kingdom_info.kingdom))
+            await cursor.execute("UPDATE KB_Trade SET Source_Kingdom = ? WHERE Source_Kingdom = ?",
+                                 (new_kingdom, old_kingdom_info.kingdom))
+            await cursor.execute("UPDATE KB_Trade SET End_Kingdom = ? WHERE End_Kingdom = ?",
+                                    (new_kingdom, old_kingdom_info.kingdom))
+            await cursor.execute("UPDATE KB_Buildings_Permits SET Kingdom = ? WHERE Kingdom = ?",
+                                    (new_kingdom, old_kingdom_info.kingdom))
+            await cursor.execute("UPDATE KB_Leadership SET Kingdom = ? WHERE Kingdom = ?",
+                                    (new_kingdom, old_kingdom_info.kingdom))
+            await cursor.execute("UPDATE KB_Armies SET Kingdom = ? WHERE Kingdom = ?",
+                                    (new_kingdom, old_kingdom_info.kingdom))
+            await cursor.execute("UPDATE KB_Events_Active SET Kingdom = ? WHERE Kingdom = ?",
+                                    (new_kingdom, old_kingdom_info.kingdom))
+
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
                 (author, datetime.datetime.now(), "kb_Kingdoms", "Edit",
@@ -715,6 +730,11 @@ async def delete_a_kingdom(
             await cursor.execute("DELETE FROM kb_settlements WHERE Kingdom = ?", (kingdom,))
             await cursor.execute("DELETE FROM kb_settlements_Custom WHERE Kingdom = ?", (kingdom,))
             await cursor.execute("DELETE FROM kb_hexes WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("DELETE FROM KB_Trade WHERE Source_Kingdom = ? OR End_Kingdom = ?", (kingdom, kingdom))
+            await cursor.execute("DELETE FROM KB_Buildings_Permits WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("DELETE FROM KB_Leadership WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("DELETE FROM KB_Armies WHERE Kingdom = ?", (kingdom,))
+            await cursor.execute("DELETE FROM KB_Events_Active where Kingdom = ?", (kingdom,))
             await cursor.execute(
                 "Insert into A_Audit_All (Author, Timestamp, Database_Changed, Modification, Reason) VALUES (?, ?, ?, ?, ?)",
                 (author, datetime.datetime.now(), "kb_Kingdoms", "Delete", f"Deleted the kingdom of {kingdom}"))
@@ -1433,13 +1453,6 @@ class KingdomCommands(commands.Cog, name='kingdom'):
             if not valid_password:
                 await interaction.followup.send(content="The password provided is incorrect.")
                 return
-            if new_password:
-                new_password = encrypt_password(new_password)
-                async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
-                    cursor = await db.cursor()
-                    await cursor.execute("UPDATE kb_Kingdoms SET Password = ? WHERE Kingdom = ?",
-                                         (new_password, old_kingdom))
-                    await db.commit()
             kingdom_info.password = new_password if new_password else kingdom_info.password
             status = await edit_a_kingdom(
                 guild_id=interaction.guild_id,
@@ -1449,6 +1462,13 @@ class KingdomCommands(commands.Cog, name='kingdom'):
                 government=new_government,
                 alignment=new_alignment)
             await interaction.followup.send(content=status)
+            if new_password:
+                new_password = encrypt_password(new_password)
+                async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
+                    cursor = await db.cursor()
+                    await cursor.execute("UPDATE kb_Kingdoms SET Password = ? WHERE Kingdom = ?",
+                                         (new_password, old_kingdom))
+                    await db.commit()
         except (aiosqlite.Error, TypeError, ValueError) as e:
             logging.exception(f"Error fetching kingdom: {e}")
             await interaction.followup.send(content="An error occurred while fetching kingdom.")
@@ -1485,6 +1505,7 @@ class KingdomCommands(commands.Cog, name='kingdom'):
                 if not character_info:
                     await interaction.followup.send(content=f"The character of {character_name} does not exist.")
                     return
+                (gold, gold_value, gold_value_max, level, oath, thread_id) = character_info
                 if amount < 0:
                     bought_points = max(amount, -kingdom_results[1])
                     cost = bought_points * 4000
@@ -1495,9 +1516,9 @@ class KingdomCommands(commands.Cog, name='kingdom'):
                         character_name=character_name,
                         level=character_info[3],
                         oath=character_info[4],
-                        gold=character_info[0],
-                        gold_value=character_info[1],
-                        gold_value_max=character_info[2],
+                        gold=Decimal(gold),
+                        gold_value=Decimal(gold_value),
+                        gold_value_max=Decimal(gold_value_max),
                         gold_change=Decimal(cost),
                         reason="selling build points",
                         source="Adjust BP Commands",
@@ -1547,9 +1568,9 @@ class KingdomCommands(commands.Cog, name='kingdom'):
                         character_name=character_name,
                         level=character_info[3],
                         oath=character_info[4],
-                        gold=Decimal(character_info[0]),
-                        gold_value=Decimal(character_info[1]),
-                        gold_value_max=Decimal(character_info[2]),
+                        gold=Decimal(gold),
+                        gold_value=Decimal(gold_value),
+                        gold_value_max=Decimal(gold_value_max),
                         gold_change=-Decimal(cost),
                         reason="selling build points",
                         source="Adjust BP Commands",
@@ -1580,7 +1601,7 @@ class KingdomCommands(commands.Cog, name='kingdom'):
                         guild=interaction.guild,
                         character_name=character_name)
                     await interaction.followup.send(adjusted_bp_result)
-        except (aiosqlite, TypeError, ValueError) as e:
+        except (aiosqlite, TypeError, ValueError, character_commands.CalculationAidFunctionError) as e:
             logging.exception(f"Error increasing build points: {e}")
             await interaction.followup.send(content="An error occurred while increasing build points.")
 
@@ -1620,8 +1641,11 @@ class KingdomCommands(commands.Cog, name='kingdom'):
                     discord.SelectOption(label=ability) for ability in abilities
                 ]
 
-                additional = 1 if title != "Ruler" and kingdom_results[1] < 26 else 2
-                additional = 3 if title == "Ruler" and kingdom_results[1] < 101 else additional
+                additional = 1
+                if title == "Ruler":
+                    additional = 1 if kingdom_results[1] < 26 else 2
+                    additional = 3 if kingdom_results[1] > 101 else additional
+                print(additional, economy, loyalty, stability)
                 view = LeadershipView(
                     options, interaction.guild_id, interaction.user.id, kingdom, title, character_name,
                     additional, economy, loyalty, stability, kingdom_results[1], modifier=modifier,

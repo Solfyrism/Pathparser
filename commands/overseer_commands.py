@@ -1548,7 +1548,7 @@ class OverseerCommands(commands.Cog, name='overseer'):
         """Overpower a kingdom and assume direct control."""
         await interaction.response.defer(thinking=True)
         try:
-            new_password = await kingdom_commands.encrypt_password(password)
+            new_password = kingdom_commands.encrypt_password(password)
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
                 await cursor.execute("Update KB_Kingdoms SET Password = ? WHERE Kingdom = ?", (new_password, kingdom))
@@ -1560,7 +1560,7 @@ class OverseerCommands(commands.Cog, name='overseer'):
 
         except (TypeError, ValueError) as e:
             logging.exception(f"Error in kingdom_overpower: {e}")
-            await interaction.followup.send("An error occurred while overpowering a kingdom.")
+            await interaction.followup.send(f"An error occurred while overpowering a kingdom. {e}")
 
     @kingdom_group.command(name="build_points", description="Adjust the build points of a kingdom.")
     @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)

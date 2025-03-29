@@ -121,7 +121,7 @@ def get_gold_breakdown(number: Union[float, Decimal]) -> str:
     gold_breakdown += f"{'{:,}'.format(int(number))} GP " if number >= 1 else "0 GP "
     gold_breakdown += f"{int((number - int(number)) * 10)} SP " if ((number - int(number)) * 10) >= 1 else ""
     gold_breakdown += \
-        f"{int(((number - int(number)) * 10 - int((number - int(number)) * 10)) * 10)} CP" \
+        f"{int(((number - int(number)) * 10 - int((number - int(number)) * 10)) * 10)} CP " \
             if (((number - int(number)) * 10 - int(
             (number - int(number)) * 10)) * 10) >= 1 else ""
     return gold_breakdown

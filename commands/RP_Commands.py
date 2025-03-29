@@ -522,9 +522,14 @@ async def handle_use(db, interaction: discord.Interaction, user_id: int, item_na
         if actions_1 == -1 or actions_2 == -1 or actions_3 == -1:
             return "An error occurred while using the item."
     update_quantity = item_quantity[0] - amount
-    await cursor.execute(
-        "UPDATE RP_Players_Items SET Item_Quantity = ? WHERE player_id = ? and (item_name = ? or item_id = ?)",
-        (update_quantity, user_id, item_name, item_id))
+    if update_quantity > 0:
+        await cursor.execute(
+            "UPDATE RP_Players_Items SET Item_Quantity = ? WHERE player_id = ? and (item_name = ? or item_id = ?)",
+            (update_quantity, user_id, item_name, item_id))
+    else:
+        await cursor.execute(
+            "DELETE FROM RP_Players_Items WHERE player_id = ? and (item_name = ? or item_id = ?)",
+            (user_id, item_name, item_id))
     await db.commit()
     return response
 
@@ -565,7 +570,7 @@ class RPCommands(commands.Cog, name='RP'):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @roleplay_group.command(name="balance", description="Check your roleplay balance")
-    async def roleplay_balance(self, interaction: discord.Interaction):
+    async def roleplay_balance(self, interaction: discord.Interaction, user: typing.Optional[discord.User] = None):
         await interaction.response.defer(thinking=True)
 
         async with roleplay_info_cache.lock:
@@ -575,8 +580,10 @@ class RPCommands(commands.Cog, name='RP'):
 
             reward_name = settings.reward_name if settings.reward_name else "coins"
             reward_emoji = settings.reward_emoji if settings.reward_emoji else "<:RPCash:884166313260503060>"
-
-        user_id = interaction.user.id
+        if user is None:
+            user_id = interaction.user.id
+        else:
+            user_id = user.id
         async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
             cursor = await db.cursor()
             await cursor.execute("SELECT balance FROM RP_Players WHERE user_id = ?", (user_id,))

@@ -262,8 +262,10 @@ async def on_message(message):
                     await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
                 elif message.author.id == 318796580662542347 and 'got shot' in message.content.lower():
                     await message.channel.send("https://cdn.discordapp.com/attachments/479089930816192513/1330383824315613275/hq720.png?ex=678dc7fd&is=678c767d&hm=a4ae84c616d84827555e18cee3a61337d2f65f36eae0caf89dc9d06bd42377bd&")
-                elif message.author.id == 318796580662542347 and 'tried to set me on fire' in message.content.lower():
+                elif message.author.id == 318796580662542347 and 'set me on fire' in message.content.lower():
                     await message.channel.send("https://i.imgflip.com/pwruu.jpg")
+                elif message.author.id == 318796580662542347 and 'got robbed' in message.content.lower():
+                    await message.channel.send("https://media.tenor.com/9G-H14djSBkAAAAM/wallet-john-travolta.gif")
                 if "%soulisawesome" in message.content.lower():
                     await message.channel.send("https://y.yarn.co/6447b331-7aa2-4785-a5a0-9d20fa4dae35_text.gif")
                 swears = {
@@ -314,7 +316,7 @@ async def on_message(message):
                 await handle_rp_message(message)
             else:
                 logging.debug(f"Channel {channel_id} is still not approved. Processing commands.")
-                random_number = random.randint(1, 50)
+                random_number = random.randint(1, 100)
                 if 'einstein' in message.content.lower():
                     await message.channel.send(
                         "https://i.insider.com/641ca0f5d67fe70018a376ca?width=800&format=jpeg&auto=webp")
@@ -341,6 +343,10 @@ async def on_message(message):
                 elif random_number == 4 and message.author.id == 217873501313433600:
                     await message.channel.send(
                         "https://cdn.discordapp.com/attachments/479089930816192513/1322782239452430467/4OGDuJJjqwVJFdQkOvEm71fkWBFQVWFFhRYEWBFQWWBRYAfoXa71Wo11RYEWBFQVWFFhRYCkFPgUCd2wuGYpcgwAAAABJRU5ErkJggg.png?ex=6776bdb5&is=67756c35&hm=35c2b303e206d87b60edc261f3134c6a072af9255a5a721e1a0cfa377fcb20a6&")
+                elif random_number == 5 and message.author.id == 217873501313433600:
+                    await message.channel.send(
+                        "https://cdn.discordapp.com/attachments/421853827235315734/1352364333950173274/ANb3AcDQanGnAAAAAElFTkSuQmCC.png?ex=67ddbeee&is=67dc6d6e&hm=55275328f9e6a682359c9e3158c124a553bc3f1276c16f4704e3a173d5012b03&"
+                    )
                 guild_id = message.guild.id
 
                 if message.author.id == 318796580662542347 and 'stabbed' in message.content.lower():
