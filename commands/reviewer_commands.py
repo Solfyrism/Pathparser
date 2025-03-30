@@ -61,7 +61,7 @@ async def forge_character_embed(
                 if forge_id:
                     message = await forge_channel.fetch_message(forge_id)
                     if not message:
-                        send_message = await forge_channel.send(embed=embed)
+                        send_message = await forge_channel.send(content=f"<@{player_id}>", embed=embed)
                         await cursor.execute(
                             "UPDATE Player_Characters SET forge_id = ? WHERE Character_Name = ?",
                             (send_message.id, character_name))
@@ -71,7 +71,7 @@ async def forge_character_embed(
                         await message.edit(embed=embed)
                         return f"Character forge embed for '{character_name}' has been updated."
                 else:
-                    send_message = await forge_channel.send(embed=embed)
+                    send_message = await forge_channel.send(content=f"<@{player_id}>", embed=embed)
                     await cursor.execute(
                         "UPDATE Player_Characters SET forge_id = ? WHERE Character_Name = ?",
                         (send_message.id, character_name))

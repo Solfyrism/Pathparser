@@ -16,7 +16,7 @@ from matplotlib import pyplot as plt
 import commands.character_commands as character_commands
 import commands.player_commands as player_commands
 import shared_functions
-from scheduler_utils import scheduled_jobs, remind_users, scheduler, session_reminders
+from scheduler_utils import scheduled_jobs, remind_users, scheduler, schedule_session_reminders
 from shared_functions import name_fix
 
 # *** GLOBAL VARIABLES *** #
@@ -1271,10 +1271,7 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                 "UPDATE Sessions SET Message = ?, Session_Thread = ? WHERE Session_ID = ?",
                                 (announcement_message.id, created_thread.id, session_id))
                             await db.commit()
-                            session_reminders(
-                                scheduler=scheduler,
-                                remind_users=remind_users,
-                                scheduled_jobs=scheduled_jobs,
+                            schedule_session_reminders(
                                 session_id=session_id,
                                 thread_id=created_thread.id,
                                 hammer_time=hammer_time_stamp,
@@ -1435,15 +1432,12 @@ class GamemasterCommands(commands.Cog, name='Gamemaster'):
                                 start_time=hammer_time,
                                 jobs_to_schedule=scheduled_jobs
                             )
-                            session_reminders(
+                            schedule_session_reminders(
                                 session_id=session_id,
                                 thread_id=session_thread,
                                 hammer_time=hammer_time,
                                 guild_id=interaction.guild_id,
-                                bot=self.bot,
-                                remind_users=remind_users,
-                                scheduled_jobs=scheduled_jobs,
-                                scheduler=scheduler
+                                bot=self.bot
                             )
                             await interaction.followup.send(
                                 f"Session {build_info_base.session_name} with {session_id} has been updated at {announcement_message.jump_url}!")
