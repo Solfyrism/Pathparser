@@ -4005,13 +4005,17 @@ class PropositionViewRecipient(shared_functions.RecipientAcknowledgementView):
             )
             await conn.commit()
             await shared_functions.character_embed(character_name=self.character_name, guild=interaction.guild)
-            character_changes = shared_functions.CharacterChange(character_name=self.character_name,
-                                                                 author=self.requester_name,
-                                                                 source=f'Prestige Request',
-                                                                 prestige_change=-abs(self.prestige_cost),
-                                                                 prestige=self.prestige - self.prestige_cost)
-            await shared_functions.log_embed(character_changes, guild=interaction.guild, thread=self.logging_thread,
-                                             bot=self.bot)
+            character_changes = shared_functions.CharacterChange(
+                character_name=self.character_name,
+                author=self.requester_name,
+                source=f'Prestige Request',
+                prestige_change=-abs(self.prestige_cost),
+                prestige=self.prestige - self.prestige_cost)
+            await shared_functions.log_embed(
+                change=character_changes,
+                guild=interaction.guild,
+                thread=self.logging_thread,
+                bot=self.bot)
 
     async def rejected(self, interaction: discord.Interaction):
         """Handle the rejection logic."""

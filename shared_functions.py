@@ -2116,13 +2116,13 @@ class RecipientAcknowledgementView(discord.ui.View):
                     if not channel:
                         channel = await self.interaction.guild.fetch_channel(int(channel_id))
                     if channel:
-                        send_message = await channel.send(
+                        self.message = await channel.send(
                             content=self.content,
                             embed=self.embed,
                             view=self
                         )
                         await self.interaction.followup.send(
-                            f"Message sent to the Character Transaction Channel. {send_message.jump_url}",
+                            f"Message sent to the Character Transaction Channel. {self.message.jump_url}",
                             ephemeral=True
                         )
                     else:
@@ -2144,7 +2144,7 @@ class RecipientAcknowledgementView(discord.ui.View):
             child.disabled = True
         if self.message:
             try:
-                await self.message.edit(content=self.content, embed=self.embed, view=self)
+                await self.message.edit(view=self)
             except discord.HTTPException as e:
                 logging.error(f"Failed to edit message on timeout: {e}")
 

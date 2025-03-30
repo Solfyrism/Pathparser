@@ -16,6 +16,72 @@ from shared_functions import name_fix
 os.chdir("C:\\pathparser")
 
 
+async def forge_character_embed(
+        character_name: str,
+        guild: discord.Guild,
+        forge_channel_id: int,
+        author: discord.Member):
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild.id}.sqlite") as conn:
+            cursor = await conn.cursor()
+
+            # Fetch character info
+            await cursor.execute(
+                """
+                SELECT player_name, Player_ID, True_Character_Name, Mythweavers, Image_Link, 
+                Tradition_Name, Tradition_Link, 
+                Template_Name, Template_Link, forge_id
+                FROM Player_Characters WHERE Character_Name = ?
+                """, (character_name,))
+            character_info = await cursor.fetchone()
+            if not character_info:
+                return f"No character found with Character_Name '{character_name}'."
+            else:
+                (player_name, player_id, true_character_name, mythweavers, image_link,
+                 tradition_name, tradition_link,
+                 template_name, template_link,
+                 forge_id) = character_info
+                forge_channel = guild.get_channel(forge_channel_id)
+                if not forge_channel:
+                    forge_channel = await guild.fetch_channel(forge_channel_id)
+                if not forge_channel:
+                    return f"Channel with ID {forge_channel_id} not found."
+                embed = discord.Embed(
+                    title=true_character_name,
+                    url=mythweavers,
+                    color=discord.Color.blue()
+                )
+                embed.set_author(name=player_name)
+                embed.set_thumbnail(url=image_link)
+                if tradition_name:
+                    embed.add_field(name='Tradition', value=f"[{tradition_name}]({tradition_link})")
+                if template_name:
+                    embed.add_field(name='Template', value=f"[{template_name}]({template_link})")
+                embed.set_footer(text=f"Last forged by {author.display_name}")
+                if forge_id:
+                    message = await forge_channel.fetch_message(forge_id)
+                    if not message:
+                        send_message = await forge_channel.send(embed=embed)
+                        await cursor.execute(
+                            "UPDATE Player_Characters SET forge_id = ? WHERE Character_Name = ?",
+                            (send_message.id, character_name))
+                        await conn.commit()
+                        return f"Character embed for '{character_name}' has been forged."
+                    else:
+                        await message.edit(embed=embed)
+                        return f"Character forge embed for '{character_name}' has been updated."
+                else:
+                    send_message = await forge_channel.send(embed=embed)
+                    await cursor.execute(
+                        "UPDATE Player_Characters SET forge_id = ? WHERE Character_Name = ?",
+                        (send_message.id, character_name))
+                    await conn.commit()
+                    return f"Character embed for '{character_name}' has been forged."
+    except (aiosqlite.Error, discord.HTTPException) as e:
+        logging.exception(f"Error while forging character embed: {e}")
+        return f"An error occurred while forging character embed for '{character_name}'."
+
+
 async def register_character_embed(
         character_name: str,
         guild: discord.Guild) -> Union[Tuple[discord.Embed, str, int, int], str]:
@@ -445,6 +511,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
         """Administrative: set a character's tradition!"""
         character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
         guild_id = interaction.guild_id
+        content = ""
         guild = interaction.guild
         shared_functions.extract_document_id(link)
         await interaction.response.defer(thinking=True, ephemeral=True)
@@ -494,7 +561,27 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                         bot=self.bot
                     )
                     await shared_functions.character_embed(character_name=character_name, guild=guild)
-                    await interaction.followup.send(embed=log_embed)
+                    # Fetch channel ID
+                    async with shared_functions.config_cache.lock:
+                        configs = shared_functions.config_cache.cache.get(guild.id)
+                        if configs:
+                            channel_id = configs.get('Review_Channel')
+                    if not channel_id:
+                        await cursor.execute("SELECT Search FROM Admin where Identifier = 'Review_Channel'")
+                        channel_id_info = await cursor.fetchone()
+                        if not channel_id_info:
+                            pass
+                        else:
+                            channel_id = channel_id_info[0]
+                    if channel_id:
+                        content += await forge_character_embed(
+                            character_name=character_name,
+                            guild=guild,
+                            forge_channel_id=channel_id,
+                            author=interaction.user
+                        )
+                    await interaction.followup.send(content=content,embed=log_embed)
+
                 else:
                     await interaction.followup.send(essence_calculation, ephemeral=True)
                     return
@@ -507,6 +594,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
         character_name = str.replace(str.replace(unidecode(str.title(character_name)), ";", ""), ")", "")
         guild_id = interaction.guild_id
         guild = interaction.guild
+        content = ""
         shared_functions.extract_document_id(link)
         await interaction.response.defer(thinking=True, ephemeral=True)
         if not shared_functions:
@@ -555,7 +643,26 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                         bot=self.bot
                     )
                     await shared_functions.character_embed(character_name=character_name, guild=guild)
-                    await interaction.followup.send(embed=log_embed)
+                    # Fetch channel ID
+                    async with shared_functions.config_cache.lock:
+                        configs = shared_functions.config_cache.cache.get(guild.id)
+                        if configs:
+                            channel_id = configs.get('Review_Channel')
+                        if not channel_id:
+                            await cursor.execute("SELECT Search FROM Admin where Identifier = 'Review_Channel'")
+                            channel_id_info = await cursor.fetchone()
+                            if not channel_id_info:
+                                pass
+                            else:
+                                channel_id = channel_id_info[0]
+                        if channel_id:
+                            content += await forge_character_embed(
+                                character_name=character_name,
+                                guild=guild,
+                                forge_channel_id=channel_id,
+                                author=interaction.user
+                            )
+                    await interaction.followup.send(content=content, embed=log_embed)
                 else:
                     await interaction.followup.send(essence_calculation, ephemeral=True)
                     return
