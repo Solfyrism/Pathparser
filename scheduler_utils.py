@@ -16,12 +16,12 @@ scheduled_jobs = {}
 # Initialize the scheduler
 scheduler = AsyncIOScheduler()
 scheduler.start()
+print("Scheduler started: ", scheduler.running)
 scheduled_jobs = {}
 
 
 async def remind_users(session_id: int, guild_id: int, thread_id: int, time: int, bot: discord.Client) -> None:
     try:
-        print(f"remind_users {datetime.now()}", session_id, guild_id, thread_id, time)
         content = f"Reminder: The event is starting in {time} minutes."
         async with aiosqlite.connect("pathparser.db") as db:
             cursor = await db.execute(
@@ -49,6 +49,7 @@ def session_reminders(
         scheduler, remind_users, scheduled_jobs, session_id: int, thread_id: int, hammer_time: str, guild_id: int,
         bot: discord.Client
 ) -> None:
+    print("accessing session reminders")
     now = datetime.now(timezone.utc)  # Make 'now' timezone-aware
     session_start_time = parse_hammer_time(hammer_time)  # Ensure this is timezone-aware
     time_difference = session_start_time - now
@@ -62,9 +63,11 @@ def session_reminders(
                 remind_users,
                 'date',
                 run_date=reminder_time,
-                args=[session_id, guild_id, thread_id, time, bot]
+                args=[session_id, guild_id, thread_id, time, bot],
+                misfire_grace_time=90
             )
             scheduled_jobs[(session_id, time)] = job
+            print(job)
 
 
 def parse_hammer_time(hammer_time_str: str) -> datetime:

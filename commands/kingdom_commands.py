@@ -480,8 +480,10 @@ class LeadershipView(discord.ui.View):
         return True
 
     async def proceed_to_modifier_selection(self):
+        print(self.modifier_selection_count, self.modifier_fields, len(self.modifier_fields))
         if self.modifier_selection_count < len(self.modifier_fields):
             # Create options for modifiers
+
             options = [
                 discord.SelectOption(label=field, value=field)
                 for field in self.modifier_fields

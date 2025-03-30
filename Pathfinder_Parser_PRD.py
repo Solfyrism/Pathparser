@@ -162,8 +162,8 @@ async def on_ready():
 @bot.event
 async def on_disconnect():
     print("Bot is disconnecting.")
-last_trigger_time = {}
 
+last_trigger_time = {}
 
 @bot.event
 async def on_message(message):
