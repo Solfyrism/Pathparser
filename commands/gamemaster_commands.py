@@ -2741,7 +2741,7 @@ class JoinOrLeaveSessionView(discord.ui.View):
                             if overflow_validation:  # Overflow is a role
                                 range_results = overflow_validation
                             else:
-                                overflow_validation = await validate_milestone_system_overflow(
+                                overflow_validation = await validate_region_system_overflow(
                                     guild=interaction.guild,
                                     overflow=overflow,
                                     session_range_id=session_range_id)  # Overflow is typing.Optional[discord.Role]
@@ -2759,7 +2759,6 @@ class JoinOrLeaveSessionView(discord.ui.View):
                                 character_names = await cursor.fetchall()
                                 return [character_name[0] for character_name in character_names]
                         else:  # No level range found in milestone system. Matching Role to user permissions.
-
 
                             user_valid = interaction.user.get_role(int(session_range_id))
 

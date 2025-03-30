@@ -430,9 +430,21 @@ class AdminCommands(commands.Cog, name='admin'):
     @admin_group.command(name='announce', description='Announce a message to a channel')
     async def announce(self, interaction: discord.Interaction, role: discord.Role, message: str):
         """Announce a message to a channel."""
-        await interaction.response.defer(thinking=True, ephemeral=False)
+        await interaction.response.defer(thinking=True, ephemeral=True)
         try:
-            await interaction.followup.send(f"Announcing to {role.mention}:\n{message}")
+            if role.mentionable:
+
+                await interaction.channel.send(f"Announcing to {role.mention}:\n{message}")
+            else:
+
+                try:
+                    await role.edit(mentionable=True)
+                    await interaction.channel.send(f"Announcing to {role.mention}:\n{message}")
+                    await role.edit(mentionable=False)
+                except discord.errors.Forbidden:
+                    await interaction.channel.send(f"Announcing to {role.name}:\n{message}")
+
+            await interaction.followup.send('announcement sent')
         except discord.errors.HTTPException:
             logging.exception(f"Error in announce command")
         finally:
@@ -3684,8 +3696,12 @@ class AdminCommands(commands.Cog, name='admin'):
     )
 
     @region_group.command(name='add', description='Add a region to the server')
-    async def add_region(self, interaction: discord.Interaction, name: str, role: discord.Role,
-                         channel: discord.TextChannel, kingdom_building: bool = False):
+    async def add_region(
+            self, interaction: discord.Interaction,
+            name: str,
+            role: discord.Role,
+            channel: discord.TextChannel,
+            kingdom_building: bool = False):
         await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
@@ -3704,7 +3720,10 @@ class AdminCommands(commands.Cog, name='admin'):
 
     @region_group.command(name='remove', description='Remove a region from the server')
     @app_commands.autocomplete(name=shared_functions.region_autocomplete)
-    async def remove_region(self, interaction: discord.Interaction, name: str):
+    async def remove_region(
+            self,
+            interaction: discord.Interaction,
+            name: str):
         await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
@@ -3723,9 +3742,14 @@ class AdminCommands(commands.Cog, name='admin'):
 
     @region_group.command(name='edit', description='Edit a region on the server')
     @app_commands.autocomplete(old_name=shared_functions.region_autocomplete)
-    async def edit_region(self, interaction: discord.Interaction, old_name: str, new_name: typing.Optional[str],
-                          role: typing.Optional[discord.Role], channel: typing.Optional[discord.TextChannel],
-                          kingdom_building: typing.Optional[bool]):
+    async def edit_region(
+            self,
+            interaction: discord.Interaction,
+            old_name: str,
+            new_name: typing.Optional[str],
+            role: typing.Optional[discord.Role],
+            channel: typing.Optional[discord.TextChannel],
+            kingdom_building: typing.Optional[bool]):
         await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
@@ -3760,8 +3784,12 @@ class AdminCommands(commands.Cog, name='admin'):
 
     @region_group.command(name='level_range', description='Add a level range to a region')
     @app_commands.autocomplete(region=shared_functions.region_autocomplete)
-    async def add_level_range(self, interaction: discord.Interaction, region: str, min_level: int, max_level: int,
-                              role: discord.Role):
+    async def add_level_range(
+            self, interaction: discord.Interaction,
+            region: str,
+            min_level: int,
+            max_level: int,
+            role: discord.Role):
         await interaction.response.defer(thinking=True, ephemeral=True)
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
@@ -3829,6 +3857,53 @@ class AdminCommands(commands.Cog, name='admin'):
             await interaction.followup.send(
                 f"An error occurred whilst responding. Please try again later. {e}", ephemeral=True)
 
+    @admin_group.command(name='reset_roles', description='Reset all assigned in the server')
+    async def reset_roles(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild.id}.sqlite") as db:
+                cursor = await db.cursor()
+                await cursor.execute("SELECT Name, Role_ID FROM Regions where name not in ('Illu', 'Kotima', 'Heim', 'Bayt')")
+                roles = await cursor.fetchall()
+                for role in roles:
+                    (role_name, role_id) = role
+                    print("the region is", role_name)
+                    guild = interaction.guild
+                    role_snowflake = guild.get_role(role_id)
+                    members_in_role = role_snowflake.members
+                    for member in members_in_role:
+                        await member.remove_roles(role_snowflake)
+                    print("THIS ROLE SNOWFLAKE HAS THE FOLLOWINGS MEMBERS", role_snowflake.members)
+                    await cursor.execute("Select Role_ID, Min_Level, Max_level from Regions_Level_Range where name = ?", (role_name,))
+                    region_role_ids = await cursor.fetchall()
+                    for region_role_id in region_role_ids:
+                        (role_id, min_level, max_level) = region_role_id
+
+                        range_role_snowflake = guild.get_role(role_id)
+                        range_members_in_role = range_role_snowflake.members
+                        for member in range_members_in_role:
+                            await member.remove_roles(range_role_snowflake)
+                        print(range_role_snowflake.members)
+                        await cursor.execute("Select player_name, player_id from Player_Characters where region = ? and level between ? and ? group by player_name",
+                                             (role_name, min_level, max_level))
+                        players = await cursor.fetchall()
+                        print(f"region range for {role_name} is min level: {min_level} and max level: {max_level}")
+                        print(players)
+                        for player in players:
+                            (player_name, player_id) = player
+                            print(player_id)
+                            player_snowflake = guild.get_member(player_id)
+                            if not player_snowflake:
+                                logging.info("PLAYER OF ID {} NOT FOUND".format(player_id))
+                            else:
+                                await player_snowflake.add_roles(range_role_snowflake, role_snowflake)
+
+                await interaction.followup.send(f"All roles have been reset.", ephemeral=True)
+        except (aiosqlite.Error, ValueError) as e:
+            logging.exception(f"an issue occurred in the reset_roles command: {e}")
+
+            await interaction.followup.send(
+                f"An error occurred whilst responding. Please try again later. {e}", ephemeral=True)
 
 class MilestoneDisplayView(shared_functions.ShopView):
     def __init__(self, user_id: int, guild_id: int, offset: int, limit: int, interaction: discord.Interaction):
