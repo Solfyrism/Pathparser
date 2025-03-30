@@ -13,14 +13,8 @@ scheduler.start()
 scheduled_jobs = {}
 
 
-# Initialize the scheduler
-scheduler = AsyncIOScheduler()
-scheduler.start()
-print("Scheduler started: ", scheduler.running)
-scheduled_jobs = {}
-
-
 async def remind_users(session_id: int, guild_id: int, thread_id: int, time: int, bot: discord.Client) -> None:
+    print("TESTING THE REMIND USERS FUNCTION")
     try:
         content = f"Reminder: The event is starting in {time} minutes."
         async with aiosqlite.connect("pathparser.db") as db:
