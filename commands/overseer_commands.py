@@ -633,78 +633,6 @@ async def modify_blueprint(
         return "An error occurred while modifying a blueprint."
 
 
-def allocate_food(required: int, available: dict[str, int]) -> dict[str, int]:
-    """
-    Given a required total food amount and a dictionary mapping resource names to
-    available amounts, return a dictionary showing how much of each resource should be consumed.
-
-    No single resource may contribute more than 50% (i.e. required/2), but each resource should
-    ideally contribute at least 15% of the required amount if possible.
-
-    The algorithm will always use the most abundant resource (up to the cap)
-    and then distribute the remaining requirement among the other resources
-    proportionally to their available amounts (each capped at required/2).
-
-    Parameters:
-      required: int -- The total food units needed.
-      available: dict -- Keys are resource names (e.g. 'meat', 'fish', etc.),
-                         and values are the available amounts.
-
-    Returns:
-      A dictionary with the same keys and the allocated consumption amounts.
-    """
-    cap = required / 2.0  # Maximum allowed per resource
-    min_contribution = required * 0.15  # Minimum contribution per resource
-    allocation = {}
-
-    # Determine the resource with the greatest available amount.
-    max_resource = max(available, key=available.get)
-
-    # First, allocate the minimum required amount to each resource if possible
-    initial_allocations = {
-        r: min(available[r], min_contribution) for r in available
-    }
-    total_initial = sum(initial_allocations.values())
-
-    # If the total allocated in this step exceeds the required amount, scale down proportionally
-    if total_initial > required:
-        scale_factor = required / total_initial
-        allocation = {r: int(initial_allocations[r] * scale_factor) for r in available}
-        return allocation  # Already allocated everything, return early
-
-    # Apply these guaranteed minimum allocations
-    allocation.update(initial_allocations)
-    remaining = required - total_initial
-
-    # Allocate the max resource, ensuring it does not exceed its cap
-    allocation[max_resource] += min(available[max_resource] - allocation[max_resource], cap - allocation[max_resource])
-    remaining -= allocation[max_resource]
-
-    # Distribute the remaining amount proportionally among other resources
-    others = [r for r in available if r != max_resource]
-    effective = {r: min(available[r] - allocation[r], cap - allocation[r]) for r in others}
-    total_effective = sum(effective.values())
-
-    if total_effective > 0 and remaining > 0:
-        distribution = {r: remaining * effective[r] / total_effective for r in others}
-        allocated_others = {r: int(distribution[r]) for r in others}
-        total_allocated = sum(allocated_others.values())
-        diff = int(round(remaining - total_allocated))
-
-        # Adjust for rounding errors, prioritizing resources with the largest remainder
-        remainders = {r: distribution[r] - allocated_others[r] for r in others}
-        for r in sorted(remainders, key=remainders.get, reverse=True):
-            if diff <= 0:
-                break
-            if allocated_others[r] < effective[r]:
-                allocated_others[r] += 1
-                diff -= 1
-
-        for r in others:
-            allocation[r] += allocated_others[r]
-
-    return allocation
-
 async def customize_kingdom_modifiers(
         guild_id: int,
         author: int,
@@ -1218,7 +1146,7 @@ async def resolve_turn(
                 
             FROM KB_Events_Consequence KBEC
             LEFT JOIN KB_Events_Active KBE ON KBEC.Name = KBE.Name
-            WHERE Kingdom = ?;""",(kingdom,))
+            WHERE Kingdom = ?;""", (kingdom,))
             event_consequences = await cursor.fetchone()
             (total_economy, total_loyalty, total_stability) = event_consequences
             await cursor.execute("SELECT id, Kingdom, Settlement, Hex, Name, Check_A_Status, Check_B_Status, Success_Requirement, Duration FROM KB_Events_Active WHERE Kingdom = ? And Active = 1", (kingdom,))
@@ -1312,8 +1240,8 @@ async def resolve_turn(
             (stored_grain, stored_produce, stored_husbandry, stored_seafood) = stored_food_results
             grain = safe_int_complex(produced_grain, -sending_grain, receiving_grain, stored_grain)
             produce = safe_int_complex(produced_produce, -sending_produce, receiving_produce, stored_produce)
-            husbandry = safe_int_complex(produced_husbandry - sending_husbandry + receiving_husbandry, stored_husbandry)
-            seafood = safe_int_complex(produced_seafood - sending_seafood + receiving_seafood, stored_seafood)
+            husbandry = safe_int_complex(produced_husbandry - sending_husbandry + receiving_husbandry, stored_husbandry, None, None)
+            seafood = safe_int_complex(produced_seafood - sending_seafood + receiving_seafood, stored_seafood, None, None)
             resource_utilization_dict = {"Grain": grain, "Produce": produce, "Husbandry": husbandry, "Seafood": seafood}
             build_point_result = (random.randint(1, 20) + economy - unrest) // 3
             await cursor.execute("""SELECT SUM(Amount) FROM KB_Hexes_Constructed WHERE Kingdom = ? AND Subtype in ('Husbandry', 'Seafood', 'Produce', 'Grain')""", (kingdom,))
@@ -1345,7 +1273,7 @@ async def resolve_turn(
                 trade_bp += finished_building if finished > 0 and sum(resource_utilization_dict.values()) > consumption else 0
 
             if sum(resource_utilization_dict.values()) > consumption:
-                resource_allocation_dict = allocate_food(consumption, resource_utilization_dict)
+                resource_allocation_dict = shared_functions.allocate_food(consumption, resource_utilization_dict)
                 await cursor.execute("""
                 SELECT 
                 SUM(CASE WHEN subtype = 'Grain' THEN amount * quality * 5 ELSE 0 END) AS Grain_total,
@@ -1432,7 +1360,7 @@ def safe_int_complex(a, b, c, d):
         b = int(b)
         c = int(c)
         d = int(d)
-    return a + b + c
+    return a + b + c + d
 
 class OverseerCommands(commands.Cog, name='overseer'):
     def __init__(self, bot):
@@ -1529,17 +1457,6 @@ class OverseerCommands(commands.Cog, name='overseer'):
         except (TypeError, ValueError) as e:
             logging.exception(f"Error in kingdom_modifiers: {e}")
             await interaction.followup.send("An error occurred while customizing kingdom modifiers.")
-
-    @kingdom_group.command(name='rebalance', description='Forced the kingdom and settlement tables to rebalance.')
-    async def kingdom_rebalance(self, interaction: discord.Interaction):
-        """Forced the kingdom and settlement tables to rebalance."""
-        await interaction.response.defer(thinking=True)
-        try:
-            status = await rebalance_kingdom_building(interaction.guild_id, interaction.user.id)
-            await interaction.followup.send(status)
-        except (TypeError, ValueError) as e:
-            logging.exception(f"Error in kingdom_rebalance: {e}")
-            await interaction.followup.send("An error occurred while balancing kingdom buildings.")
 
     @kingdom_group.command(name='overpower', description='Overpower a kingdom and assume direct control.')
     @app_commands.autocomplete(kingdom=kingdom_commands.kingdom_autocomplete)
@@ -1745,7 +1662,7 @@ class OverseerCommands(commands.Cog, name='overseer'):
     @app_commands.choices(
         behavior=[discord.app_commands.Choice(name='set', value=1),
                   discord.app_commands.Choice(name='random', value=2)])
-    async def add_hex(self, interaction: discord.Interaction, kingdom: str, terrain: str, region: str, farm: int,
+    async def add_hex(self, interaction: discord.Interaction, kingdom: typing.Optional[str], terrain: str, region: str, farm: int,
                       ore: int, stone: int, wood: int, fish: int, behavior: discord.app_commands.Choice[int] = 1):
         await interaction.response.defer(thinking=True)
         try:
@@ -1758,6 +1675,12 @@ class OverseerCommands(commands.Cog, name='overseer'):
                 fish = random.randint(1, fish)
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
+                if kingdom:
+                    await cursor.execute("SELECT kingdom FROM KB_Kingdoms WHERE Kingdom = ?", (kingdom,))
+                    kingdom_info = await cursor.fetchone()
+                    if not kingdom_info:
+                        await interaction.followup.send("The kingdom you are trying to add the hex to does not exist.")
+                        return
                 await cursor.execute(
                     "INSERT INTO KB_Hexes (Kingdom, Hex_Terrain, Region, Farm, Ore, Stone, wood, fish) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (kingdom, terrain, region, farm, ore, stone, wood, fish))
@@ -1768,7 +1691,7 @@ class OverseerCommands(commands.Cog, name='overseer'):
                                          (kingdom,))
                     status = f"The hex with ID {hex_id[0]} has been created and added to the kingdom of {kingdom}!\r\nit can support {farm} farms, {ore} mines, {stone} quarries, {wood} woodcutters and {fish} fisheries."
                 else:
-                    status = f"The hex with ID {hex_id[0]}has been created!\r\nit can support {farm} farms, {ore} mines, {stone} quarries, {wood} woodcutters and {fish} fisheries."
+                    status = f"The hex with ID {hex_id[0]} has been created!\r\nit can support {farm} farms, {ore} mines, {stone} quarries, {wood} woodcutters and {fish} fisheries."
                 await db.commit()
 
                 await interaction.followup.send(status)
@@ -2446,7 +2369,7 @@ class OverseerCommands(commands.Cog, name='overseer'):
             logging.exception(f"Error in adjust_population: {e}")
             await interaction.followup.send("An error occurred while adjusting the population.")
 
-    @population_group.command(name='bip', description='adjust the bip in a region')
+    @population_group.command(name='bid', description='adjust the bid in a region')
     @app_commands.autocomplete(region=shared_functions.region_autocomplete)
     @app_commands.choices(
         randomize=[discord.app_commands.Choice(name='set', value=0),

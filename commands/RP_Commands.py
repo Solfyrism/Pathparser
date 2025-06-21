@@ -603,7 +603,10 @@ class RPCommands(commands.Cog, name='RP'):
                 formatted_balance = "{:,}".format(balance)
                 ordinal_position = shared_functions.ordinal(user_rank[0])
                 embed = discord.Embed(title=interaction.user.name, description=f"Leaderboard Rank: {ordinal_position}")
-                embed.set_thumbnail(url=interaction.user.avatar.url)
+                try:
+                    embed.set_thumbnail(url=interaction.user.avatar.url)
+                except AttributeError:
+                    pass
                 embed.add_field(name="Balance", value=f"{formatted_balance} {reward_name} {reward_emoji}")
                 await interaction.followup.send(embed=embed)
             else:

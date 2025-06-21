@@ -52,6 +52,7 @@ async def reinstate_reminders(server_bot) -> None:
                     (now.timestamp(),)
                 )
                 reminders = await cursor.fetchall()
+                print(reminders)
                 for reminder in reminders:
                     (session_id, thread_id, hammer_time) = reminder
                     scheduler_utils.schedule_session_reminders(
@@ -95,7 +96,7 @@ async def reinstate_session_buttons(server_bot) -> None:
                             session_start_time - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
                     # Cap the timeout at 12 hours.
                     timeout_seconds = min(timeout_seconds, 12 * 3600)
-                    print(session_id)
+
                     # Fetch the message to be edited.
                     try:
                         message = await channel.fetch_message(message_id)
@@ -160,14 +161,12 @@ async def on_ready():
 @bot.event
 async def on_disconnect():
     print("Bot is disconnecting.")
+    scheduler_utils.shutdown_global_scheduler()
 
 
 @bot.event
 async def on_connect():
     await start_global_scheduler()
-
-
-last_trigger_time = {}
 
 
 @bot.event
@@ -179,87 +178,24 @@ async def on_message(message):
     if isinstance(message.channel, discord.channel.TextChannel):
         channel_id = message.channel.id
     elif isinstance(message.channel, discord.channel.Thread):
-        async with shared_functions.build_home_cache.lock:
-            thread_id = message.channel.id
-            if guild_id in shared_functions.build_home_cache.cache:
-                build_home = shared_functions.build_home_cache.cache[guild_id]
-                if thread_id in build_home:
-                    information = build_home.get[thread_id]
-                    if information[1] == message.author.id:
-                        await message.pin()
-                        information[0] -= 1
-                        update_message = await message.channel.fetch_message(information[2])
-                        await update_message.edit(content=f"**{information[0] // 2} messages remaining!**")
-                    if message.author.system:
-                        await message.delete()
-                        information[0] -= 1
-                    if information[0] == 0:
-                        build_home.pop(thread_id)
-                        update_message = await message.channel.fetch_message(information[2])
-                        await update_message.delete()
-
         channel_id = message.channel.parent_id
-
     else:
         channel_id = None
-    try:
-        async with shared_functions.config_cache.lock:
-            configs = shared_functions.config_cache.cache[message.guild.id]
-            no_ping_role = configs.get('Do_Not_Ping')
-            no_ping_emoji = configs.get('Do_Not_Ping_React')
-    except:
-        logging.error("Error getting server configs")
-        pass
     # Check if the guild is in the cache
-
     async with shared_functions.approved_channel_cache.lock:
         if guild_id in shared_functions.approved_channel_cache.cache:
 
             if channel_id in shared_functions.approved_channel_cache.cache[guild_id]:
                 logging.debug(f"Channel {channel_id} is approved for RP messages.")
                 await handle_rp_message(message)
-                if message.mentions:
-                    try:
-                        if no_ping_role:
-                            no_ping_role_flake = message.guild.get_role(no_ping_role)
-                            for member in message.mentions:
-                                if no_ping_role_flake in member.roles:
-                                    await message.add_reaction(no_ping_emoji)
-                                    break
-                    except:
-                        pass
-
             else:
                 logging.debug(f"Channel {channel_id} is not approved. Processing commands.")
                 random_number = random.randint(1, 50)
-                if message.mentions:
-                    try:
-                        if no_ping_role:
-                            no_ping_role_flake = message.guild.get_role(no_ping_role)
-                            for member in message.mentions:
-
-                                if no_ping_role_flake in member.roles:
-                                    await message.add_reaction(no_ping_emoji)
-                                    break
-                    except:
-                        pass
                 if 'einstein' in message.content.lower():
                     await message.channel.send(
                         "https://i.insider.com/641ca0f5d67fe70018a376ca?width=800&format=jpeg&auto=webp")
-                elif 'monkey' in message.content.lower():
-
-                    current_time = datetime.datetime.utcnow()
-                    last_time = last_trigger_time.get(channel_id, datetime.datetime.min)
-                    if (current_time - last_time).total_seconds() > 300:  # 300 seconds = 5 minutes
-                        last_trigger_time[channel_id] = current_time
-                        if random_number != 1:
-                            await message.channel.send("https://i.ytimg.com/vi/tLHqnn1ZkAM/maxresdefault.jpg")
-                        else:
-                            await message.channel.send(
-                                "https://tenor.com/view/mmmm-monkey-monkey-ug-master-oogway-oogway-gif-19727561")
-                    else:
-                        logging.debug("Cooldown active. Skipping message.")
-
+                elif 'monkey' in message.content.lower() and random_number != 1:
+                    await message.channel.send("https://i.ytimg.com/vi/tLHqnn1ZkAM/maxresdefault.jpg")
                 elif 'monkey' in message.content.lower() and random_number == 1:
                     await message.channel.send(
                         "https://tenor.com/view/mmmm-monkey-monkey-ug-master-oogway-oogway-gif-19727561")
@@ -275,34 +211,7 @@ async def on_message(message):
                 elif random_number == 4 and message.author.id == 217873501313433600:
                     await message.channel.send(
                         "https://cdn.discordapp.com/attachments/479089930816192513/1322782239452430467/4OGDuJJjqwVJFdQkOvEm71fkWBFQVWFFhRYEWBFQWWBRYAfoXa71Wo11RYEWBFQVWFFhRYCkFPgUCd2wuGYpcgwAAAABJRU5ErkJggg.png?ex=6776bdb5&is=67756c35&hm=35c2b303e206d87b60edc261f3134c6a072af9255a5a721e1a0cfa377fcb20a6&")
-
-                if message.author.id == 318796580662542347 and 'stabbed' in message.content.lower():
-                    await message.channel.send(
-                        "https://media.tenor.com/-BpjJcwntaYAAAAM/you-fucking-what-epic-npc-dnd.gif")
-                elif message.author.id == 318796580662542347 and 'hit by a car' in message.content.lower():
-                    await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
-                elif message.author.id == 318796580662542347 and 'car wreck' in message.content.lower():
-                    await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
-                elif message.author.id == 318796580662542347 and 'car crash' in message.content.lower():
-                    await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
-                elif message.author.id == 318796580662542347 and 'hit by a truck' in message.content.lower():
-                    await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
-                elif message.author.id == 318796580662542347 and 'got shot' in message.content.lower():
-                    await message.channel.send(
-                        "https://cdn.discordapp.com/attachments/479089930816192513/1330383824315613275/hq720.png?ex=678dc7fd&is=678c767d&hm=a4ae84c616d84827555e18cee3a61337d2f65f36eae0caf89dc9d06bd42377bd&")
-                elif message.author.id == 318796580662542347 and 'set me on fire' in message.content.lower():
-                    await message.channel.send("https://i.imgflip.com/pwruu.jpg")
-                elif message.author.id == 318796580662542347 and 'got robbed' in message.content.lower():
-                    await message.channel.send("https://media.tenor.com/9G-H14djSBkAAAAM/wallet-john-travolta.gif")
-                if "%soulisawesome" in message.content.lower():
-                    await message.channel.send("https://y.yarn.co/6447b331-7aa2-4785-a5a0-9d20fa4dae35_text.gif")
-                if "amara" in message.content.lower():
-                    await message.add_reaction("<:Amara:889554558072782879>")
-                    await message.add_reaction("🇶")
-                    await message.add_reaction("🇺")
-                    await message.add_reaction("🇪")
-                    await message.add_reaction("❓")
-
+                guild_id = message.guild.id
                 swears = {
                     "fuck": 0,
                     "shit": 0,
@@ -318,11 +227,10 @@ async def on_message(message):
                 for swear in swears.keys():
                     # Use regex to match whole words
                     swears[swear] = len(re.findall(rf"\b{swear}\b", normalized_string))
+
                 # Calculate total occurrences
                 total_count = sum(swears.values())
-
                 if total_count > 1 and message.author.id == 243120409703088128:
-
                     hostility = min(100, int((total_count / 5) * 100))
                     if 0 <= random_number <= 17:
                         await message.channel.send(f"Hostility Detected: {hostility}% Someone's a salty boy! :)")
@@ -352,22 +260,15 @@ async def on_message(message):
                 await handle_rp_message(message)
             else:
                 logging.debug(f"Channel {channel_id} is still not approved. Processing commands.")
-                random_number = random.randint(1, 100)
+                random_number = random.randint(1, 50)
                 if 'einstein' in message.content.lower():
                     await message.channel.send(
                         "https://i.insider.com/641ca0f5d67fe70018a376ca?width=800&format=jpeg&auto=webp")
-                elif 'monkey' in message.content.lower():
-                    current_time = datetime.datetime.utcnow()
-                    last_time = last_trigger_time.get(channel_id, datetime.datetime.min)
-                    if (current_time - last_time).total_seconds() > 300:  # 300 seconds = 5 minutes
-                        last_trigger_time[channel_id] = current_time
-                        if random_number != 1:
-                            await message.channel.send("https://i.ytimg.com/vi/tLHqnn1ZkAM/maxresdefault.jpg")
-                        else:
-                            await message.channel.send(
-                                "https://tenor.com/view/mmmm-monkey-monkey-ug-master-oogway-oogway-gif-19727561")
-                    else:
-                        logging.debug("Cooldown active. Skipping message.")
+                elif 'monkey' in message.content.lower() and random_number != 1:
+                    await message.channel.send("https://i.ytimg.com/vi/tLHqnn1ZkAM/maxresdefault.jpg")
+                elif 'monkey' in message.content.lower() and random_number == 1:
+                    await message.channel.send(
+                        "https://tenor.com/view/mmmm-monkey-monkey-ug-master-oogway-oogway-gif-19727561")
                 if random_number == 1 and message.author.id == 217873501313433600:
                     await message.channel.send(
                         "https://cdn.discordapp.com/attachments/479089930816192513/1309682327860805733/7YjmdoZxhSgAAAAASUVORK5CYII.png?ex=67768b77&is=677539f7&hm=9ebebdcbf4c8f1266649c1d1d66dbcdad58b18f1a219da101094a96f910d396c&")
@@ -380,24 +281,7 @@ async def on_message(message):
                 elif random_number == 4 and message.author.id == 217873501313433600:
                     await message.channel.send(
                         "https://cdn.discordapp.com/attachments/479089930816192513/1322782239452430467/4OGDuJJjqwVJFdQkOvEm71fkWBFQVWFFhRYEWBFQWWBRYAfoXa71Wo11RYEWBFQVWFFhRYCkFPgUCd2wuGYpcgwAAAABJRU5ErkJggg.png?ex=6776bdb5&is=67756c35&hm=35c2b303e206d87b60edc261f3134c6a072af9255a5a721e1a0cfa377fcb20a6&")
-                elif random_number == 5 and message.author.id == 217873501313433600:
-                    await message.channel.send(
-                        "https://cdn.discordapp.com/attachments/421853827235315734/1352364333950173274/ANb3AcDQanGnAAAAAElFTkSuQmCC.png?ex=67ddbeee&is=67dc6d6e&hm=55275328f9e6a682359c9e3158c124a553bc3f1276c16f4704e3a173d5012b03&"
-                    )
                 guild_id = message.guild.id
-
-                if message.author.id == 318796580662542347 and 'stabbed' in message.content.lower():
-                    await message.channel.send(
-                        "https://media.tenor.com/-BpjJcwntaYAAAAM/you-fucking-what-epic-npc-dnd.gif")
-                elif message.author.id == 318796580662542347 and 'hit by a car' in message.content.lower():
-                    await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
-                elif message.author.id == 318796580662542347 and 'hit by a truck' in message.content.lower():
-                    await message.channel.send("https://media.makeameme.org/created/yoooooooooooooooo-how-did.jpg")
-                elif message.author.id == 318796580662542347 and 'shot' in message.content.lower():
-                    await message.channel.send(
-                        "https://cdn.discordapp.com/attachments/479089930816192513/1330383824315613275/hq720.png?ex=678dc7fd&is=678c767d&hm=a4ae84c616d84827555e18cee3a61337d2f65f36eae0caf89dc9d06bd42377bd&")
-                elif message.author.id == 318796580662542347 and 'tried to set me on fire' in message.content.lower():
-                    await message.channel.send("https://i.imgflip.com/pwruu.jpg")
                 swears = {
                     "fuck": 0,
                     "shit": 0,
@@ -447,32 +331,8 @@ async def on_join(guild):
                     f"C:/pathparser/pathparser_{guild.id}.sqlite")
 
 
-bot.run(os.getenv("DISCORD_TOKEN"))
+bot.run(os.getenv("DISCORD_TOKEN_V2"))
 
-"""if __name__ == "__main__":
-    try:
-        # Use bot.run() - THIS MANAGES THE EVENT LOOP
-        print("Starting bot...")
-        bot.run(os.getenv("DISCORD_TOKEN"))
-
-    except KeyboardInterrupt:
-        print("Shutdown requested via Ctrl+C.")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        # Log the exception traceback here
-        import traceback
-        traceback.print_exc()
-    finally:
-        # Cleanly shutdown scheduler when bot.run() exits
-        print("Bot process is stopping. Shutting down scheduler...")
-        if scheduler and scheduler.running:
-            # shutdown(wait=False) might be needed if the loop is already stopped
-            # when finally is reached, but True is safer if possible.
-            shutdown_global_scheduler()
-            print("Scheduler shut down.")
-        else:
-            print("Scheduler was not running or not initialized.")
-        print("Cleanup finished.")"""
 
 bot.loop.create_task(shared_functions.clear_autocomplete_cache())
 

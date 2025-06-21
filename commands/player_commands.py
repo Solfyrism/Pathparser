@@ -2768,10 +2768,18 @@ class PlayerCommands(commands.Cog, name='Player'):
         try:
             async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as db:
                 cursor = await db.cursor()
-                await cursor.execute("Select Group_Name Group_ID, Role_ID, Player_Name from Sessions_Group where Group_ID = ?", (group_id,))
+                await cursor.execute("""
+                Select
+                SG.Group_Name, SG.Group_ID, SG.Role_ID, SG.Player_Name,
+                PC.Player_ID 
+                from Sessions_Group as SG 
+                Left Join Player_Characters as PC 
+                on SG.Player_Name = PC.Player_Name 
+                where SG.Group_ID = ?
+                """, (group_id,))
                 group = await cursor.fetchone()
                 if group:
-                    (group_name, role_id, player_name) = group
+                    (group_name, group_id, role_id, player_name, owner_id) = group
                     await cursor.execute(
                         "Select Group_ID, player_name from Sessions_Group_Presign where Group_ID = ? and Player_Name = ?",
                         (group_id, interaction.user.name))
@@ -2779,20 +2787,25 @@ class PlayerCommands(commands.Cog, name='Player'):
                     if previous_group:
                         await interaction.followup.send(f"You have already joined group {group_id}!")
                     else:
-                        await cursor.execute("SELECT Player_ID from Player_Characters WHERE Player_Name = ?",)
+                        await cursor.execute("SELECT Player_ID from Player_Characters WHERE Player_Name = ?", (interaction.user.name,))
                         player_id_info = await cursor.fetchone()
                         player_id = player_id_info[0]
                         view = GroupJoinView(
-                            allowed_user_id=player_id,
+                            allowed_user_id=owner_id,
                             guild_id=interaction.guild.id,
                             group_id=group_id,
                             interaction=interaction,
                             bot=self.bot,
-                            content=f"<@{player_id}> has requested to join group {group_name}! Do you accept?",
-                            group_name = group_name,
+                            content=f"<@{owner_id}>\r\n<@{player_id}> has requested to join group {group_name}! Do you accept?",
+                            group_name=group_name,
                             requester_name=interaction.user.name,
                             group_role_id=role_id
                         )
+                        await view.send_initial_message()
+                        await interaction.followup.send(
+                            content=f"Group {group_name} has been requested to join by {interaction.user.name}!",
+                            ephemeral=True)
+
                 else:
                     await interaction.followup.send(f"Group {group_id} could not be found!")
         except (aiosqlite.Error, TypeError) as e:
@@ -3078,7 +3091,7 @@ class GroupManyView(shared_functions.ShopView):
                  group_name: str, host_player_name: str, host_character: str, description: str, role_id: int,
                  interaction: discord.Interaction):
         super().__init__(user_id=user_id, guild_id=guild_id, offset=offset, limit=limit, interaction=interaction,
-                         content=self.content)
+                         content="")
         self.max_items = None  # Cache total number of items
         self.content = None
         self.group_id = group_id
@@ -3556,7 +3569,7 @@ class GroupJoinView(shared_functions.RecipientAcknowledgementView):
     async def create_embed(self):
         """Create the initial embed for the proposition."""
         self.embed = discord.Embed(
-            title=f"Group Join Request \r\n: Group Name: {self.group_name}",
+            title=f"Group Join Request \r\nGroup Name: {self.group_name}",
             description=(
                 f"**Requester:** {self.requester_name}\n"
             ),

@@ -53,6 +53,33 @@ def safe_int_atk(value, default=0):
         return default
 
 
+async def rp_home_autocomplete(
+        interaction: discord.Interaction,
+        current: str) -> list[app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild.id
+    current = unidecode(current.lower())
+    try:
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+            # Correct parameterized query
+            cursor = await db.execute("""
+            SELECT name FROM rp_store_items 
+            WHERE name LIKE ? and 
+            Name in ('House', 'Mansion', 'Palace', 'Castle', 'Private', 'Island Vista')
+            LIMIT 20
+             """, (f"%{current}%",))
+            items_list = await cursor.fetchall()
+
+            # Populate choices
+            for item in items_list:
+                if current in item[0].lower():
+                    data.append(app_commands.Choice(name=item[0], value=item[0]))
+
+    except (aiosqlite.Error, TypeError, ValueError) as e:
+        logging.exception(f"An error occurred while fetching settings: {e}")
+    return data
+
+
 # LEVEL INFORMATION
 async def get_max_level(guild_id: int) -> Optional[int]:
     async with shared_functions.config_cache.lock:
@@ -93,6 +120,8 @@ def normal_sheet_attributes(skills_data: dict) -> dict:
         'cmb': safe_int_atk(skills_data.get('CMB')),
     }
     return attributes
+
+
 def experimental_sheet_attributes(skills_data: dict) -> dict:
     attributes = {
         'strength': safe_int(skills_data.get('strength_score')),
@@ -121,6 +150,7 @@ def experimental_sheet_attributes(skills_data: dict) -> dict:
     }
     return attributes
 
+
 async def normal_sheet_skills(db: aiosqlite.Connection, skills_data: dict, character_name: str) -> str:
     cursor = await db.cursor()
     for i in range(1, 36):
@@ -146,6 +176,7 @@ async def normal_sheet_skills(db: aiosqlite.Connection, skills_data: dict, chara
     await db.commit()
     return "Skills updated successfully."
 
+
 async def experimental_sheet_skills(db: aiosqlite.Connection, skills_data: dict, character_name: str) -> str:
     cursor = await db.cursor()
     for i in range(1, 36):
@@ -168,7 +199,6 @@ async def experimental_sheet_skills(db: aiosqlite.Connection, skills_data: dict,
                 )
             )
     return "Skills updated successfully."
-
 
 
 def calculate_milestones(
@@ -382,7 +412,8 @@ async def level_ranges(cursor: aiosqlite.Cursor, guild, author_id: int, level: i
                                                     Player_ID = ? and Region = ? and character_name != ? limit 1;""",
                                                      (min_level_old, max_level_old, author_id, region, character_name))
                                 character_in_old_range = await cursor.fetchone()
-                                print("got character in old range", character_in_old_range, min_level_old, max_level_old,)
+                                print("got character in old range", character_in_old_range, min_level_old,
+                                      max_level_old, )
                                 if character_in_old_range:
                                     (characters_in_range,) = character_in_old_range
                                     print("got characters in range", characters_in_range)
@@ -767,11 +798,14 @@ async def stg_character_embed(guild_id, character_name) -> (Union[Tuple[discord.
                     document_id = shared_functions.extract_document_id(backstory)
                     if document_id is None:
                         if oath == 'Offerings':
-                            embed.set_footer(text=f'{oath}, Could not parse Document Link!', icon_url=f'https://i.imgur.com/dSuLyJd.png')
+                            embed.set_footer(text=f'{oath}, Could not parse Document Link!',
+                                             icon_url=f'https://i.imgur.com/dSuLyJd.png')
                         elif oath == 'Poverty':
-                            embed.set_footer(text=f'{oath}, Could not parse Document Link!', icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
+                            embed.set_footer(text=f'{oath}, Could not parse Document Link!',
+                                             icon_url=f'https://i.imgur.com/4Fr9ZnZ.png')
                         elif oath == 'Absolute':
-                            embed.set_footer(text=f'{oath}, Could not parse Document Link!', icon_url=f'https://i.imgur.com/ibE5vSY.png')
+                            embed.set_footer(text=f'{oath}, Could not parse Document Link!',
+                                             icon_url=f'https://i.imgur.com/ibE5vSY.png')
                         else:
                             embed.set_footer(text=f'Could not parse Document Link!')
                     else:
@@ -1018,7 +1052,8 @@ class CharacterCommands(commands.Cog, name='character'):
                     author=interaction.user.name,
                     region=region,
                     source='Character Edit')
-                await shared_functions.log_embed(guild=interaction.guild, change=changer_changes, bot=self.bot, thread=thread)
+                await shared_functions.log_embed(guild=interaction.guild, change=changer_changes, bot=self.bot,
+                                                 thread=thread)
                 await interaction.followup.send(f"Character {character} moved from {old_region} to {region}")
                 await shared_functions.character_embed(guild=interaction.guild, character_name=character)
         except aiosqlite.Error as e:
@@ -2538,6 +2573,336 @@ class CharacterCommands(commands.Cog, name='character'):
                 ephemeral=True
             )
 
+    home_group = discord.app_commands.Group(
+        name='home',
+        description='home group commands',
+        parent=character_group
+    )
+
+    @home_group.command(name='create', description='Create a character owned location')
+    @app_commands.autocomplete(item=rp_home_autocomplete)
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    @app_commands.autocomplete(settlement=shared_functions.settlement_autocomplete)
+    async def create_location(
+            self,
+            interaction: discord.Interaction,
+            character_name: str,
+            settlement: str,
+            location_name: str,
+            item: str,
+            image: str=None):
+        """Create a character owned location"""
+        guild_id = interaction.guild_id
+        author_name = interaction.user.name
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            try:
+                # Check if the character exists
+                await cursor.execute(
+                    "SELECT Character_Name, Message_ID FROM Player_Characters WHERE Player_Name = ? AND (Character_Name = ? OR Nickname = ?)",
+                    (author_name, character_name, character_name))
+                character_info = await cursor.fetchone()
+                if character_info is None:
+                    await interaction.followup.send(
+                        f"Character '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+
+                # Check if the location already exists
+                await cursor.execute(
+                    "SELECT settlement FROM Player_Homes WHERE Settlement = ? AND Character_Name = ?",
+                    (settlement, character_name))
+                existing_location = await cursor.fetchone()
+                if existing_location:
+                    await interaction.followup.send(
+                        f"Characters can only have 1 Home per region",
+                        ephemeral=True
+                    )
+                    return
+
+                await cursor.execute(
+                    "SELECT Item_Name, Item_Quantity From RP_Players_Items where Player_ID = ? and Item_Name = ?",
+                    (interaction.user.id, item))
+                item_info = await cursor.fetchone()
+                if item_info is None:
+                    await interaction.followup.send(
+                        f"Item '{item}' not found.",
+                        ephemeral=True
+                    )
+                    return
+
+                await cursor.execute(
+                    "SELECT KK.Region, KS.Settlement From KB_Kingdoms KK Left Join KB_Settlements KS on KK.Kingdom = KS.Kingdom where KS.Settlement = ?",
+                    (settlement,)
+                )
+                settlement_info = await cursor.fetchone()
+                if settlement_info is None:
+                    await interaction.followup.send(
+                        f"Settlement '{settlement}' not found.",
+                        ephemeral=True
+                    )
+                    return
+                (region, settlement) = settlement_info
+                async with shared_functions.config_cache.lock:
+                    configs = shared_functions.config_cache.cache.get(guild_id)
+                    if configs:
+                        channel_id = configs.get('Player_Owned_Channel')
+                        bio_channel_id = configs.get('Accepted_Bio_Channel')
+                        if channel_id is None:
+                            await cursor.execute("Select Search From Admin where Identifier = 'Player_Owned_Channel'")
+                            channel_fetch = await cursor.fetchone()
+                            if channel_fetch is None:
+                                await interaction.followup.send(
+                                    f"Channel ID for 'Player_Owned_Channel' not found in the config.",
+                                    ephemeral=True
+                                )
+                                return
+                            channel_id = channel_fetch[0]
+                        if bio_channel_id is None:
+                            await cursor.execute("Select Search From Admin where Identifier = 'Accepted_Bio_Channel'")
+                            bio_channel_fetch = await cursor.fetchone()
+                            if bio_channel_fetch is None:
+                                await interaction.followup.send(
+                                    f"Channel ID for 'Accepted_Bio_Channel' not found in the config.",
+                                    ephemeral=True
+                                )
+                                return
+                            bio_channel_id = bio_channel_fetch[0]
+                channel = interaction.guild.get_channel(channel_id)
+                if channel is None:
+                    channel = await interaction.guild.fetch_channel(channel_id)
+                bio_channel = interaction.guild.get_channel(bio_channel_id)
+                if bio_channel is None:
+                    bio_channel = await interaction.guild.fetch_channel(bio_channel_id)
+                bio_message = await bio_channel.fetch_message(character_info[1])
+                title = f"{region} - {settlement} - {location_name}"
+
+                embed = discord.Embed(
+                    title=location_name,
+                    description=f"region: {region} settlement: {settlement}",
+                    url=f"https://discord.com/channels/{interaction.guild_id}/{bio_channel_id}/{bio_message.id}")
+                if image:
+                    embed.set_image(url=image)
+                embed.set_footer(text=f"Belongs to {character_name}")
+                message = await channel.send(embed=embed)
+                thread = await message.create_thread(name=f'{title}', auto_archive_duration=10080)
+                thread_message = await thread.send(f"{interaction.user.mention} Welcome to your new home! Please Send 5 base messages with '.' or similar to pin them!")
+                async with shared_functions.build_home_cache.lock:
+                    shared_functions.build_home_cache.cache[guild_id] = {thread.id, (6, interaction.user.id, thread_message.id)}
+
+                if item_info[1] == 1:
+                    await cursor.execute("DELETE FROM RP_Players_Items WHERE Player_ID = ? and Item_Name = ?",
+                                         (interaction.user.id, item))
+                else:
+                    await cursor.execute(
+                        "UPDATE RP_Players_Items SET Item_Quantity = Item_Quantity - 1 WHERE Player_ID = ? and Item_Name = ?",
+                        (interaction.user.id, item))
+
+                # Insert the new location into the database
+                await cursor.execute(
+                    "INSERT INTO Player_Homes (Settlement, Character_Name, Thread_ID) VALUES (?, ?, ?)",
+                    (settlement, character_name, thread.id))
+                await conn.commit()
+
+                await interaction.followup.send(
+                    f"Location '{location_name}' created successfully in '{settlement}'.",
+                    ephemeral=True
+                )
+            except aiosqlite.Error as e:
+                logging.exception(f"A SQLite error occurred in the create_location command: {e}")
+                await interaction.followup.send(
+                    f"An error occurred while creating the location. Error: {e}",
+                    ephemeral=True
+                )
+
+    @home_group.command(name='delete', description='Delete a character owned location')
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    @app_commands.autocomplete(settlement=shared_functions.settlement_autocomplete)
+    async def delete_location(self, interaction: discord.Interaction, character_name: str, settlement: str):
+        """Delete a character owned location"""
+        guild_id = interaction.guild_id
+        author_name = interaction.user.name
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as conn:
+            cursor = await conn.cursor()
+            try:
+                # Check if the character exists
+                await cursor.execute(
+                    "SELECT Character_Name FROM Player_Characters WHERE Player_Name = ? AND (Character_Name = ? OR Nickname = ?)",
+                    (author_name, character_name, character_name))
+                character_info = await cursor.fetchone()
+                if character_info is None:
+                    await interaction.followup.send(
+                        f"Character '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+
+                # Check if the location exists
+                await cursor.execute(
+                    "SELECT Thread_ID FROM Player_Homes WHERE Character_Name = ? AND Settlement = ?",
+                    (character_name, settlement))
+                location_info = await cursor.fetchone()
+                if location_info is None:
+                    await interaction.followup.send(
+                        f"Location for '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+
+                async with shared_functions.config_cache.lock:
+                    configs = shared_functions.config_cache.cache.get(guild_id)
+                    if configs:
+                        channel_id = configs.get('Player_Owned_Channel')
+                        if channel_id is None:
+                            await cursor.execute("Select Search From Admin where Identifier = 'Player_Owned_Channel'")
+                            channel_fetch = await cursor.fetchone()
+                            if channel_fetch is None:
+                                await interaction.followup.send(
+                                    f"Channel ID for 'Player_Owned_Channel' not found in the config.",
+                                    ephemeral=True
+                                )
+                                return
+                            channel_id = channel_fetch[0]
+                channel = interaction.guild.get_channel(channel_id)
+                if channel is None:
+                    await interaction.guild.fetch_channel(channel_id)
+                thread_id = location_info[0]
+                thread = channel.get_thread(thread_id)
+                if thread is None:
+                    await interaction.followup.send(
+                        f"Thread '{thread_id}' not found.",
+                        ephemeral=True
+                    )
+                    return
+                await thread.delete()
+                message = await channel.fetch_message(thread_id)
+                await message.delete()
+                async with shared_functions.build_home_cache.lock:
+                    guild_cache = shared_functions.build_home_cache.cache.get[guild_id]
+                    if thread.id in guild_cache:
+                        guild_cache.pop(thread.id)
+                # Delete the location from the database
+                await cursor.execute(
+                    "DELETE FROM Player_Homes WHERE Character_Name = ?",
+                    (character_name,))
+                await conn.commit()
+
+                await interaction.followup.send(
+                    f"Location for '{character_name}' deleted successfully.",
+                    ephemeral=True
+                )
+            except aiosqlite.Error as e:
+                logging.exception(f"A SQLite error occurred in the delete_location command: {e}")
+                await interaction.followup.send(
+                    f"An error occurred while deleting the location. Error: {e}",
+                    ephemeral=True
+                )
+
+    @home_group.command(name="modify", description="Modify a character owned location")
+    @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
+    @app_commands.autocomplete(settlement=shared_functions.settlement_autocomplete)
+    async def modify_location(self, interaction: discord.Interaction, character_name: str, settlement: str,
+                              new_location_name: str, new_image: str = None):
+        """Modify a character owned location"""
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        try:
+            async with aiosqlite.connect(f"Pathparser_{interaction.guild_id}.sqlite") as conn:
+                cursor = await conn.cursor()
+                # Check if the character exists
+                await cursor.execute(
+                    "SELECT Character_Name, Message_ID FROM Player_Characters WHERE Player_Name = ? AND (Character_Name = ? OR Nickname = ?)",
+                    (interaction.user.name, character_name, character_name))
+                character_info = await cursor.fetchone()
+                if character_info is None:
+                    await interaction.followup.send(
+                        f"Character '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+                # Check if the location exists
+                await cursor.execute(
+                    "SELECT Thread_ID FROM Player_Homes WHERE Character_Name = ? AND Settlement = ?",
+                    (character_name, settlement))
+                location_info = await cursor.fetchone()
+                if location_info is None:
+                    await interaction.followup.send(
+                        f"Location for '{character_name}' not found.",
+                        ephemeral=True
+                    )
+                    return
+                # Update the location name in the database
+                async with shared_functions.config_cache.lock:
+                    configs = shared_functions.config_cache.cache.get(guild_id)
+                    if configs:
+                        channel_id = configs.get('Player_Owned_Channel')
+                        bio_channel_id = configs.get('Accepted_Bio_Channel')
+                        if channel_id is None:
+                            await cursor.execute("Select Search From Admin where Identifier = 'Player_Owned_Channel'")
+                            channel_fetch = await cursor.fetchone()
+                            if channel_fetch is None:
+                                await interaction.followup.send(
+                                    f"Channel ID for 'Player_Owned_Channel' not found in the config.",
+                                    ephemeral=True
+                                )
+                                return
+                            channel_id = channel_fetch[0]
+                        if bio_channel_id is None:
+                            await cursor.execute("Select Search From Admin where Identifier = 'Accepted_Bio_Channel'")
+                            bio_channel_fetch = await cursor.fetchone()
+                            if bio_channel_fetch is None:
+                                await interaction.followup.send(
+                                    f"Channel ID for 'Accepted_Bio_Channel' not found in the config.",
+                                    ephemeral=True
+                                )
+                                return
+                            bio_channel_id = bio_channel_fetch[0]
+                channel = interaction.guild.get_channel(channel_id)
+                if channel is None:
+                    channel = await interaction.guild.fetch_channel(channel_id)
+                bio_channel = interaction.guild.get_channel(bio_channel_id)
+                if bio_channel is None:
+                    bio_channel = await interaction.guild.fetch_channel(bio_channel_id)
+                bio_message = await bio_channel.fetch_message(character_info[1])
+                thread_id = location_info[0]
+                thread = channel.get_thread(thread_id)
+                message = await channel.fetch_message(thread_id)
+                if not thread or not message:
+                    await interaction.followup.send(
+                        f"Thread '{thread_id}' not found.",
+                        ephemeral=True
+                    )
+                    return
+                await cursor.execute(
+                    "SELECT KK.Region, KS.Settlement From KB_Kingdoms KK Left Join KB_Settlements KS on KK.Kingdom = KS.Kingdom where KS.Settlement = ?",
+                    (settlement,)
+                )
+                settlement_info = await cursor.fetchone()
+
+                title = f"{settlement_info[0]} - {settlement} - {new_location_name}"
+                embed = discord.Embed(
+                    title=new_location_name,
+                    description=f"region: {settlement_info[0]} settlement: {settlement}",
+                    url=f"https://discord.com/channels/{interaction.guild_id}/{bio_channel_id}/{bio_message.id}")
+                if image:
+                    embed.set_image(url=image)
+                embed.set_footer(text=f"Belongs to {character_name}")
+                await thread.edit(name=title)
+                await message.edit(content=f"# {title}")
+
+                await interaction.followup.send(
+                    "Location name updated successfully.",
+                    ephemeral=True
+                )
+        except (aiosqlite.Error, TypeError, ValueError) as e:
+            logging.exception(f"An error occurred in the modify_location command: {e}")
+            await interaction.followup.send(
+                f"An error occurred while modifying the location. Error: {e}",
+                ephemeral=True
+            )
+
     display_group = discord.app_commands.Group(
         name='display',
         description='level_range group commands',
@@ -3185,8 +3550,9 @@ class CharacterCommands(commands.Cog, name='character'):
                                description='Upload the Abilities and skills from your mythweavers sheet.')
     @app_commands.autocomplete(character_name=shared_functions.own_character_select_autocompletion)
     @app_commands.choices(sheet=[discord.app_commands.Choice(name='Sane_Person_Very_Regular', value=1),
-                                discord.app_commands.Choice(name='Experimental', value=2)])
-    async def upload(self, interaction: discord.Interaction, character_name: str, mythweavers: discord.Attachment, sheet: discord.app_commands.Choice[int] = 1):
+                                 discord.app_commands.Choice(name='Experimental', value=2)])
+    async def upload(self, interaction: discord.Interaction, character_name: str, mythweavers: discord.Attachment,
+                     sheet: discord.app_commands.Choice[int] = 1):
         try:
             sheet_value = 1 if isinstance(sheet, int) else sheet.value
             await interaction.response.defer(thinking=True, ephemeral=True)
