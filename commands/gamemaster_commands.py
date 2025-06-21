@@ -664,7 +664,7 @@ async def validate_milestone_system_overflow(
                     (session_range_id,))
                 session_range_info = await cursor.fetchone()
 
-                if session_range_info is not None:
+                if session_range_info[0] is not None:
                     await cursor.execute(
                         "SELECT Role_ID FROM Level_Range WHERE level = ?",
                         (session_range_info[0] - 1,))
@@ -675,7 +675,7 @@ async def validate_milestone_system_overflow(
                     session_range = guild.get_role(overflow_range_id[0])
 
                     if session_range is not None:
-                        return session_range, min(overflow_range_info[0], session_range_info[0]) , max(overflow_range_info[1], session_range_info[1])
+                        return session_range, min(overflow_range_info[0], session_range_info[0]), max(overflow_range_info[1], session_range_info[1])
 
                     else:
                         return None
@@ -2691,6 +2691,7 @@ class JoinOrLeaveSessionView(discord.ui.View):
     async def get_suitable_characters(self, interaction: discord.Interaction) -> Union[List[str], str]:
         # Fetch the user's characters
         try:
+            print(interaction.user.name)
             async with aiosqlite.connect(f'Pathparser_{self.guild.id}.sqlite') as db:
                 cursor = await db.cursor()
                 # Check if the user has already signed up for the session
@@ -2726,20 +2727,13 @@ class JoinOrLeaveSessionView(discord.ui.View):
                             "Select Min(Level), Max(Level) from Milestone_System where Level_Range_ID = ?",
                             (session_range_id,))
                         level_range = await cursor.fetchone()
-
                         if level_range[0]:
+                            print("found level range", level_range)
                             overflow_validation = await validate_milestone_system_overflow(
                                 guild=interaction.guild,
                                 overflow=overflow,
                                 session_range_id=session_range_id)  # Overflow is typing.Optional[discord.Role]
-                            if overflow_validation:  # Overflow is a role
-                                range_results = overflow_validation
-                            else:
-                                overflow_validation = await validate_region_system_overflow(
-                                    guild=interaction.guild,
-                                    overflow=overflow,
-                                    session_range_id=session_range_id)  # Overflow is typing.Optional[discord.Role]
-                                range_results = overflow_validation
+                            range_results = overflow_validation
                             if range_results:
                                 await cursor.execute(
                                     "SELECT Character_Name FROM Player_Characters WHERE Player_ID = ? AND Level >= ? AND Level <= ?",
@@ -2752,17 +2746,41 @@ class JoinOrLeaveSessionView(discord.ui.View):
                                     (interaction.user.id, level_range[0], level_range[1]))
                                 character_names = await cursor.fetchall()
                                 return [character_name[0] for character_name in character_names]
-                        else:  # No level range found in milestone system. Matching Role to user permissions.
-
-                            user_valid = interaction.user.get_role(int(session_range_id))
-
-                            if user_valid:
-                                await cursor.execute("SELECT Character_Name FROM Player_Characters WHERE Player_ID = ?",
-                                                     (interaction.user.id,))
-                                character_names = await cursor.fetchall()
-                                return [character_name[0] for character_name in character_names]
+                        else:  # No level range found in milestone system. Matching Role to user permissions or region.
+                            await cursor.execute(
+                                "Select name, min_level, max_level from regions_level_range where role_id = ?",
+                                (session_range_id,))
+                            level_range = await cursor.fetchone()
+                            if level_range:
+                                print("found region level range", level_range)
+                                overflow_validation = await validate_region_system_overflow(
+                                    guild=interaction.guild,
+                                    overflow=overflow,
+                                    session_range_id=session_range_id)  # Overflow is typing.Optional[discord.Role]
+                                range_results = overflow_validation
+                                print("overflow validation", range_results)
+                                if range_results:
+                                    await cursor.execute(
+                                        "SELECT Character_Name FROM Player_Characters WHERE Player_ID = ? AND Level >= ? AND Level <= ?",
+                                        (interaction.user.id, range_results[1], range_results[2]))
+                                    character_names = await cursor.fetchall()
+                                    return [character_name[0] for character_name in character_names]
+                                else:  # Overflow is not a role
+                                    print("no overflow validation, using level_restuls", level_range)
+                                    await cursor.execute(
+                                        "SELECT Character_Name FROM Player_Characters WHERE Player_ID = ? AND Level >= ? AND Level <= ?",
+                                        (interaction.user.id, level_range[1], level_range[2]))
+                                    character_names = await cursor.fetchall()
+                                    return [character_name[0] for character_name in character_names]
                             else:
-                                return 'You do not have a character suitable for this session.'
+                                user_valid = interaction.user.get_role(int(session_range_id))
+                                if user_valid:
+                                    await cursor.execute("SELECT Character_Name FROM Player_Characters WHERE Player_ID = ?",
+                                                         (interaction.user.id,))
+                                    character_names = await cursor.fetchall()
+                                    return [character_name[0] for character_name in character_names]
+                                else:
+                                    return 'You do not have a character suitable for this session.'
         except aiosqlite.Error as e:
             logging.exception(
                 f"Failed to fetch characters for user {interaction.user.id} in guild {interaction.guild.id}: {e}")

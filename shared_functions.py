@@ -112,8 +112,15 @@ class ApprovedChannelCache:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
+@dataclass
+class HomeChannelCache:
+    cache: Dict[int, dict] = field(default_factory=dict)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
 approved_channel_cache = ApprovedChannelCache()
 
+build_home_cache = HomeChannelCache()
 
 def get_gold_breakdown(number: Union[float, Decimal]) -> str:
     """Break down a number into its gold, silver, and copper components."""
@@ -745,6 +752,36 @@ async def character_embed(
         return f"An unexpected error occurred while building character embed for '{character_name}'."
 
 
+
+def safe_add(a, b):
+    """Safely add two values together, treating None as zero and converting to Decimal if necessary."""
+    # Treat None as zero
+    a = a if a is not None else 0
+    b = b if b is not None else 0
+
+    # If either value is a Decimal, convert both to Decimal
+    if isinstance(a, float) or isinstance(b, float):
+        a = float(a)
+        b = float(b)
+
+    return a + b
+
+def safe_int_complex(a, b, c, d):
+    """Safely add two values together, treating None as zero and converting to Decimal if necessary."""
+    # Treat None as zero
+    a = a if a is not None else 0
+    b = b if b is not None else 0
+    c = c if c is not None else 0
+    d = d if d is not None else 0
+
+    # If either value is a Decimal, convert both to Decimal
+    if isinstance(a, int) or isinstance(b, int) or isinstance(c, int):
+        a = int(a)
+        b = int(b)
+        c = int(c)
+        d = int(d)
+    return a + b + c + d
+
 def name_fix(name) -> Optional[Tuple[str, str]]:
     return_value = [None, None]
     try:
@@ -1066,6 +1103,80 @@ async def search_timezones(interaction: discord.Interaction, current: str) -> ty
     ]
 
 
+def allocate_food(required: int, available: dict[str, int]) -> dict[str, int]:
+    """
+    Given a required total food amount and a dictionary mapping resource names to
+    available amounts, return a dictionary showing how much of each resource should be consumed.
+
+    No single resource may contribute more than 50% (i.e. required/2), but each resource should
+    ideally contribute at least 15% of the required amount if possible.
+
+    The algorithm will always use the most abundant resource (up to the cap)
+    and then distribute the remaining requirement among the other resources
+    proportionally to their available amounts (each capped at required/2).
+
+    Parameters:
+      required: int -- The total food units needed.
+      available: dict -- Keys are resource names (e.g. 'meat', 'fish', etc.),
+                         and values are the available amounts.
+
+    Returns:
+      A dictionary with the same keys and the allocated consumption amounts.
+    """
+    cap = required / 2.0  # Maximum allowed per resource
+    min_contribution = required * 0.15  # Minimum contribution per resource
+    allocation = {}
+
+    # Determine the resource with the greatest available amount.
+    max_resource = max(available, key=available.get)
+
+    # First, allocate the minimum required amount to each resource if possible
+    initial_allocations = {
+        r: min(available[r], min_contribution) for r in available
+    }
+    total_initial = sum(initial_allocations.values())
+
+    # If the total allocated in this step exceeds the required amount, scale down proportionally
+    if total_initial > required:
+        scale_factor = required / total_initial
+        allocation = {r: int(initial_allocations[r] * scale_factor) for r in available}
+        return allocation  # Already allocated everything, return early
+
+    # Apply these guaranteed minimum allocations
+    allocation.update(initial_allocations)
+    remaining = required - total_initial
+
+    # Allocate the max resource, ensuring it does not exceed its cap
+    allocation[max_resource] += min(available[max_resource] - allocation[max_resource], cap - allocation[max_resource])
+    remaining -= allocation[max_resource]
+
+    # Distribute the remaining amount proportionally among other resources
+    others = [r for r in available if r != max_resource]
+    effective = {r: min(available[r] - allocation[r], cap - allocation[r]) for r in others}
+    total_effective = sum(effective.values())
+
+    if total_effective > 0 and remaining > 0:
+        distribution = {r: remaining * effective[r] / total_effective for r in others}
+        allocated_others = {r: int(distribution[r]) for r in others}
+        total_allocated = sum(allocated_others.values())
+        diff = int(round(remaining - total_allocated))
+
+        # Adjust for rounding errors, prioritizing resources with the largest remainder
+        remainders = {r: distribution[r] - allocated_others[r] for r in others}
+        for r in sorted(remainders, key=remainders.get, reverse=True):
+            if diff <= 0:
+                break
+            if allocated_others[r] < effective[r]:
+                allocated_others[r] += 1
+                diff -= 1
+
+        for r in others:
+            allocation[r] += allocated_others[r]
+
+    return allocation
+
+
+
 def get_utc_offset(tz):
     try:
         # Get the current time for the timezone
@@ -1377,6 +1488,24 @@ def validate_worldanvil(url: str) -> Tuple[bool, str, int]:
     except Exception as e:
         logging.error(f"Error validating World Anvil link '{url}': {e}")
         return False, "An error occurred during validation.", -1  # Exception case uses step indicator -1
+
+
+async def settlement_autocomplete(interaction: discord.Interaction, current: str
+                                  ) -> typing.List[app_commands.Choice[str]]:
+    data = []
+    guild_id = interaction.guild_id
+    async with aiosqlite.connect(f"Pathparser_{guild_id}.sqlite") as db:
+        cursor = await db.cursor()
+        current = unidecode(str.title(current))
+        await cursor.execute(
+            "SELECT Settlement FROM kb_settlements WHERE Settlement LIKE ? Limit 20",
+            (f"%{current}%",))
+        settlement_list = await cursor.fetchall()
+        for settlement in settlement_list:
+            if current in settlement[0]:
+                data.append(app_commands.Choice(name=settlement[0], value=settlement[0]))
+    return data
+
 
 
 async def region_autocomplete(interaction: discord.Interaction, current: str) -> typing.List[app_commands.Choice[str]]:

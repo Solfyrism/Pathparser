@@ -1572,7 +1572,7 @@ class AdminCommands(commands.Cog, name='admin'):
                         # Reset the cache to apply the new level cap.
                         await shared_functions.config_cache.load_configurations(guild_id=guild_id)
                         await cursor.execute(
-                            "SELECT True_Character_Name, Character_Name, Level, Milestones, Tier, Trials, personal_cap, Thread_ID, region FROM Player_Characters WHERE Milestones >= ?",
+                            "SELECT True_Character_Name, Character_Name, Level, Milestones, Tier, Trials, personal_cap, Thread_ID, region, Player_ID FROM Player_Characters WHERE Milestones >= ?",
                             (minimum_milestones,))
                         characters_to_adjust = await cursor.fetchall()
                         if characters_to_adjust:
@@ -1582,7 +1582,7 @@ class AdminCommands(commands.Cog, name='admin'):
                                 # Calculate the new level and tier for each character that had their level cap increased.
                                 try:
                                     (true_character_name, character_name, character_level, milestones, tier, trials,
-                                     personal_cap, thread_id, region) = character
+                                     personal_cap, thread_id, region, player_id) = character
                                     level_adjustment = await character_commands.level_calculation(
                                         character_name=character_name,
                                         level=character_level,
@@ -1595,7 +1595,8 @@ class AdminCommands(commands.Cog, name='admin'):
                                         hard=0,
                                         deadly=0,
                                         misc=0,
-                                        region=region)
+                                        region=region,
+                                        author_id=player_id)
                                     (new_level,
                                      total_milestones,
                                      min_milestones,
@@ -2325,21 +2326,21 @@ class AdminCommands(commands.Cog, name='admin'):
                                     trials=trials,
                                     trial_change=0,
                                     tier=tier)
-                                (new_tier, total_trials, trials_required, trial_change) = mythic_adjustment
+                                (new_tier_adjusted, total_trials, trials_required, trial_change) = mythic_adjustment
 
                                 character_updates = shared_functions.UpdateCharacterData(
                                     character_name=character_name,
-                                    mythic_package=(new_tier, total_trials, trials_required)
+                                    mythic_package=(new_tier_adjusted, total_trials, trials_required)
                                 )
 
                                 character_changes = shared_functions.CharacterChange(
                                     character_name=character_name,
                                     author=interaction.user.name,
-                                    tier=new_tier,
+                                    tier=new_tier_adjusted,
                                     trials=total_trials,
                                     trials_remaining=trials_required,
                                     trial_change=0,
-                                    source=f"admin adjusted tier cap to {new_tier}")
+                                    source=f"admin adjusted the server tier cap to {new_tier}")
 
                                 await shared_functions.update_character(
                                     guild_id=guild_id,

@@ -321,6 +321,7 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
         guild = interaction.guild
         guild_id = interaction.guild_id
         await interaction.response.defer(thinking=True, ephemeral=True)
+        response = ""
         async with aiosqlite.connect(f"C:/pathparser/pathparser_{guild_id}.sqlite") as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.cursor()
@@ -463,12 +464,18 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                             await thread.send(content=iterative_approval_content)
                     if info_tmp_bio:
                         print(f"Creating article with {info_tmp_bio}")
-                        article = await shared_functions.put_wa_article(
-                            guild_id=interaction.guild.id, template='Person',
-                            title=info_true_character_name,
-                            category=backstory_category,
-                            overview=info_tmp_bio,
-                            author=info_player_name)
+                        try:
+                            article = await shared_functions.put_wa_article(
+                                guild_id=interaction.guild.id, template='Person',
+                                title=info_true_character_name,
+                                category=backstory_category,
+                                overview=info_tmp_bio,
+                                author=info_player_name)
+                        except Exception as e:
+                            logging.error(f"Failed to create WA article: {e}")
+                            article = None
+                            pass
+                            response += f"I tried to create a WA article, but it failed! \r\n"
                         try:
                             article_url = article['url']
                             article_id = article['id']
@@ -492,9 +499,9 @@ class ReviewerCommands(commands.Cog, name='Reviewer'):
                     try:
                         await interaction.guild.get_member(info_player_id).add_roles(approved_role)
                         await interaction.guild.get_member(info_player_id).add_roles(level_role)
-                        response = f"{info_character_name} has been moved to the accepted bios."
+                        response += f"{info_character_name} has been moved to the accepted bios."
                     except AttributeError:
-                        response = f"{info_character_name} has been moved to the accepted bios. However, I was unable to add either the approved or level role to the player."
+                        response += f"{info_character_name} has been moved to the accepted bios. However, I was unable to add either the approved or level role to the player."
                     await interaction.followup.send(response,
                                                     ephemeral=True)
 
